@@ -308,19 +308,6 @@ namespace UnityEngine.Rendering.Universal
                     break;
             }
 
-            bool mrt4 = SystemInfo.supportedRenderTargetCount >= 4;
-            if (technique == DecalTechnique.DBuffer && !mrt4)
-            {
-                Debug.LogError("Decal DBuffer technique requires MRT4 support.");
-                return DecalTechnique.Invalid;
-            }
-
-            if (technique == DecalTechnique.GBuffer && !mrt4)
-            {
-                Debug.LogError("Decal useGBuffer option requires MRT4 support.");
-                return DecalTechnique.Invalid;
-            }
-
             return technique;
         }
 
