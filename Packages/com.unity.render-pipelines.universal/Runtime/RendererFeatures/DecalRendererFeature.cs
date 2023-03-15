@@ -329,30 +329,6 @@ namespace UnityEngine.Rendering.Universal
                     break;
             }
 
-            // Skip error in tests to avoid failure
-#if !UNITY_INCLUDE_TESTS
-            if (technique == DecalTechnique.DBuffer &&
-                (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore ||
-                SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3))
-            {
-                Debug.LogError("Decal DBuffer technique is not supported with OpenGL.");
-                return DecalTechnique.Invalid;
-            }
-
-            bool mrt4 = SystemInfo.supportedRenderTargetCount >= 4;
-            if (technique == DecalTechnique.DBuffer && !mrt4)
-            {
-                Debug.LogError("Decal DBuffer technique requires MRT4 support.");
-                return DecalTechnique.Invalid;
-            }
-
-            if (technique == DecalTechnique.GBuffer && !mrt4)
-            {
-                Debug.LogError("Decal useGBuffer option requires MRT4 support.");
-                return DecalTechnique.Invalid;
-            }
-#endif
-
             return technique;
         }
 
