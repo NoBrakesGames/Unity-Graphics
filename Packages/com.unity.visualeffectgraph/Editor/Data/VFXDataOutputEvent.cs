@@ -37,7 +37,8 @@ namespace UnityEditor.VFX
         }
 
         public override void FillDescs(
-            VFXCompileErrorReporter reporter,
+            IVFXErrorReporter reporter,
+            VFXCompilationMode compilationMode,
             List<VFXGPUBufferDesc> outBufferDescs,
             List<VFXTemporaryGPUBufferDesc> outTemporaryBufferDescs,
             List<VFXEditorSystemDesc> outSystemDescs,
@@ -47,6 +48,7 @@ namespace UnityEditor.VFX
             Dictionary<VFXContext, int> contextSpawnToBufferIndex,
             VFXDependentBuffersData dependentBuffers,
             Dictionary<VFXContext, List<VFXContextLink>[]> effectiveFlowInputLinks,
+            Dictionary<VFXData, uint> dataToSystemIndex,
             VFXSystemNames systemNames)
         {
             if (m_Contexts.Count != 1)

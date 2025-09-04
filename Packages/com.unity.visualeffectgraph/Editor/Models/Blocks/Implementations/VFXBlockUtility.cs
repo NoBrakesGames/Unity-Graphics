@@ -1,8 +1,10 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+
+using UnityEditor.VFX.Operator;
 using UnityEngine;
+using UnityEngine.Assertions;
 
 namespace UnityEditor.VFX.Block
 {
@@ -29,6 +31,14 @@ namespace UnityEditor.VFX.Block
 
     class VFXBlockUtility
     {
+        private static readonly Dictionary<AttributeCompositionMode, string[]> s_SynonymMap = new()
+        {
+            { AttributeCompositionMode.Add, new [] {"+"} },
+            { AttributeCompositionMode.Overwrite, new [] {"="} },
+            { AttributeCompositionMode.Multiply, new [] {"*"} },
+            { AttributeCompositionMode.Blend, new [] {"%"} },
+        };
+
         public static string GetNameString(AttributeCompositionMode mode)
         {
             switch (mode)
@@ -52,6 +62,34 @@ namespace UnityEditor.VFX.Block
             }
         }
 
+        public static string GetNameString(AttributeFromCurve.CurveSampleMode mode)
+        {
+            switch (mode)
+            {
+                case AttributeFromCurve.CurveSampleMode.OverLife: return "Over Life";
+                case AttributeFromCurve.CurveSampleMode.BySpeed: return "By Speed";
+                case AttributeFromCurve.CurveSampleMode.Random: return "Random from Curve";
+                case AttributeFromCurve.CurveSampleMode.RandomConstantPerParticle: return "Random Constant/Particle";
+                case AttributeFromCurve.CurveSampleMode.Custom: return "Custom";
+                default: throw new ArgumentException();
+            }
+        }
+
+        public static string GetNameString(AttributeFromMap.AttributeMapSampleMode mode)
+        {
+            switch (mode)
+            {
+                case AttributeFromMap.AttributeMapSampleMode.IndexRelative: return "Index Relative";
+                case AttributeFromMap.AttributeMapSampleMode.Index: return "Index";
+                case AttributeFromMap.AttributeMapSampleMode.Sequential: return "Sequential";
+                case AttributeFromMap.AttributeMapSampleMode.Sample2DLOD: return "2D";
+                case AttributeFromMap.AttributeMapSampleMode.Sample3DLOD: return "3D";
+                case AttributeFromMap.AttributeMapSampleMode.Random: return "Random";
+                case AttributeFromMap.AttributeMapSampleMode.RandomConstantPerParticle: return "Random Constant/Particle";
+                default: throw new ArgumentException();
+            }
+        }
+
         public static string GetComposeString(AttributeCompositionMode mode, params string[] parameters)
         {
             switch (mode)
@@ -61,6 +99,27 @@ namespace UnityEditor.VFX.Block
                 case AttributeCompositionMode.Multiply: return string.Format("{0} *= {1};", parameters);
                 case AttributeCompositionMode.Blend: return string.Format("{0} = lerp({0},{1},{2});", parameters);
                 default: throw new System.NotImplementedException("VFXBlockUtility.GetComposeFormatString() does not implement return string for : " + mode.ToString());
+            }
+        }
+
+        public static string GetNameString(Noise.DimensionCount mode)
+        {
+            switch (mode)
+            {
+                case Noise.DimensionCount.One: return "1D";
+                case Noise.DimensionCount.Two: return "2D";
+                case Noise.DimensionCount.Three: return "3D";
+                default: throw new NotImplementedException("VFXBlockUtility.GetNameString() does not implement return string for : " + mode);
+            }
+        }
+
+        public static string GetNameString(CurlNoise.DimensionCount mode)
+        {
+            switch (mode)
+            {
+                case CurlNoise.DimensionCount.Two: return "2D";
+                case CurlNoise.DimensionCount.Three: return "3D";
+                default: throw new NotImplementedException("VFXBlockUtility.GetNameString() does not implement return string for : " + mode);
             }
         }
 
@@ -127,33 +186,44 @@ namespace UnityEditor.VFX.Block
             return res.TrimEnd(new[] { '\n' });
         }
 
-        public static bool ConvertToVariadicAttributeIfNeeded(ref string attribName, out VariadicChannelOptions outChannel)
+        private static bool ConvertToVariadicAttributeIfNeeded(VFXGraph vfxGraph, ref string attribName, out VariadicChannelOptions outChannel)
         {
-            var attrib = VFXAttribute.Find(attribName);
-
-            if (attrib.variadic == VFXVariadic.BelongsToVariadic)
+            try
             {
-                char component = attrib.name.ToLower().Last();
-                VariadicChannelOptions channel;
-                switch (component)
+                if (!vfxGraph.attributesManager.TryFind(attribName, out var attrib))
                 {
-                    case 'x':
-                        channel = VariadicChannelOptions.X;
-                        break;
-                    case 'y':
-                        channel = VariadicChannelOptions.Y;
-                        break;
-                    case 'z':
-                        channel = VariadicChannelOptions.Z;
-                        break;
-                    default:
-                        throw new InvalidOperationException(string.Format("Cannot convert {0} to variadic version", attrib.name));
+                    throw new InvalidOperationException($"Could not find attribute {attribName}");
                 }
 
-                attribName = VFXAttribute.Find(attrib.name.Substring(0, attrib.name.Length - 1)).name; // Just to ensure the attribute can be found
-                outChannel = channel;
+                if (attrib.variadic == VFXVariadic.BelongsToVariadic)
+                {
+                    char component = attrib.name.ToLower().Last();
+                    VariadicChannelOptions channel;
+                    switch (component)
+                    {
+                        case 'x':
+                            channel = VariadicChannelOptions.X;
+                            break;
+                        case 'y':
+                            channel = VariadicChannelOptions.Y;
+                            break;
+                        case 'z':
+                            channel = VariadicChannelOptions.Z;
+                            break;
+                        default:
+                            throw new InvalidOperationException(string.Format("Cannot convert {0} to variadic version",
+                                attrib.name));
+                    }
 
-                return true;
+                    // Just to ensure the attribute can be found
+                    Assert.IsTrue(vfxGraph.attributesManager.Exist(attrib.name.Substring(0, attrib.name.Length - 1)));
+                    outChannel = channel;
+
+                    return true;
+                }
+            }
+            catch (ArgumentException)
+            {
             }
 
             outChannel = VariadicChannelOptions.X;
@@ -234,7 +304,7 @@ namespace UnityEditor.VFX.Block
             return false;
         }
 
-        public static bool SanitizeAttribute(ref string attribName, ref VariadicChannelOptions channels, int version)
+        public static bool SanitizeAttribute(VFXGraph graph, ref string attribName, ref VariadicChannelOptions channels, int version)
         {
             bool settingsChanged = false;
             string oldName = attribName;
@@ -254,7 +324,7 @@ namespace UnityEditor.VFX.Block
 
             // Changes attribute to variadic version
             VariadicChannelOptions newChannels;
-            if (VFXBlockUtility.ConvertToVariadicAttributeIfNeeded(ref attribName, out newChannels))
+            if (VFXBlockUtility.ConvertToVariadicAttributeIfNeeded(graph, ref attribName, out newChannels))
             {
                 Debug.Log(string.Format("Sanitizing attribute: Convert {0} to variadic attribute {1} with channel {2}", oldName, attribName, newChannels));
                 channels = newChannels;
@@ -264,12 +334,14 @@ namespace UnityEditor.VFX.Block
             return settingsChanged;
         }
 
-        static public bool SanitizeAttribute(ref string attribName, ref string channelsMask, int version)
+        public static bool SanitizeAttribute(VFXGraph graph, ref string attribName, ref string channelsMask, int version)
         {
             var channels = ChannelFromMask(channelsMask);
-            var settingsChanged = SanitizeAttribute(ref attribName, ref channels, version);
+            var settingsChanged = SanitizeAttribute(graph, ref attribName, ref channels, version);
             channelsMask = MaskFromChannel(channels);
             return settingsChanged;
         }
+
+        internal static string[] GetCompositionSynonym(AttributeCompositionMode mode) => s_SynonymMap[mode];
     }
 }

@@ -16,11 +16,31 @@ public class GraphicsTests
 #endif
     public const string path = "Assets/ReferenceImages";
 
+#if UNITY_WEBGL || UNITY_ANDROID
+    [UnitySetUp]
+    public IEnumerator SetUp()
+    {
+        yield return RuntimeGraphicsTestCaseProvider.EnsureGetReferenceImageBundlesAsync();
+    }
+#endif
+
     [UnityTest, Category("GraphicsTest")]
+#if UNITY_EDITOR
     [PrebuildSetup("SetupGraphicsTestCases")]
+#endif
     [UseGraphicsTestCases(path)]
     public IEnumerator Run(GraphicsTestCase testCase)
     {
+        if (testCase.ScenePath.Contains("ErrorMaterial"))
+        {
+            LogAssert.ignoreFailingMessages = true;
+        }
+
+#if UNITY_WEBGL || UNITY_ANDROID
+        // Do this near the beginning of the test case method before you test or assert
+        RuntimeGraphicsTestCaseProvider.AssociateReferenceImageWithTest(testCase);
+#endif
+		Debug.Log($"Running test case '{testCase}' with scene '{testCase.ScenePath}' {testCase.ReferenceImagePathLog}.");
         SceneManager.LoadScene(testCase.ScenePath);
 
         // Always wait one frame for scene load
@@ -68,7 +88,7 @@ public class GraphicsTests
         }
 #endif
 
-        ImageAssert.AreEqual(testCase.ReferenceImage, cameras.Where(x => x != null), settings.ImageComparisonSettings);
+        ImageAssert.AreEqual(testCase.ReferenceImage, cameras.Where(x => x != null), settings.ImageComparisonSettings, testCase.ReferenceImagePathLog);
     }
 
     [TearDown]

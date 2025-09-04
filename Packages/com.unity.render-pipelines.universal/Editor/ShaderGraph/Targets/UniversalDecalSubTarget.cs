@@ -649,9 +649,9 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 UniversalStructFields.Varyings.staticLightmapUV,
                 UniversalStructFields.Varyings.dynamicLightmapUV,
                 UniversalStructFields.Varyings.sh,
+                UniversalStructFields.Varyings.probeOcclusion,
                 UniversalStructFields.Varyings.fogFactorAndVertexLight, // fog and vertex lighting, vert input is dependency
-                // todo
-                //UniversalStructFields.Varyings.shadowCoord,             // shadow coord, vert input is dependency
+                UniversalStructFields.Varyings.shadowCoord,             // shadow coord, vert input is dependency
             };
 
             public static FieldCollection GBufferProjector = new FieldCollection()
@@ -660,8 +660,8 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 UniversalStructFields.Varyings.staticLightmapUV,
                 UniversalStructFields.Varyings.dynamicLightmapUV,
                 UniversalStructFields.Varyings.sh,
-                // todo
-                //UniversalStructFields.Varyings.shadowCoord,             // shadow coord, vert input is dependency
+                UniversalStructFields.Varyings.probeOcclusion,
+                UniversalStructFields.Varyings.shadowCoord,             // shadow coord, vert input is dependency
             };
 
             public static FieldCollection ScreenSpaceMesh = new FieldCollection()
@@ -677,9 +677,9 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 UniversalStructFields.Varyings.staticLightmapUV,
                 UniversalStructFields.Varyings.dynamicLightmapUV,
                 UniversalStructFields.Varyings.sh,
+                UniversalStructFields.Varyings.probeOcclusion,
                 UniversalStructFields.Varyings.fogFactorAndVertexLight, // fog and vertex lighting, vert input is dependency
-                // todo
-                //UniversalStructFields.Varyings.shadowCoord,             // shadow coord, vert input is dependency
+                UniversalStructFields.Varyings.shadowCoord,             // shadow coord, vert input is dependency
             };
         }
         #endregion
@@ -974,7 +974,6 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
             public static KeywordCollection DBufferProjector = new KeywordCollection
             {
                 { CoreKeywordDescriptors.DBuffer },
-                { CoreKeywordDescriptors.FoveatedRendering },
                 { Descriptors.DecalLayers },
             };
 
@@ -988,6 +987,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreKeywordDescriptors.StaticLightmap },
                 { CoreKeywordDescriptors.DynamicLightmap },
                 { CoreKeywordDescriptors.DirectionalLightmapCombined },
+                { CoreKeywordDescriptors.UseLegacyLightmaps },
                 { CoreKeywordDescriptors.MainLightShadows },
                 { CoreKeywordDescriptors.AdditionalLights },
                 { CoreKeywordDescriptors.AdditionalLightShadows },
@@ -1014,7 +1014,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreKeywordDescriptors.AdditionalLightShadows },
                 { CoreKeywordDescriptors.ShadowsSoft },
                 { CoreKeywordDescriptors.ForwardPlus },
-                { CoreKeywordDescriptors.FoveatedRendering },
+                { CoreKeywordDescriptors.LightCookies },
                 { CoreKeywordDescriptors.DebugDisplay },
                 { Descriptors.DecalsNormalBlend },
                 { Descriptors.DecalLayers },
@@ -1025,6 +1025,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreKeywordDescriptors.StaticLightmap },
                 { CoreKeywordDescriptors.DynamicLightmap },
                 { CoreKeywordDescriptors.DirectionalLightmapCombined },
+                { CoreKeywordDescriptors.UseLegacyLightmaps },
                 { CoreKeywordDescriptors.MainLightShadows },
                 { CoreKeywordDescriptors.ShadowsSoft },
                 { CoreKeywordDescriptors.LightmapShadowMixing },

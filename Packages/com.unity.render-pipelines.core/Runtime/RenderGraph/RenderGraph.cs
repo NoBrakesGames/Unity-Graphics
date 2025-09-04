@@ -1,20 +1,18 @@
 using System;
-using System.Diagnostics;
 using System.Collections.Generic;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.RendererUtils;
-using NameAndTooltip = UnityEngine.Rendering.DebugUI.Widget.NameAndTooltip;
-
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Scripting.APIUpdating;
 // Typedef for the in-engine RendererList API (to avoid conflicts with the experimental version)
 using CoreRendererListDesc = UnityEngine.Rendering.RendererUtils.RendererListDesc;
-using System.Runtime.CompilerServices;
 
-namespace UnityEngine.Experimental.Rendering.RenderGraphModule
+namespace UnityEngine.Rendering.RenderGraphModule
 {
     /// <summary>
     /// Sets the read and write access for the depth buffer.
     /// </summary>
-    [Flags]
+    [Flags][MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public enum DepthAccess
     {
         ///<summary>Read Access.</summary>
@@ -26,9 +24,35 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
     }
 
     /// <summary>
+    /// Express the operations the rendergraph pass will do on a resource.
+    /// </summary>
+    [Flags][MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
+    public enum AccessFlags
+    {
+        ///<summary>The pass does not access the resource at all. Calling Use* functions with none has no effect.</summary>
+        None = 0,
+
+        ///<summary>This pass will read data the resource. Data in the resource should never be written unless one of the write flags is also present. Writing to a read-only resource may lead to undefined results, significant performance penaties, and GPU crashes.</summary>
+        Read = 1 << 0,
+
+        ///<summary>This pass will at least write some data to the resource. Data in the resource should never be read unless one of the read flags is also present. Reading from a write-only resource may lead to undefined results, significant performance penaties, and GPU crashes.</summary>
+        Write = 1 << 1,
+
+        ///<summary>Previous data in the resource is not preserved. The resource will contain undefined data at the beginning of the pass.</summary>
+        Discard = 1 << 2,
+
+        ///<summary>All data in the resource will be written by this pass. Data in the resource should never be read.</summary>
+        WriteAll = Write | Discard,
+
+        ///<summary> Shortcut for Read | Write</summary>
+        ReadWrite = Read | Write
+    }
+
+    /// <summary>
     /// An object representing the internal context of a rendergraph pass execution.
     /// This object is public for technical reasons only and should not be used.
     /// </summary>
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public class InternalRenderGraphContext
     {
         internal ScriptableRenderContext renderContext;
@@ -61,6 +85,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
     /// command buffer that can be used to schedule all commands. This will eventually be deprecated
     /// in favor of more specific contexts that have more specific command buffer types.
     /// </summary>
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public struct RenderGraphContext : IDerivedRendergraphContext
     {
         private InternalRenderGraphContext wrappedContext;
@@ -85,6 +110,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
     /// This class declares the context object passed to the execute function of a raster render pass.
     /// <see cref="RenderGraph.AddRasterRenderPass"/>
     /// </summary>
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public struct RasterGraphContext : IDerivedRendergraphContext
     {
         private InternalRenderGraphContext wrappedContext;
@@ -113,6 +139,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
     /// This class declares the context object passed to the execute function of a compute render pass.
     /// <see cref="RenderGraph.AddComputePass"/>
     /// </summary>
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public class ComputeGraphContext : IDerivedRendergraphContext
     {
         private InternalRenderGraphContext wrappedContext;
@@ -126,27 +153,29 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         ///<summary>Render Graph pool used for temporary data.</summary>
         public RenderGraphObjectPool renderGraphPool { get => wrappedContext.renderGraphPool; }
 
+        static internal ComputeCommandBuffer computecmd = new ComputeCommandBuffer(null, null, false);
+
         /// <inheritdoc />
         public void FromInternalContext(InternalRenderGraphContext context)
         {
             wrappedContext = context;
-            cmd = new ComputeCommandBuffer(wrappedContext.cmd, wrappedContext.executingPass, false);
+            computecmd.m_WrappedCommandBuffer = wrappedContext.cmd;
+            computecmd.m_ExecutingPass = context.executingPass;
+            cmd = computecmd;
         }
     }
 
     /// <summary>
-    /// This class declares the context object passed to the execute function of a low level render pass.
-    /// <see cref="RenderGraph.AddLowLevelPass"/>
+    /// This class declares the context object passed to the execute function of an unsafe render pass.
+    /// <see cref="RenderGraph.AddUnsafePass"/>
     /// </summary>
-    public class LowLevelGraphContext : IDerivedRendergraphContext
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
+    public class UnsafeGraphContext : IDerivedRendergraphContext
     {
         private InternalRenderGraphContext wrappedContext;
 
-        ///<summary>Underlying CommandBuffer used for rendering. It should only be used for backward-compatibility purpose.</summary>
-        public CommandBuffer legacyCmd { get => llcmd.m_WrappedCommandBuffer; }
-
-        ///<summary>LowLevel Command Buffer used for rendering.</summary>
-        public LowLevelCommandBuffer cmd;
+        ///<summary>Unsafe Command Buffer used for rendering.</summary>
+        public UnsafeCommandBuffer cmd;
 
         ///<summary>Render Graph default resources.</summary>
         public RenderGraphDefaultResources defaultResources { get => wrappedContext.defaultResources; }
@@ -154,20 +183,21 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         ///<summary>Render Graph pool used for temporary data.</summary>
         public RenderGraphObjectPool renderGraphPool { get => wrappedContext.renderGraphPool; }
 
-        static internal LowLevelCommandBuffer llcmd = new LowLevelCommandBuffer(null, null, false);
+        internal static UnsafeCommandBuffer unsCmd = new UnsafeCommandBuffer(null, null, false);
         /// <inheritdoc />
         public void FromInternalContext(InternalRenderGraphContext context)
         {
             wrappedContext = context;
-            llcmd.m_WrappedCommandBuffer = wrappedContext.cmd;
-            llcmd.m_ExecutingPass = context.executingPass;
-            cmd = llcmd;
+            unsCmd.m_WrappedCommandBuffer = wrappedContext.cmd;
+            unsCmd.m_ExecutingPass = context.executingPass;
+            cmd = unsCmd;
         }
     }
 
     /// <summary>
     /// This struct contains properties which control the execution of the Render Graph.
     /// </summary>
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public struct RenderGraphParameters
     {
         ///<summary>Identifier for this render graph execution.</summary>
@@ -187,167 +217,21 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
     }
 
     /// <summary>
-    /// This struct is used to define the scope where the Render Graph is recorded before the execution.
-    /// When this struct goes out of scope or is disposed, the Render Graph will be automatically executed.
-    /// </summary>
-    /// <seealso cref="RenderGraph.RecordAndExecute(in RenderGraphParameters)"/>
-    public struct RenderGraphExecution : IDisposable
-    {
-        RenderGraph renderGraph;
-
-        /// <summary>
-        /// Internal constructor for RenderGraphExecution
-        /// </summary>
-        /// <param name="renderGraph">renderGraph</param>
-        internal RenderGraphExecution(RenderGraph renderGraph)
-            => this.renderGraph = renderGraph;
-
-        /// <summary>
-        /// This function triggers the Render Graph to be executed.
-        /// </summary>
-        public void Dispose() => renderGraph.Execute();
-    }
-
-    class RenderGraphDebugParams
-    {
-        DebugUI.Widget[] m_DebugItems;
-        DebugUI.Panel m_DebugPanel;
-
-        public bool clearRenderTargetsAtCreation;
-        public bool clearRenderTargetsAtRelease;
-        public bool disablePassCulling;
-        public bool immediateMode;
-        public bool enableLogging;
-        public bool logFrameInformation;
-        public bool logResources;
-
-        private static class Strings
-        {
-            public static readonly NameAndTooltip ClearRenderTargetsAtCreation = new() { name = "Clear Render Targets At Creation", tooltip = "Enable to clear all render textures before any rendergraph passes to check if some clears are missing." };
-            public static readonly NameAndTooltip DisablePassCulling = new() { name = "Disable Pass Culling", tooltip = "Enable to temporarily disable culling to asses if a pass is culled." };
-            public static readonly NameAndTooltip ImmediateMode = new() { name = "Immediate Mode", tooltip = "Enable to force render graph to execute all passes in the order you registered them." };
-            public static readonly NameAndTooltip EnableLogging = new() { name = "Enable Logging", tooltip = "Enable to allow HDRP to capture information in the log." };
-            public static readonly NameAndTooltip LogFrameInformation = new() { name = "Log Frame Information", tooltip = "Enable to log information output from each frame." };
-            public static readonly NameAndTooltip LogResources = new() { name = "Log Resources", tooltip = "Enable to log the current render graph's global resource usage." };
-        }
-
-        public void RegisterDebug(string name, DebugUI.Panel debugPanel = null)
-        {
-            var list = new List<DebugUI.Widget>();
-            list.Add(new DebugUI.Container
-            {
-                displayName = $"{name} Render Graph",
-                children =
-                {
-                    new DebugUI.BoolField { nameAndTooltip = Strings.ClearRenderTargetsAtCreation, getter = () => clearRenderTargetsAtCreation, setter = value => clearRenderTargetsAtCreation = value },
-                    // We cannot expose this option as it will change the active render target and the debug menu won't know where to render itself anymore.
-                    //    list.Add(new DebugUI.BoolField { displayName = "Clear Render Targets at release", getter = () => clearRenderTargetsAtRelease, setter = value => clearRenderTargetsAtRelease = value });
-                    new DebugUI.BoolField { nameAndTooltip = Strings.DisablePassCulling, getter = () => disablePassCulling, setter = value => disablePassCulling = value },
-                    new DebugUI.BoolField { nameAndTooltip = Strings.ImmediateMode, getter = () => immediateMode, setter = value => immediateMode = value },
-                    new DebugUI.BoolField { nameAndTooltip = Strings.EnableLogging, getter = () => enableLogging, setter = value => enableLogging = value },
-                    new DebugUI.Button
-                    {
-                        nameAndTooltip = Strings.LogFrameInformation,
-                        action = () =>
-                        {
-                            if (!enableLogging)
-                                Debug.Log("You must first enable logging before this logging frame information.");
-                            logFrameInformation = true;
-            #if UNITY_EDITOR
-                            UnityEditor.SceneView.RepaintAll();
-            #endif
-                        }
-                    },
-                    new DebugUI.Button
-                    {
-                        nameAndTooltip = Strings.LogResources,
-                        action = () =>
-                        {
-                            if (!enableLogging)
-                                Debug.Log("You must first enable logging before this logging resources.");
-                            logResources = true;
-            #if UNITY_EDITOR
-                            UnityEditor.SceneView.RepaintAll();
-            #endif
-                        }
-                    }
-                }
-            });
-
-            m_DebugItems = list.ToArray();
-            m_DebugPanel = debugPanel != null ? debugPanel : DebugManager.instance.GetPanel(name.Length == 0 ? "Render Graph" : name, true);
-            m_DebugPanel.children.Add(m_DebugItems);
-        }
-
-        public void UnRegisterDebug(string name)
-        {
-            //DebugManager.instance.RemovePanel(name.Length == 0 ? "Render Graph" : name);
-            m_DebugPanel.children.Remove(m_DebugItems);
-            m_DebugPanel = null;
-            m_DebugItems = null;
-        }
-    }
-
-    /// <summary>
     /// The Render Pass rendering delegate to use with typed contexts.
     /// </summary>
     /// <typeparam name="PassData">The type of the class used to provide data to the Render Pass.</typeparam>
     /// <typeparam name="ContextType">The type of the context that will be passed to the render function.</typeparam>
     /// <param name="data">Render Pass specific data.</param>
     /// <param name="renderGraphContext">Global Render Graph context.</param>
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public delegate void BaseRenderFunc<PassData, ContextType>(PassData data, ContextType renderGraphContext) where PassData : class, new();
 
-    internal class RenderGraphDebugData
-    {
-        [DebuggerDisplay("PassDebug: {name}")]
-        public struct PassDebugData
-        {
-            public string name;
-            public List<int>[] resourceReadLists;
-            public List<int>[] resourceWriteLists;
-            public bool culled;
-            public bool async;
-            public int syncToPassIndex; // Index of the pass that needs to be waited for.
-            public int syncFromPassIndex; // Smaller pass index that waits for this pass.
-            // We have this member instead of removing the pass altogether because we need the full list of passes in order to be able to remap them correctly when we remove them from display in the viewer.
-            public bool generateDebugData;
-        }
-
-        [DebuggerDisplay("ResourceDebug: {name} [{creationPassIndex}:{releasePassIndex}]")]
-        public struct ResourceDebugData
-        {
-            public string name;
-            public bool imported;
-            public int creationPassIndex;
-            public int releasePassIndex;
-
-            public List<int> consumerList;
-            public List<int> producerList;
-        }
-
-        public List<PassDebugData> passList = new List<PassDebugData>();
-        public List<ResourceDebugData>[] resourceLists = new List<ResourceDebugData>[(int)RenderGraphResourceType.Count];
-
-        public void Clear()
-        {
-            passList.Clear();
-
-            // Create if needed
-            if (resourceLists[0] == null)
-            {
-                for (int i = 0; i < (int)RenderGraphResourceType.Count; ++i)
-                    resourceLists[i] = new List<ResourceDebugData>();
-            }
-
-            for (int i = 0; i < (int)RenderGraphResourceType.Count; ++i)
-                resourceLists[i].Clear();
-        }
-    }
 
     /// <summary>
     /// This class is the main entry point of the Render Graph system.
     /// </summary>
-    public class RenderGraph
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
+    public partial class RenderGraph
     {
         ///<summary>Maximum number of MRTs supported by Render Graph.</summary>
         public static readonly int kMaxMRTCount = 8;
@@ -373,34 +257,42 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             }
         }
 
-        [DebuggerDisplay("RenderPass: {pass.name} (Index:{pass.index} Async:{enableAsyncCompute})")]
+        [DebuggerDisplay("RenderPass: {name} (Index:{index} Async:{enableAsyncCompute})")]
         internal struct CompiledPassInfo
         {
-            public RenderGraphPass pass;
+            public string name;
+            public int index;
+
             public List<int>[] resourceCreateList;
             public List<int>[] resourceReleaseList;
-            public int refCount;
-            public bool culled;
-            public bool culledByRendererList;
-            public bool hasSideEffect;
-            public int syncToPassIndex; // Index of the pass that needs to be waited for.
-            public int syncFromPassIndex; // Smaller pass index that waits for this pass.
-            public bool needGraphicsFence;
             public GraphicsFence fence;
-
-            public bool enableAsyncCompute;
-            public bool allowPassCulling { get { return pass.allowPassCulling; } }
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             // This members are only here to ease debugging.
-            public List<string>[]   debugResourceReads;
-            public List<string>[]   debugResourceWrites;
+            public List<string>[] debugResourceReads;
+            public List<string>[] debugResourceWrites;
 #endif
 
-            public void Reset(RenderGraphPass pass)
+            public int refCount;
+            public int syncToPassIndex; // Index of the pass that needs to be waited for.
+            public int syncFromPassIndex; // Smaller pass index that waits for this pass.
+
+            public bool enableAsyncCompute;
+            public bool allowPassCulling;
+            public bool needGraphicsFence;
+            public bool culled;
+            public bool culledByRendererList;
+            public bool hasSideEffect;
+            public bool enableFoveatedRasterization;
+
+            public void Reset(RenderGraphPass pass, int index)
             {
-                this.pass = pass;
+                name = pass.name;
+                this.index = index;
+
                 enableAsyncCompute = pass.enableAsyncCompute;
+                allowPassCulling = pass.allowPassCulling;
+                enableFoveatedRasterization = pass.enableFoveatedRasterization;
 
                 if (resourceCreateList == null)
                 {
@@ -447,34 +339,113 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             }
         }
 
-        RenderGraphResourceRegistry m_Resources;
+        /// <summary>
+        /// Enable the use of the render pass API by the graph instead of traditional SetRenderTarget. This is an advanced
+        /// feature and users have to be aware of the specific impact it has on rendergraph/graphics APIs below.
+        ///
+        /// When enabled, the render graph try to use render passes and supasses instead of relying on SetRendertarget. It
+        /// will try to aggressively optimize the number of BeginRenderPass+EndRenderPass calls as well as calls to NextSubPass.
+        /// This with the aim to maximize the time spent "on chip" on tile based renderers.
+        ///
+        /// The Graph will automatically determine when to break render passes as well as the load and store actions to apply to these render passes.
+        /// To do this, the graph will analyze the use of textures. E.g. when a texture is used twice in a row as a active render target, the two
+        /// render graph passes will be merged in a single render pass with two surpasses. On the other hand if a render target is sampled as a texture in
+        /// a later pass this render target will be stored (and possibly resolved) and the render pass will be broken up.
+        ///
+        /// When setting this setting to true some existing render graph API is no longer valid as it can't express detailed frame information needed to emit
+        /// native render pases. In particular:
+        /// - The ImportBackbuffer overload without a RenderTargetInfo argument.
+        /// - Any AddRenderPass overloads. The more specific AddRasterRenderPass/AddComputePass/AddUnsafePass functions should be used to register passes.
+        ///
+        /// In addition to this, additional validation will be done on the correctness of arguments of existing API that was not previously done. This could lead
+        /// to new errors when using existing render graph code with nativeRenderPassesEnabled.
+        ///
+        /// Note: that CommandBuffer.BeginRenderPass/EndRenderPass calls are different by design from SetRenderTarget so this could also have
+        /// effects outside of render graph (e.g. for code relying on the currently active render target as this will not be updated when using render passes).
+        /// </summary>
+        public bool nativeRenderPassesEnabled
+        {
+            get; set;
+        }
+
+        internal/*for tests*/ RenderGraphResourceRegistry m_Resources;
         RenderGraphObjectPool m_RenderGraphPool = new RenderGraphObjectPool();
         RenderGraphBuilders m_builderInstance = new RenderGraphBuilders();
-        List<RenderGraphPass> m_RenderPasses = new List<RenderGraphPass>(64);
+        internal/*for tests*/ List<RenderGraphPass> m_RenderPasses = new List<RenderGraphPass>(64);
         List<RendererListHandle> m_RendererLists = new List<RendererListHandle>(32);
         RenderGraphDebugParams m_DebugParameters = new RenderGraphDebugParams();
         RenderGraphLogger m_FrameInformationLogger = new RenderGraphLogger();
         RenderGraphDefaultResources m_DefaultResources = new RenderGraphDefaultResources();
         Dictionary<int, ProfilingSampler> m_DefaultProfilingSamplers = new Dictionary<int, ProfilingSampler>();
-        bool m_ExecutionExceptionWasRaised;
         InternalRenderGraphContext m_RenderGraphContext = new InternalRenderGraphContext();
         CommandBuffer m_PreviousCommandBuffer;
-        int m_CurrentImmediatePassIndex;
         List<int>[] m_ImmediateModeResourceList = new List<int>[(int)RenderGraphResourceType.Count];
+        RenderGraphCompilationCache m_CompilationCache;
+
+        RenderTargetIdentifier[][] m_TempMRTArrays = null;
+
+        internal interface ICompiledGraph
+        {
+            public void Clear();
+        }
 
         // Compiled Render Graph info.
+        internal class CompiledGraph : ICompiledGraph
+        {
+            // This is a 1:1 mapping on the resource handle indexes, this means the first element with index 0 will represent the "null" handle
+            public DynamicArray<CompiledResourceInfo>[] compiledResourcesInfos = new DynamicArray<CompiledResourceInfo>[(int)RenderGraphResourceType.Count];
+            public DynamicArray<CompiledPassInfo> compiledPassInfos = new DynamicArray<CompiledPassInfo>();
+            public int lastExecutionFrame;
 
-        // This is a 1:1 mapping on the resource handle indexes, this means the first element with index 0 will represent the "null" handle
-        DynamicArray<CompiledResourceInfo>[] m_CompiledResourcesInfos = new DynamicArray<CompiledResourceInfo>[(int)RenderGraphResourceType.Count];
-        DynamicArray<CompiledPassInfo> m_CompiledPassInfos = new DynamicArray<CompiledPassInfo>();
+            public CompiledGraph()
+            {
+                for (int i = 0; i < (int)RenderGraphResourceType.Count; ++i)
+                {
+                    compiledResourcesInfos[i] = new DynamicArray<CompiledResourceInfo>();
+                }
+            }
+
+            public void Clear()
+            {
+                for (int i = 0; i < (int)RenderGraphResourceType.Count; ++i)
+                    compiledResourcesInfos[i].Clear();
+                compiledPassInfos.Clear();
+            }
+
+            void InitResourceInfosData(DynamicArray<CompiledResourceInfo> resourceInfos, int count)
+            {
+                resourceInfos.Resize(count);
+                for (int i = 0; i < resourceInfos.size; ++i)
+                    resourceInfos[i].Reset();
+            }
+
+            public void InitializeCompilationData(List<RenderGraphPass> passes, RenderGraphResourceRegistry resources)
+            {
+                InitResourceInfosData(compiledResourcesInfos[(int)RenderGraphResourceType.Texture], resources.GetTextureResourceCount());
+                InitResourceInfosData(compiledResourcesInfos[(int)RenderGraphResourceType.Buffer], resources.GetBufferResourceCount());
+                InitResourceInfosData(compiledResourcesInfos[(int)RenderGraphResourceType.AccelerationStructure], resources.GetRayTracingAccelerationStructureResourceCount());
+
+                compiledPassInfos.Resize(passes.Count);
+                for (int i = 0; i < compiledPassInfos.size; ++i)
+                    compiledPassInfos[i].Reset(passes[i], i);
+            }
+        }
+
         Stack<int> m_CullingStack = new Stack<int>();
 
+        string m_CurrentExecutionName;
         int m_ExecutionCount;
         int m_CurrentFrameIndex;
+        int m_CurrentImmediatePassIndex;
+        bool m_ExecutionExceptionWasRaised;
         bool m_HasRenderGraphBegun;
-        string m_CurrentExecutionName;
         bool m_RendererListCulling;
-        Dictionary<string, RenderGraphDebugData> m_DebugData = new Dictionary<string, RenderGraphDebugData>();
+        bool m_EnableCompilationCaching;
+        CompiledGraph m_DefaultCompiledGraph = new();
+        CompiledGraph m_CurrentCompiledGraph;
+        string m_CaptureDebugDataForExecution; // Null unless debug data has been requested
+
+        Dictionary<string, DebugData> m_DebugData = new Dictionary<string, DebugData>();
 
         // Global list of living render graphs
         static List<RenderGraph> s_RegisteredGraphs = new List<RenderGraph>();
@@ -482,11 +453,18 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         #region Public Interface
         /// <summary>Name of the Render Graph.</summary>
         public string name { get; private set; } = "RenderGraph";
-        /// <summary>If true, the Render Graph will generate execution debug information.</summary>
-        internal static bool requireDebugData { get; set; } = false;
+
+        /// <summary>Request debug data be captured for the provided execution on the next frame.</summary>
+        internal void RequestCaptureDebugData(string executionName)
+        {
+            m_CaptureDebugDataForExecution = executionName;
+        }
 
         /// <summary>If true, the Render Graph Viewer is active.</summary>
-        public static bool isRenderGraphViewerActive => requireDebugData;
+        public static bool isRenderGraphViewerActive { get; internal set; }
+
+        /// <summary>If true, the Render Graph will run its various validity checks while processing (not considered in release mode).</summary>
+        internal static bool enableValidityChecks { get; private set; }
 
         /// <summary>
         /// Set of default resources usable in a pass rendering code.
@@ -506,13 +484,24 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         public RenderGraph(string name = "RenderGraph")
         {
             this.name = name;
-            m_Resources = new RenderGraphResourceRegistry(m_DebugParameters, m_FrameInformationLogger);
-
-            for (int i = 0; i < (int)RenderGraphResourceType.Count; ++i)
+            if (GraphicsSettings.TryGetRenderPipelineSettings<RenderGraphGlobalSettings>(out var renderGraphGlobalSettings))
             {
-                m_CompiledResourcesInfos[i] = new DynamicArray<CompiledResourceInfo>();
+                m_EnableCompilationCaching = renderGraphGlobalSettings.enableCompilationCaching;
+                if (m_EnableCompilationCaching)
+                    m_CompilationCache = new RenderGraphCompilationCache();
+
+                enableValidityChecks = renderGraphGlobalSettings.enableValidityChecks;
+            }
+            else // No SRP pipeline is present/active, it can happen with unit tests
+            {
+                enableValidityChecks = true;
             }
 
+            m_TempMRTArrays = new RenderTargetIdentifier[kMaxMRTCount][];
+            for (int i = 0; i < kMaxMRTCount; ++i)
+                m_TempMRTArrays[i] = new RenderTargetIdentifier[i + 1];
+
+            m_Resources = new RenderGraphResourceRegistry(m_DebugParameters, m_FrameInformationLogger);
             s_RegisteredGraphs.Add(this);
             onGraphRegistered?.Invoke(this);
         }
@@ -522,18 +511,35 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// </summary>
         public void Cleanup()
         {
+            // Usually done at the end of Execute step
+            // Also doing it here in case RG stopped before it
+            ClearCompiledGraph();
+
             m_Resources.Cleanup();
             m_DefaultResources.Cleanup();
             m_RenderGraphPool.Cleanup();
 
             s_RegisteredGraphs.Remove(this);
             onGraphUnregistered?.Invoke(this);
+
+            nativeCompiler?.Cleanup();
+
+            m_CompilationCache?.Clear();
         }
+
+        internal RenderGraphDebugParams debugParams => m_DebugParameters;
+
+        internal List<DebugUI.Widget> GetWidgetList()
+        {
+            return m_DebugParameters.GetWidgetList(name);
+        }
+
+        internal bool areAnySettingsActive => m_DebugParameters.AreAnySettingsActive;
 
         /// <summary>
         /// Register the render graph to the debug window.
         /// </summary>
-        /// <param name="panel"></param>
+        /// <param name="panel">Optional debug panel to which the render graph debug parameters will be registered.</param>
         public void RegisterDebug(DebugUI.Panel panel = null)
         {
             m_DebugParameters.RegisterDebug(name, panel);
@@ -560,7 +566,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// Returns the last rendered frame debug data. Can be null if requireDebugData is set to false.
         /// </summary>
         /// <returns>The last rendered frame debug data</returns>
-        internal RenderGraphDebugData GetDebugData(string executionName)
+        internal DebugData GetDebugData(string executionName)
         {
             if (m_DebugData.TryGetValue(executionName, out var debugData))
                 return debugData;
@@ -593,28 +599,79 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// Any pass writing to an imported texture will be considered having side effects and can't be automatically culled.
         /// </summary>
         /// <param name="rt">External RTHandle that needs to be imported.</param>
-        /// <returns>A new TextureHandle.</returns>
+        /// <returns>A new TextureHandle that represents the imported texture in the context of this rendergraph.</returns>
         public TextureHandle ImportTexture(RTHandle rt)
         {
             return m_Resources.ImportTexture(rt);
         }
 
         /// <summary>
-        /// Import an external texture to the Render Graph and set the handle as builtin handle
+        /// Import an external texture to the Render Graph.
+        /// Any pass writing to an imported texture will be considered having side effects and can't be automatically culled.
+        ///
+        /// Note: RTHandles that wrap RenderTargetIdentifier will fail to import using this overload as render graph can't derive the render texture's properties.
+        /// In that case the overload taking a RenderTargetInfo argument should be used instead.
         /// </summary>
-        internal TextureHandle ImportTexture(RTHandle rt, bool isBuiltin = false)
+        /// <param name="rt">External RTHandle that needs to be imported.</param>
+        /// <param name="importParams">Info describing the clear behavior of imported textures. Clearing textures using importParams may be more efficient than manually clearing the texture using `cmd.Clear` on some hardware.</param>
+        /// <returns>A new TextureHandle that represents the imported texture in the context of this rendergraph.</returns>
+        public TextureHandle ImportTexture(RTHandle rt, ImportResourceParams importParams )
+        {
+            return m_Resources.ImportTexture(rt, importParams);
+        }
+
+
+        /// <summary>
+        /// Import an external texture to the Render Graph. This overload should be used for RTHandles  wrapping a RenderTargetIdentifier.
+        /// If the RTHandle is wrapping a RenderTargetIdentifer, Rendergrpah can't derive the render texture's properties so the user has to provide this info to the graph through RenderTargetInfo.
+        ///
+        /// Any pass writing to an imported texture will be considered having side effects and can't be automatically culled.
+        ///
+        /// Note: To avoid inconsistencies between the passed in RenderTargetInfo and render texture this overload can only be used when the RTHandle is wrapping a RenderTargetIdentifier.
+        /// If this is not the case, the overload of ImportTexture without a RenderTargetInfo argument should be used instead.
+        /// </summary>
+        /// <param name="rt">External RTHandle that needs to be imported.</param>
+        /// <param name="info">The properties of the passed in RTHandle.</param>
+        /// <param name="importParams">Info describing the clear behavior of imported textures. Clearing textures using importParams may be more efficient than manually clearing the texture using `cmd.Clear` on some hardware.</param>
+        /// <returns>A new TextureHandle that represents the imported texture in the context of this rendergraph.</returns>
+        public TextureHandle ImportTexture(RTHandle rt, RenderTargetInfo info, ImportResourceParams importParams = new ImportResourceParams() )
+        {
+            return m_Resources.ImportTexture(rt, info, importParams);
+        }
+
+        /// <summary>
+        /// Import an external texture to the Render Graph and set the handle as builtin handle. This can only happen from within the graph module
+        /// so it is internal.
+        /// </summary>
+        internal TextureHandle ImportTexture(RTHandle rt, bool isBuiltin)
         {
             return m_Resources.ImportTexture(rt, isBuiltin);
         }
 
         /// <summary>
-        /// Import the final backbuffer to render graph.
+        /// Import the final backbuffer to render graph. The rendergraph can't derive the properties of a RenderTargetIdentifier as it is an opaque handle so the user has to pass them in through the info argument.
         /// </summary>
         /// <param name="rt">Backbuffer render target identifier.</param>
-        /// <returns>A new TextureHandle for the backbuffer.</returns>
+        /// <param name="info">The properties of the passed in RTHandle.</param>
+        /// <param name="importParams">Info describing the clear behavior of imported textures. Clearing textures using importParams may be more efficient than manually clearing the texture using `cmd.Clear` on some hardware.</param>
+        /// <returns>A new TextureHandle that represents the imported texture in the context of this rendergraph.</returns>
+        public TextureHandle ImportBackbuffer(RenderTargetIdentifier rt, RenderTargetInfo info, ImportResourceParams importParams = new ImportResourceParams())
+        {
+            return m_Resources.ImportBackbuffer(rt, info, importParams);
+        }
+
+        /// <summary>
+        /// Import the final backbuffer to render graph.
+        /// This function can only be used when nativeRenderPassesEnabled is false.
+        /// </summary>
+        /// <param name="rt">Backbuffer render target identifier.</param>
+        /// <returns>A new TextureHandle that represents the imported texture in the context of this rendergraph.</returns>
         public TextureHandle ImportBackbuffer(RenderTargetIdentifier rt)
         {
-            return m_Resources.ImportBackbuffer(rt);
+            RenderTargetInfo dummy = new RenderTargetInfo();
+            dummy.width = dummy.height = dummy.volumeDepth = dummy.msaaSamples = 1;
+            dummy.format = GraphicsFormat.R8G8B8A8_SRGB;
+            return m_Resources.ImportBackbuffer(rt, dummy, new ImportResourceParams());
         }
 
         /// <summary>
@@ -675,6 +732,25 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         }
 
         /// <summary>
+        /// Create a new Render Graph Texture resource using the descriptor from another texture.
+        /// </summary>
+        /// <remarks>
+        /// This API cannot be called during the Render Graph execution, please call it outside of SetRenderFunc().
+        /// </remarks>
+        /// <param name="texture">Texture from which the descriptor should be used.</param>
+        /// <param name="name">The destination texture name.</param>
+        /// <param name="clear">Texture needs to be cleared on first use.</param>
+        /// <returns>A new TextureHandle.</returns>
+        public TextureHandle CreateTexture(TextureHandle texture, string name, bool clear = false)
+        {
+            var destinationDesc = GetTextureDesc(texture);
+            destinationDesc.name = name;
+            destinationDesc.clearBuffer = clear;
+
+            return m_Resources.CreateTexture(destinationDesc);
+        }
+
+        /// <summary>
         /// Create a new Render Graph Texture if the passed handle is invalid and use said handle as output.
         /// If the passed handle is valid, no texture is created.
         /// </summary>
@@ -695,6 +771,19 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         {
             return m_Resources.GetTextureResourceDesc(texture.handle);
         }
+
+        /// <summary>
+        /// Gets the descriptor of the specified Texture resource.
+        /// </summary>
+        /// <param name="texture">Texture resource from which the descriptor is requested.</param>
+        /// <returns>The input texture descriptor.</returns>
+        public RenderTargetInfo GetRenderTargetInfo(TextureHandle texture)
+        {
+            RenderTargetInfo info;
+            m_Resources.GetRenderTargetInfo(texture.handle, out info);
+            return info;
+        }
+
 
         /// <summary>
         /// Creates a new Renderer List Render Graph resource.
@@ -719,6 +808,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <summary>
         /// Creates a new Shadow  Renderer List Render Graph resource.
         /// </summary>
+        /// <param name="shadowDrawingSettings">DrawSettings that describe the shadow drawcall.</param>
         /// <returns>A new RendererListHandle.</returns>
         public RendererListHandle CreateShadowRendererList(ref ShadowDrawingSettings shadowDrawingSettings)
         {
@@ -728,6 +818,8 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <summary>
         /// Creates a new Gizmo Renderer List Render Graph resource.
         /// </summary>
+        /// <param name="camera">The camera that is used for rendering the Gizmo.</param>
+        /// <param name="gizmoSubset">GizmoSubset that specifies whether gizmos render before or after postprocessing for a camera render. </param>
         /// <returns>A new RendererListHandle.</returns>
         public RendererListHandle CreateGizmoRendererList(in Camera camera, in GizmoSubset gizmoSubset)
         {
@@ -737,15 +829,28 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <summary>
         /// Creates a new UIOverlay Renderer List Render Graph resource.
         /// </summary>
+        /// <param name="camera">The camera that is used for rendering the full UIOverlay.</param>
         /// <returns>A new RendererListHandle.</returns>
         public RendererListHandle CreateUIOverlayRendererList(in Camera camera)
         {
-            return m_Resources.CreateUIOverlayRendererList(m_RenderGraphContext.renderContext, camera);
+            return m_Resources.CreateUIOverlayRendererList(m_RenderGraphContext.renderContext, camera, UISubset.All);
+        }
+
+        /// <summary>
+        /// Creates a new UIOverlay Renderer List Render Graph resource.
+        /// </summary>
+        /// <param name="camera">The camera that is used for rendering some subset of the UIOverlay.</param>
+        /// <param name="uiSubset">Enum flag that specifies which subset to render.</param>
+        /// <returns>A new RendererListHandle.</returns>
+        public RendererListHandle CreateUIOverlayRendererList(in Camera camera, in UISubset uiSubset)
+        {
+            return m_Resources.CreateUIOverlayRendererList(m_RenderGraphContext.renderContext, camera, uiSubset);
         }
 
         /// <summary>
         /// Creates a new WireOverlay Renderer List Render Graph resource.
         /// </summary>
+        /// <param name="camera">The camera that is used for rendering the WireOverlay.</param>
         /// <returns>A new RendererListHandle.</returns>
         public RendererListHandle CreateWireOverlayRendererList(in Camera camera)
         {
@@ -753,7 +858,43 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         }
 
         /// <summary>
-        /// Import an external Graphics Buffer to the Render Graph
+        /// Creates a new Skybox Renderer List Render Graph resource.
+        /// </summary>
+        /// <param name="camera">The camera that is used for rendering the Skybox.</param>
+        /// <returns>A new RendererListHandle.</returns>
+        public RendererListHandle CreateSkyboxRendererList(in Camera camera)
+        {
+            return m_Resources.CreateSkyboxRendererList(m_RenderGraphContext.renderContext, camera);
+        }
+
+        /// <summary>
+        /// Creates a new Skybox Renderer List Render Graph resource.
+        /// </summary>
+        /// <param name="camera">The camera that is used for rendering the Skybox.</param>
+        /// <param name="projectionMatrix">The projection matrix used during XR rendering of the skybox.</param>
+        /// <param name="viewMatrix">The view matrix used during XR rendering of the skybox.</param>
+        /// <returns>A new RendererListHandle.</returns>
+        public RendererListHandle CreateSkyboxRendererList(in Camera camera, Matrix4x4 projectionMatrix, Matrix4x4 viewMatrix)
+        {
+            return m_Resources.CreateSkyboxRendererList(m_RenderGraphContext.renderContext, camera, projectionMatrix, viewMatrix);
+        }
+
+        /// <summary>
+        /// Creates a new Skybox Renderer List Render Graph resource.
+        /// </summary>
+        /// <param name="camera">The camera that is used for rendering the Skybox.</param>
+        /// <param name="projectionMatrixL">The left eye projection matrix used during Legacy single pass XR rendering of the skybox.</param>
+        /// <param name="viewMatrixL">The left eye view matrix used during Legacy single pass XR rendering of the skybox.</param>
+        /// <param name="projectionMatrixR">The right eye projection matrix used during Legacy single pass XR rendering of the skybox.</param>
+        /// <param name="viewMatrixR">The right eye view matrix used during Legacy single pass XR rendering of the skybox.</param>
+        /// <returns>A new RendererListHandle.</returns>
+        public RendererListHandle CreateSkyboxRendererList(in Camera camera, Matrix4x4 projectionMatrixL, Matrix4x4 viewMatrixL, Matrix4x4 projectionMatrixR, Matrix4x4 viewMatrixR)
+        {
+            return m_Resources.CreateSkyboxRendererList(m_RenderGraphContext.renderContext, camera, projectionMatrixL, viewMatrixL, projectionMatrixR, viewMatrixR);
+        }
+
+        /// <summary>
+        /// Import an external Graphics Buffer to the Render Graph.
         /// Any pass writing to an imported graphics buffer will be considered having side effects and can't be automatically culled.
         /// </summary>
         /// <param name="graphicsBuffer">External Graphics Buffer that needs to be imported.</param>
@@ -794,95 +935,16 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             return m_Resources.GetBufferResourceDesc(graphicsBuffer.handle);
         }
 
-        private class MovePassData
-        {
-            public TextureHandle from;
-            public TextureHandle to;
-        }
-
         /// <summary>
-        /// Add a new Render Pass to the Render Graph that resolves the source texture into the destination texture.
-        /// Note this is a special pass that depending on the GPU configuration might be "semi-free" and not execute any additional GPU commands.
-        /// It is highly recommended to use resolve passes instead of making small passes that for example do commandBuffer.ResolveAntiAliasedSurface
-        /// If the source and destination texture are both non MSAA this is equivalent to a move (see AddMovePass).
-        ///
+        /// Import an external RayTracingAccelerationStructure to the Render Graph.
+        /// Any pass writing to (building) an imported RayTracingAccelerationStructure will be considered having side effects and can't be automatically culled.
         /// </summary>
-        /// <param name="source">Texture to read data from.</param>
-        /// <param name="destination">Texture to copy data into.</param>
-        /// <param name="file">File name of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
-        /// <param name="line">File line of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
-        public void AddResolvePass(TextureHandle source, TextureHandle destination
-#if !CORE_PACKAGE_DOCTOOLS
-            ,[CallerFilePath] string file = "",
-            [CallerLineNumber] int line = 0)
-#endif
+        /// <param name="accelStruct">External RayTracingAccelerationStructure that needs to be imported.</param>
+		/// <param name="name">Optional name for identifying the RayTracingAccelerationStructure in the Render Graph.</param>
+        /// <returns>A new RayTracingAccelerationStructureHandle.</returns>
+        public RayTracingAccelerationStructureHandle ImportRayTracingAccelerationStructure(in RayTracingAccelerationStructure accelStruct, string name = null)
         {
-            var desc = m_Resources.GetTextureResourceDesc(source.handle);
-            if (desc.msaaSamples == MSAASamples.None)
-            {
-                AddMovePass(source, destination, file, line);
-            }
-            else
-            {
-#if DEBUG
-                string passName = "Resolve " + m_Resources.GetRenderGraphResourceName(source.handle) + " to " + m_Resources.GetRenderGraphResourceName(destination.handle);
-#else
-                string passName = "Resolve Pass";
-#endif
-                using (var builder = AddRenderPass<MovePassData>(passName, out var passData, file, line))
-                {
-                    passData.from = source;
-                    passData.to = destination;
-                    builder.ReadTexture(source);
-                    builder.WriteTexture(destination);
-                    builder.SetRenderFunc(
-                        (MovePassData data, RenderGraphContext context) =>
-                        {
-
-                            context.cmd.ResolveAntiAliasedSurface(source, destination);
-                        }
-                    );
-                }
-            }
-        }
-
-        /// <summary>
-        /// Add a new move pass to the Render Graph. This pass moves data from one texture to another. Note that this pass is more limited
-        /// in functionality than for example doing a blit from one texture to another. It cannot do any type conversions, the textures
-        /// have to be the same size,...
-        /// This pass may be optimized away by the RenderGraph depending on the dependencies within the graph. E.g. if the destination resource
-        /// is the only resource ever using the data in source the graph may decide to directly render to the destination instead of rendering
-        /// to source and then doing an copy to destination.
-        /// </summary>
-        /// <param name="source">Texture to read data from.</param>
-        /// <param name="destination">Texture to copy data into.</param>
-        /// <param name="file">File name of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
-        /// <param name="line">File line of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
-        public void AddMovePass(TextureHandle source, TextureHandle destination
-#if !CORE_PACKAGE_DOCTOOLS
-            ,[CallerFilePath] string file = "",
-            [CallerLineNumber] int line = 0)
-#endif
-        {
-#if DEBUG
-            string passName = "Move " + m_Resources.GetRenderGraphResourceName(source.handle) + " to " + m_Resources.GetRenderGraphResourceName(destination.handle);
-#else
-            string passName = "Move Pass";
-#endif
-
-            using (var builder = AddRenderPass<MovePassData>(passName, out var passData, file, line))
-            {
-                passData.from = source;
-                passData.to = destination;
-                builder.ReadTexture(source);
-                builder.WriteTexture(destination);
-                builder.SetRenderFunc(
-                    (MovePassData data, RenderGraphContext context) =>
-                    {
-                        context.cmd.CopyTexture(source, destination);
-                    }
-                );
-            }
+            return m_Resources.ImportRayTracingAccelerationStructure(accelStruct, name);
         }
 
         /// <summary>
@@ -920,7 +982,9 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 #endif
         {
             var renderPass = m_RenderGraphPool.Get<RasterRenderGraphPass<PassData>>();
-            renderPass.Initialize(m_RenderPasses.Count, m_RenderGraphPool.Get<PassData>(), passName, sampler);
+            renderPass.Initialize(m_RenderPasses.Count, m_RenderGraphPool.Get<PassData>(), passName, RenderGraphPassType.Raster, sampler);
+
+            AddPassDebugMetadata(renderPass, file, line);
 
             passData = renderPass.data;
 
@@ -936,7 +1000,6 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <typeparam name="PassData">Type of the class to use to provide data to the Render Pass.</typeparam>
         /// <param name="passName">Name of the new Render Pass (this is also be used to generate a GPU profiling marker).</param>
         /// <param name="passData">Instance of PassData that is passed to the render function and you must fill.</param>
-        /// <param name="sampler">Profiling sampler used around the pass.</param>
         /// <param name="file">File name of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
         /// <param name="line">File line of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
         /// <returns>A new instance of a IRasterRenderGraphBuilder used to setup the new Rasterization Render Pass.</returns>
@@ -966,7 +1029,9 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 #endif
         {
             var renderPass = m_RenderGraphPool.Get<ComputeRenderGraphPass<PassData>>();
-            renderPass.Initialize(m_RenderPasses.Count, m_RenderGraphPool.Get<PassData>(), passName, sampler);
+            renderPass.Initialize(m_RenderPasses.Count, m_RenderGraphPool.Get<PassData>(), passName, RenderGraphPassType.Compute, sampler);
+
+            AddPassDebugMetadata(renderPass, file, line);
 
             passData = renderPass.data;
 
@@ -976,12 +1041,14 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             return m_builderInstance;
         }
 
+
         /// <summary>
-        /// Add a new Low Level Render Pass to the Render Graph. Low level passes can do certain operations compute/raster render passes cannot do and have
-        /// access to the full command buffer API. The low level API should be used sparingly as it has the following downsides
+        /// Add a new Unsafe Render Pass to the Render Graph. Unsafe passes can do certain operations compute/raster render passes cannot do and have
+        /// access to the full command buffer API. The unsafe API should be used sparingly as it has the following downsides:
+        /// - Limited automatic validation of the commands and resource dependencies. The user is responsible to ensure that all dependencies are correctly declared.
         /// - All native render passes will be serialized out.
-        /// - In the future the render graph compiler may generate a sub-optimal command stream for low level passes.
-        /// When using a low level pass the graph will also not automatically set-up graphics state like rendertargets. The pass should do this itself
+        /// - In the future the render graph compiler may generate a sub-optimal command stream for unsafe passes.
+        /// When using a unsafe pass the graph will also not automatically set up graphics state like rendertargets. The pass should do this itself
         /// using cmd.SetRenderTarget and related commands.
         /// </summary>
         /// <typeparam name="PassData">Type of the class to use to provide data to the Render Pass.</typeparam>
@@ -989,22 +1056,24 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <param name="passData">Instance of PassData that is passed to the render function and you must fill.</param>
         /// <param name="file">File name of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
         /// <param name="line">File line of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
-        /// <returns>A new instance of a ILowLevelRenderGraphBuilder used to setup the new Low Level Render Pass.</returns>
-        public ILowLevelRenderGraphBuilder AddLowLevelPass<PassData>(string passName, out PassData passData
+        /// <returns>A new instance of a IUnsafeRenderGraphBuilder used to setup the new Unsafe Render Pass.</returns>
+        public IUnsafeRenderGraphBuilder AddUnsafePass<PassData>(string passName, out PassData passData
 #if !CORE_PACKAGE_DOCTOOLS
             , [CallerFilePath] string file = "",
             [CallerLineNumber] int line = 0) where PassData : class, new()
 #endif
         {
-            return AddLowLevelPass(passName, out passData, GetDefaultProfilingSampler(passName), file, line);
+            return AddUnsafePass(passName, out passData, GetDefaultProfilingSampler(passName), file, line);
         }
 
+
         /// <summary>
-        /// Add a new Low Level Render Pass to the Render Graph. Low level passes can do certain operations compute/raster render passes cannot do and have
-        /// access to the full command buffer API. The low level API should be used sparingly as it has the following downsides
+        /// Add a new unsafe Render Pass to the Render Graph. Unsafe passes can do certain operations compute/raster render passes cannot do and have
+        /// access to the full command buffer API. The unsafe API should be used sparingly as it has the following downsides:
+        /// - Limited automatic validation of the commands and resource dependencies. The user is responsible to ensure that all dependencies are correctly declared.
         /// - All native render passes will be serialized out.
-        /// - In the future the render graph compiler may generate a sub-optimal command stream for low level passes.
-        /// When using a low level pass the graph will also not automatically set-up graphics state like rendertargets. The pass should do this itself
+        /// - In the future the render graph compiler may generate a sub-optimal command stream for unsafe passes.
+        /// When using an unsafe pass the graph will also not automatically set up graphics state like rendertargets. The pass should do this itself
         /// using cmd.SetRenderTarget and related commands.
         /// </summary>
         /// <typeparam name="PassData">Type of the class to use to provide data to the Render Pass.</typeparam>
@@ -1013,16 +1082,18 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <param name="sampler">Profiling sampler used around the pass.</param>
         /// <param name="file">File name of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
         /// <param name="line">File line of the source file this function is called from. Used for debugging. This parameter is automatically generated by the compiler. Users do not need to pass it.</param>
-        /// <returns>A new instance of a ILowLevelRenderGraphBuilder used to setup the new Low Level Render Pass.</returns>
-        public ILowLevelRenderGraphBuilder AddLowLevelPass<PassData>(string passName, out PassData passData, ProfilingSampler sampler
+        /// <returns>A new instance of a IUnsafeRenderGraphBuilder used to setup the new unsafe Render Pass.</returns>
+        public IUnsafeRenderGraphBuilder AddUnsafePass<PassData>(string passName, out PassData passData, ProfilingSampler sampler
 #if !CORE_PACKAGE_DOCTOOLS
             , [CallerFilePath] string file = "",
             [CallerLineNumber] int line = 0) where PassData : class, new()
 #endif
         {
-            var renderPass = m_RenderGraphPool.Get<LowLevelRenderGraphPass<PassData>>();
-            renderPass.Initialize(m_RenderPasses.Count, m_RenderGraphPool.Get<PassData>(), passName, sampler);
+            var renderPass = m_RenderGraphPool.Get<UnsafeRenderGraphPass<PassData>>();
+            renderPass.Initialize(m_RenderPasses.Count, m_RenderGraphPool.Get<PassData>(), passName, RenderGraphPassType.Unsafe, sampler);
             renderPass.AllowGlobalState(true);
+
+            AddPassDebugMetadata(renderPass, file, line);
 
             passData = renderPass.data;
 
@@ -1048,9 +1119,11 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             [CallerLineNumber] int line = 0) where PassData : class, new()
 #endif
         {
-            var renderPass = m_RenderGraphPool.Get<RenderGraphPass<PassData>>();
-            renderPass.Initialize(m_RenderPasses.Count, m_RenderGraphPool.Get<PassData>(), passName, sampler);
+            var renderPass = m_RenderGraphPool.Get<RenderGraphPass<PassData>>();          
+            renderPass.Initialize(m_RenderPasses.Count, m_RenderGraphPool.Get<PassData>(), passName, RenderGraphPassType.Legacy, sampler);
             renderPass.AllowGlobalState(true);// Old pass types allow global state by default as HDRP relies on it
+
+            AddPassDebugMetadata(renderPass, file, line);
 
             passData = renderPass.data;
 
@@ -1074,31 +1147,29 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             [CallerLineNumber] int line = 0) where PassData : class, new()
 #endif
         {
-            return AddRenderPass(passName, out passData, GetDefaultProfilingSampler(passName));
+            return AddRenderPass(passName, out passData, GetDefaultProfilingSampler(passName), file, line);
         }
 
         /// <summary>
-        /// Starts the recording of the the render graph and then automatically execute when the return value goes out of scope.
+        /// Starts the recording of the render graph.
         /// This must be called before adding any pass to the render graph.
         /// </summary>
         /// <param name="parameters">Parameters necessary for the render graph execution.</param>
         /// <example>
-        /// This shows how to increment an integer.
+        /// <para>Begin recording the Render Graph.</para>
         /// <code>
-        /// using (renderGraph.RecordAndExecute(parameters))
-        /// {
-        ///     // Add your render graph passes here.
-        /// }
+        /// renderGraph.BeginRecording(parameters)
+        /// // Add your render graph passes here.
+        /// renderGraph.EndRecordingAndExecute()
         /// </code>
         /// </example>
-        /// <seealso cref="RenderGraphExecution"/>
-        /// <returns><see cref="RenderGraphExecution"/></returns>
-        public RenderGraphExecution RecordAndExecute(in RenderGraphParameters parameters)
+        public void BeginRecording(in RenderGraphParameters parameters)
         {
             m_CurrentFrameIndex = parameters.currentFrameIndex;
             m_CurrentExecutionName = parameters.executionName != null ? parameters.executionName : "RenderGraphExecution";
             m_HasRenderGraphBegun = true;
-            m_RendererListCulling = parameters.rendererListCulling;
+            // Cannot do renderer list culling with compilation caching because it happens after compilation is done so it can lead to discrepancies.
+            m_RendererListCulling = parameters.rendererListCulling && !m_EnableCompilationCaching;
 
             m_Resources.BeginRenderGraph(m_ExecutionCount++);
 
@@ -1117,12 +1188,14 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
             if (m_DebugParameters.immediateMode)
             {
+                UpdateCurrentCompiledGraph(graphHash: -1, forceNoCaching: true);
+
                 LogFrameInformation();
 
                 // Prepare the list of compiled pass info for immediate mode.
                 // Conservative resize because we don't know how many passes there will be.
                 // We might still need to grow the array later on anyway if it's not enough.
-                m_CompiledPassInfos.Resize(m_CompiledPassInfos.capacity);
+                m_CurrentCompiledGraph.compiledPassInfos.Resize(m_CurrentCompiledGraph.compiledPassInfos.capacity);
                 m_CurrentImmediatePassIndex = 0;
 
                 for (int i = 0; i < (int)RenderGraphResourceType.Count; ++i)
@@ -1135,8 +1208,15 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
                 m_Resources.BeginExecute(m_CurrentFrameIndex);
             }
+        }
 
-            return new RenderGraphExecution(this);
+        /// <summary>
+        /// Ends the recording and executes the render graph.
+        /// This must be called once all passes have been added to the render graph.
+        /// </summary>
+        public void EndRecordingAndExecute()
+        {
+            Execute();
         }
 
         /// <summary>
@@ -1148,19 +1228,37 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
             try
             {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
                 if (m_RenderGraphContext.cmd == null)
-                    throw new InvalidOperationException("RenderGraph.RecordAndExecute was not called before executing the render graph.");
-
-
+                    throw new InvalidOperationException("RenderGraph.BeginRecording was not called before executing the render graph.");
+#endif
                 if (!m_DebugParameters.immediateMode)
                 {
                     LogFrameInformation();
 
-                    CompileRenderGraph();
+                    int graphHash = 0;
+                    if (m_EnableCompilationCaching)
+                        graphHash = ComputeGraphHash();
+
+                    if (nativeRenderPassesEnabled)
+                        CompileNativeRenderGraph(graphHash);
+                    else
+                        CompileRenderGraph(graphHash);
 
                     m_Resources.BeginExecute(m_CurrentFrameIndex);
 
-                    ExecuteRenderGraph();
+#if UNITY_EDITOR
+                    // Feeding Render Graph Viewer before resource deallocation at pass execution
+                    GenerateDebugData();
+#endif
+
+                    if (nativeRenderPassesEnabled)
+                        ExecuteNativeRenderGraph();
+                    else
+                        ExecuteRenderGraph();
+
+                    // Clear the shader bindings for all global textures to make sure bindings don't leak outside the graph
+                    ClearGlobalBindings();
                 }
             }
             catch (Exception e)
@@ -1182,12 +1280,10 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             }
             finally
             {
-                GenerateDebugData();
-
                 if (m_DebugParameters.immediateMode)
                     ReleaseImmediateModeResources();
 
-                ClearCompiledGraph();
+                ClearCompiledGraph(m_CurrentCompiledGraph, m_EnableCompilationCaching);
 
                 m_Resources.EndExecute();
 
@@ -1202,6 +1298,9 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             public ProfilingSampler sampler;
         }
 
+        const string k_BeginProfilingSamplerPassName = "BeginProfile";
+        const string k_EndProfilingSamplerPassName = "EndProfile";
+
         /// <summary>
         /// Begin a profiling scope.
         /// </summary>
@@ -1212,7 +1311,10 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             [CallerFilePath] string file = "",
             [CallerLineNumber] int line = 0)
         {
-            using (var builder = AddRenderPass<ProfilingScopePassData>("BeginProfile", out var passData, null, file, line))
+            if (sampler == null)
+                return;
+
+            using (var builder = AddRenderPass<ProfilingScopePassData>(k_BeginProfilingSamplerPassName, out var passData, (ProfilingSampler)null, file, line))
             {
                 passData.sampler = sampler;
                 builder.AllowPassCulling(false);
@@ -1234,7 +1336,10 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             [CallerFilePath] string file = "",
             [CallerLineNumber] int line = 0)
         {
-            using (var builder = AddRenderPass<ProfilingScopePassData>("EndProfile", out var passData, null, file, line))
+            if (sampler == null)
+                return;
+
+            using (var builder = AddRenderPass<ProfilingScopePassData>(k_EndProfilingSamplerPassName, out var passData, (ProfilingSampler)null, file, line))
             {
                 passData.sampler = sampler;
                 builder.AllowPassCulling(false);
@@ -1250,17 +1355,27 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         #region Internal Interface
         // Internal for testing purpose only
-        internal DynamicArray<CompiledPassInfo> GetCompiledPassInfos() { return m_CompiledPassInfos; }
+        internal DynamicArray<CompiledPassInfo> GetCompiledPassInfos() { return m_CurrentCompiledGraph.compiledPassInfos; }
 
         // Internal for testing purpose only
         internal void ClearCompiledGraph()
         {
+            ClearCompiledGraph(m_CurrentCompiledGraph, false);
+        }
+
+        void ClearCompiledGraph(CompiledGraph compiledGraph, bool useCompilationCaching)
+        {
             ClearRenderPasses();
             m_Resources.Clear(m_ExecutionExceptionWasRaised);
             m_RendererLists.Clear();
-            for (int i = 0; i < (int)RenderGraphResourceType.Count; ++i)
-                m_CompiledResourcesInfos[i].Clear();
-            m_CompiledPassInfos.Clear();
+            registeredGlobals.Clear();
+
+            // When using compilation caching, we need to keep alive the result of the compiled graph.
+            if (!useCompilationCaching)
+            {
+                if (!nativeRenderPassesEnabled)
+                    compiledGraph?.Clear();
+            }
         }
 
         void InvalidateContext()
@@ -1274,7 +1389,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         {
             if (m_DebugParameters.immediateMode)
             {
-                ExecutePassImmediatly(pass);
+                ExecutePassImmediately(pass);
             }
         }
 
@@ -1284,40 +1399,41 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         internal delegate void OnExecutionRegisteredDelegate(RenderGraph graph, string executionName);
         internal static event OnExecutionRegisteredDelegate onExecutionRegistered;
         internal static event OnExecutionRegisteredDelegate onExecutionUnregistered;
+        internal static event Action onDebugDataCaptured;
 
         #endregion
 
         #region Private Interface
 
-        void InitResourceInfosData(DynamicArray<CompiledResourceInfo> resourceInfos, int count)
+        // Internal for testing purpose only.
+        internal int ComputeGraphHash()
         {
-            resourceInfos.Resize(count);
-            for (int i = 0; i < resourceInfos.size; ++i)
-                resourceInfos[i].Reset();
-        }
+            using (new ProfilingScope(ProfilingSampler.Get(RenderGraphProfileId.ComputeHashRenderGraph)))
+            {
+                var hash128 = HashFNV1A32.Create();
+                for (int i = 0; i < m_RenderPasses.Count; ++i)
+                    m_RenderPasses[i].ComputeHash(ref hash128, m_Resources);
 
-        void InitializeCompilationData()
-        {
-            InitResourceInfosData(m_CompiledResourcesInfos[(int)RenderGraphResourceType.Texture], m_Resources.GetTextureResourceCount());
-            InitResourceInfosData(m_CompiledResourcesInfos[(int)RenderGraphResourceType.Buffer], m_Resources.GetBufferResourceCount());
-
-            m_CompiledPassInfos.Resize(m_RenderPasses.Count);
-            for (int i = 0; i < m_CompiledPassInfos.size; ++i)
-                m_CompiledPassInfos[i].Reset(m_RenderPasses[i]);
+                return hash128.value;
+            }
         }
 
         void CountReferences()
         {
-            for (int passIndex = 0; passIndex < m_CompiledPassInfos.size; ++passIndex)
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
+            var compiledResourceInfo = m_CurrentCompiledGraph.compiledResourcesInfos;
+
+            for (int passIndex = 0; passIndex < compiledPassInfo.size; ++passIndex)
             {
-                ref CompiledPassInfo passInfo = ref m_CompiledPassInfos[passIndex];
+                RenderGraphPass pass = m_RenderPasses[passIndex];
+                ref CompiledPassInfo passInfo = ref compiledPassInfo[passIndex];
 
                 for (int type = 0; type < (int)RenderGraphResourceType.Count; ++type)
                 {
-                    var resourceRead = passInfo.pass.resourceReadLists[type];
+                    var resourceRead = pass.resourceReadLists[type];
                     foreach (var resource in resourceRead)
                     {
-                        ref CompiledResourceInfo info = ref m_CompiledResourcesInfos[type][resource];
+                        ref CompiledResourceInfo info = ref compiledResourceInfo[type][resource.index];
                         info.imported = m_Resources.IsRenderGraphResourceImported(resource);
                         info.consumers.Add(passIndex);
                         info.refCount++;
@@ -1327,10 +1443,10 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 #endif
                     }
 
-                    var resourceWrite = passInfo.pass.resourceWriteLists[type];
+                    var resourceWrite = pass.resourceWriteLists[type];
                     foreach (var resource in resourceWrite)
                     {
-                        ref CompiledResourceInfo info = ref m_CompiledResourcesInfos[type][resource];
+                        ref CompiledResourceInfo info = ref compiledResourceInfo[type][resource.index];
                         info.imported = m_Resources.IsRenderGraphResourceImported(resource);
                         info.producers.Add(passIndex);
 
@@ -1343,9 +1459,9 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 #endif
                     }
 
-                    foreach (int resourceIndex in passInfo.pass.transientResourceList[type])
+                    foreach (var resource in pass.transientResourceList[type])
                     {
-                        ref CompiledResourceInfo info = ref m_CompiledResourcesInfos[type][resourceIndex];
+                        ref CompiledResourceInfo info = ref compiledResourceInfo[type][resource.index];
                         info.refCount++;
                         info.consumers.Add(passIndex);
                         info.producers.Add(passIndex);
@@ -1368,7 +1484,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             // This will cull all passes that produce resource that are never read.
             for (int type = 0; type < (int)RenderGraphResourceType.Count; ++type)
             {
-                DynamicArray<CompiledResourceInfo> resourceUsageList = m_CompiledResourcesInfos[type];
+                DynamicArray<CompiledResourceInfo> resourceUsageList = m_CurrentCompiledGraph.compiledResourcesInfos[type];
 
                 // Gather resources that are never read.
                 m_CullingStack.Clear();
@@ -1385,7 +1501,8 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                     var unusedResource = resourceUsageList[m_CullingStack.Pop()];
                     foreach (var producerIndex in unusedResource.producers)
                     {
-                        ref var producerInfo = ref m_CompiledPassInfos[producerIndex];
+                        ref var producerInfo = ref m_CurrentCompiledGraph.compiledPassInfos[producerIndex];
+                        var producerPass = m_RenderPasses[producerIndex];
                         producerInfo.refCount--;
                         if (producerInfo.refCount == 0 && !producerInfo.hasSideEffect && producerInfo.allowPassCulling)
                         {
@@ -1393,13 +1510,13 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                             // Cull it and decrement refCount of all the textures it reads.
                             producerInfo.culled = true;
 
-                            foreach (var resourceIndex in producerInfo.pass.resourceReadLists[type])
+                            foreach (var resource in producerPass.resourceReadLists[type])
                             {
-                                ref CompiledResourceInfo resourceInfo = ref resourceUsageList[resourceIndex];
+                                ref CompiledResourceInfo resourceInfo = ref resourceUsageList[resource.index];
                                 resourceInfo.refCount--;
                                 // If a resource is not used anymore, add it to the stack to be processed in subsequent iteration.
                                 if (resourceInfo.refCount == 0)
-                                    m_CullingStack.Push(resourceIndex);
+                                    m_CullingStack.Push(resource.index);
                             }
                         }
                     }
@@ -1429,24 +1546,25 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             int lastProducer = GetLatestProducerIndex(currentPassIndex, resource);
             if (lastProducer != -1)
             {
-                ref CompiledPassInfo currentPassInfo = ref m_CompiledPassInfos[currentPassIndex];
+                var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
+                ref CompiledPassInfo currentPassInfo = ref compiledPassInfo[currentPassIndex];
 
                 //If the passes are on different pipes, we need synchronization.
-                if (m_CompiledPassInfos[lastProducer].enableAsyncCompute != currentPassInfo.enableAsyncCompute)
+                if (m_CurrentCompiledGraph.compiledPassInfos[lastProducer].enableAsyncCompute != currentPassInfo.enableAsyncCompute)
                 {
                     // Pass is on compute pipe, need sync with graphics pipe.
                     if (currentPassInfo.enableAsyncCompute)
                     {
                         if (lastProducer > lastGraphicsPipeSync)
                         {
-                            UpdatePassSynchronization(ref currentPassInfo, ref m_CompiledPassInfos[lastProducer], currentPassIndex, lastProducer, ref lastGraphicsPipeSync);
+                            UpdatePassSynchronization(ref currentPassInfo, ref compiledPassInfo[lastProducer], currentPassIndex, lastProducer, ref lastGraphicsPipeSync);
                         }
                     }
                     else
                     {
                         if (lastProducer > lastComputePipeSync)
                         {
-                            UpdatePassSynchronization(ref currentPassInfo, ref m_CompiledPassInfos[lastProducer], currentPassIndex, lastProducer, ref lastComputePipeSync);
+                            UpdatePassSynchronization(ref currentPassInfo, ref compiledPassInfo[lastProducer], currentPassIndex, lastProducer, ref lastComputePipeSync);
                         }
                     }
                 }
@@ -1455,11 +1573,12 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         int GetFirstValidConsumerIndex(int passIndex, in CompiledResourceInfo info)
         {
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
             // We want to know the lowest pass index after the current pass that reads from the resource.
             foreach (int consumer in info.consumers)
             {
                 // consumers are by construction in increasing order.
-                if (consumer > passIndex && !m_CompiledPassInfos[consumer].culled)
+                if (consumer > passIndex && !compiledPassInfo[consumer].culled)
                     return consumer;
             }
 
@@ -1470,13 +1589,13 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         {
             // We check all producers before the consumerPass. The first one not culled will be the one allocating the resource
             // If they are all culled, we need to get the one right before the consumer, it will allocate or reuse the resource
-
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
             int previousPass = 0;
             for (index = 0; index < info.producers.Count; index++)
             {
                 int currentPass = info.producers[index];
                 // We found a valid producer - he will allocate the texture
-                if (!m_CompiledPassInfos[currentPass].culled)
+                if (!compiledPassInfo[currentPass].culled)
                     return currentPass;
                 // We reached consumer pass, return last producer even if it's culled
                 if (currentPass >= consumerPass)
@@ -1491,10 +1610,13 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         {
             // We want to know the highest pass index below the current pass that writes to the resource.
             int result = -1;
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
             foreach (var producer in info.producers)
             {
+                var producerPassInfo = compiledPassInfo[producer];
                 // producers are by construction in increasing order.
-                if (producer < passIndex)
+                // We also need to make sure we don't return a pass that was culled (can happen at this point because of renderer list culling).
+                if (producer < passIndex && !(producerPassInfo.culled || producerPassInfo.culledByRendererList))
                     result = producer;
                 else
                     return result;
@@ -1508,10 +1630,11 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             if (info.consumers.Count == 0)
                 return -1;
 
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
             var consumers = info.consumers;
             for (int i = consumers.Count - 1; i >= 0; --i)
             {
-                if (!m_CompiledPassInfos[consumers[i]].culled)
+                if (!compiledPassInfo[consumers[i]].culled)
                     return consumers[i];
             }
 
@@ -1523,10 +1646,11 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             if (info.producers.Count == 0)
                 return -1;
 
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
             var producers = info.producers;
             for (int i = 0; i < producers.Count; i++)
             {
-                if (!m_CompiledPassInfos[producers[i]].culled)
+                if (!compiledPassInfo[producers[i]].culled)
                     return producers[i];
             }
 
@@ -1538,10 +1662,11 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             if (info.producers.Count == 0)
                 return -1;
 
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
             var producers = info.producers;
             for (int i = producers.Count - 1; i >= 0; --i)
             {
-                if (!m_CompiledPassInfos[producers[i]].culled)
+                if (!compiledPassInfo[producers[i]].culled)
                     return producers[i];
             }
 
@@ -1550,15 +1675,16 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         void CreateRendererLists()
         {
-            for (int passIndex = 0; passIndex < m_CompiledPassInfos.size; ++passIndex)
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
+            for (int passIndex = 0; passIndex < compiledPassInfo.size; ++passIndex)
             {
-                ref CompiledPassInfo passInfo = ref m_CompiledPassInfos[passIndex];
+                ref CompiledPassInfo passInfo = ref compiledPassInfo[passIndex];
 
                 if (passInfo.culled)
                     continue;
 
                 // Gather all renderer lists
-                m_RendererLists.AddRange(passInfo.pass.usedRendererListList);
+                m_RendererLists.AddRange(m_RenderPasses[passInfo.index].usedRendererListList);
             }
 
             // Anything related to renderer lists needs a real context to be able to use/test it
@@ -1600,14 +1726,17 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             return fallback.IsValid();
         }
 
-        void AllocateCulledPassResources(ref CompiledPassInfo passInfo, int passIndex)
+        void AllocateCulledPassResources(ref CompiledPassInfo passInfo)
         {
+            var passIndex = passInfo.index;
+            var pass = m_RenderPasses[passIndex];
+
             for (int type = 0; type < (int)RenderGraphResourceType.Count; ++type)
             {
-                var resourcesInfo = m_CompiledResourcesInfos[type];
-                foreach (var resourceHandle in passInfo.pass.resourceWriteLists[type])
+                var resourcesInfo = m_CurrentCompiledGraph.compiledResourcesInfos[type];
+                foreach (var resourceHandle in pass.resourceWriteLists[type])
                 {
-                    ref var compiledResource = ref resourcesInfo[resourceHandle];
+                    ref var compiledResource = ref resourcesInfo[resourceHandle.index];
 
                     // Check if there is a valid consumer and no other valid producer
                     int consumerPass = GetFirstValidConsumerIndex(passIndex, compiledResource);
@@ -1645,40 +1774,46 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             int lastGraphicsPipeSync = -1;
             int lastComputePipeSync = -1;
 
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
+            var compiledResourceInfo = m_CurrentCompiledGraph.compiledResourcesInfos;
+
             // First go through all passes.
             // - Update the last pass read index for each resource.
             // - Add texture to creation list for passes that first write to a texture.
             // - Update synchronization points for all resources between compute and graphics pipes.
-            for (int passIndex = 0; passIndex < m_CompiledPassInfos.size; ++passIndex)
+            for (int passIndex = 0; passIndex < compiledPassInfo.size; ++passIndex)
             {
-                ref CompiledPassInfo passInfo = ref m_CompiledPassInfos[passIndex];
+                ref CompiledPassInfo passInfo = ref compiledPassInfo[passIndex];
 
                 // If this pass is culled, we need to make sure that any texture read by a later pass is still allocated
                 // We also try to find an imported fallback to save an allocation
                 if (passInfo.culledByRendererList)
-                    AllocateCulledPassResources(ref passInfo, passIndex);
+                    AllocateCulledPassResources(ref passInfo);
 
                 if (passInfo.culled)
                     continue;
 
+                var pass = m_RenderPasses[passInfo.index];
+
                 for (int type = 0; type < (int)RenderGraphResourceType.Count; ++type)
                 {
-                    var resourcesInfo = m_CompiledResourcesInfos[type];
-                    foreach (int resource in passInfo.pass.resourceReadLists[type])
+                    var resourcesInfo = compiledResourceInfo[type];
+                    foreach (var resource in pass.resourceReadLists[type])
                     {
-                        UpdateResourceSynchronization(ref lastGraphicsPipeSync, ref lastComputePipeSync, passIndex, resourcesInfo[resource]);
+                        UpdateResourceSynchronization(ref lastGraphicsPipeSync, ref lastComputePipeSync, passIndex, resourcesInfo[resource.index]);
                     }
 
-                    foreach (int resource in passInfo.pass.resourceWriteLists[type])
+                    foreach (var resource in pass.resourceWriteLists[type])
                     {
-                        UpdateResourceSynchronization(ref lastGraphicsPipeSync, ref lastComputePipeSync, passIndex, resourcesInfo[resource]);
+                        UpdateResourceSynchronization(ref lastGraphicsPipeSync, ref lastComputePipeSync, passIndex, resourcesInfo[resource.index]);
                     }
                 }
             }
 
             for (int type = 0; type < (int)RenderGraphResourceType.Count; ++type)
             {
-                var resourceInfos = m_CompiledResourcesInfos[type];
+                var resourceInfos = compiledResourceInfo[type];
+
                 // Now push resources to the release list of the pass that reads it last.
                 for (int i = 1; i < resourceInfos.size; ++i) // 0 == null resource skip it
                 {
@@ -1696,7 +1831,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                     // Index -1 can happen for imported resources (for example an imported dummy black texture will never be written to but does not need creation anyway)
                     // Or when the only pass that was writting to this resource was culled dynamically by renderer lists
                     if (firstWriteIndex != -1)
-                        m_CompiledPassInfos[firstWriteIndex].resourceCreateList[type].Add(i);
+                        compiledPassInfo[firstWriteIndex].resourceCreateList[type].Add(i);
 
                     var latestValidReadIndex = GetLatestValidReadIndex(resourceInfo);
                     var latestValidWriteIndex = GetLatestValidWriteIndex(resourceInfo);
@@ -1725,23 +1860,23 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                     {
                         // In case of async passes, we need to extend lifetime of resource to the first pass on the graphics pipeline that wait for async passes to be over.
                         // Otherwise, if we freed the resource right away during an async pass, another non async pass could reuse the resource even though the async pipe is not done.
-                        if (m_CompiledPassInfos[lastReadPassIndex].enableAsyncCompute)
+                        if (compiledPassInfo[lastReadPassIndex].enableAsyncCompute)
                         {
                             int currentPassIndex = lastReadPassIndex;
-                            int firstWaitingPassIndex = m_CompiledPassInfos[currentPassIndex].syncFromPassIndex;
+                            int firstWaitingPassIndex = compiledPassInfo[currentPassIndex].syncFromPassIndex;
                             // Find the first async pass that is synchronized by the graphics pipeline (ie: passInfo.syncFromPassIndex != -1)
-                            while (firstWaitingPassIndex == -1 && currentPassIndex++ < m_CompiledPassInfos.size - 1)
+                            while (firstWaitingPassIndex == -1 && currentPassIndex++ < compiledPassInfo.size - 1)
                             {
-                                if (m_CompiledPassInfos[currentPassIndex].enableAsyncCompute)
-                                    firstWaitingPassIndex = m_CompiledPassInfos[currentPassIndex].syncFromPassIndex;
+                                if (compiledPassInfo[currentPassIndex].enableAsyncCompute)
+                                    firstWaitingPassIndex = compiledPassInfo[currentPassIndex].syncFromPassIndex;
                             }
 
                             // Fail safe in case render graph is badly formed.
-                            if (currentPassIndex == m_CompiledPassInfos.size)
+                            if (currentPassIndex == compiledPassInfo.size)
                             {
                                 // This is not true with passes with side effect as they are writing to a resource that may not be read by the render graph this frame and to no other resource.
                                 // In this case we extend the lifetime of resources to the end of the frame. It's not idea but it should not be the majority of cases.
-                                if (m_CompiledPassInfos[lastReadPassIndex].hasSideEffect)
+                                if (compiledPassInfo[lastReadPassIndex].hasSideEffect)
                                 {
                                     firstWaitingPassIndex = currentPassIndex;
                                 }
@@ -1762,20 +1897,41 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                             var releasePassIndex = Math.Max(0, firstWaitingPassIndex - 1);
 
                             // Check to ensure that we do not release resources on a culled pass (causes a leak otherwise).
-                            while (m_CompiledPassInfos[releasePassIndex].culled)
+                            while (compiledPassInfo[releasePassIndex].culled)
                                 releasePassIndex = Math.Max(0, releasePassIndex - 1);
 
-                            ref CompiledPassInfo passInfo = ref m_CompiledPassInfos[releasePassIndex];
+                            ref CompiledPassInfo passInfo = ref compiledPassInfo[releasePassIndex];
                             passInfo.resourceReleaseList[type].Add(i);
                         }
                         else
                         {
-                            ref CompiledPassInfo passInfo = ref m_CompiledPassInfos[lastReadPassIndex];
+                            ref CompiledPassInfo passInfo = ref compiledPassInfo[lastReadPassIndex];
                             passInfo.resourceReleaseList[type].Add(i);
                         }
                     }
 
                     if (sharedResource && (firstWriteIndex != -1 || lastReadPassIndex != -1)) // A shared resource is considered used if it's either read or written at any pass.
+                    {
+                        m_Resources.UpdateSharedResourceLastFrameIndex(type, i);
+                    }
+                }
+            }
+        }
+
+        void UpdateAllSharedResourceLastFrameIndex()
+        {
+            for (int type = 0; type < (int)RenderGraphResourceType.Count; ++type)
+            {
+                var resourceInfos = m_CurrentCompiledGraph.compiledResourcesInfos[type];
+                var sharedResourceCount = m_Resources.GetSharedResourceCount((RenderGraphResourceType)type);
+
+                for (int i = 1; i <= sharedResourceCount; ++i) // 0 == null resource skip it
+                {
+                    CompiledResourceInfo resourceInfo = resourceInfos[i];
+                    var latestValidReadIndex = GetLatestValidReadIndex(resourceInfo);
+                    int firstWriteIndex = GetFirstValidWriteIndex(resourceInfo);
+
+                    if ((firstWriteIndex != -1 || latestValidReadIndex != -1)) // A shared resource is considered used if it's either read or written at any pass.
                     {
                         m_Resources.UpdateSharedResourceLastFrameIndex(type, i);
                     }
@@ -1803,27 +1959,32 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         void TryCullPassAtIndex(int passIndex)
         {
-            var pass = m_CompiledPassInfos[passIndex].pass;
-            if (!m_CompiledPassInfos[passIndex].culled &&
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
+            ref var compiledPass = ref compiledPassInfo[passIndex];
+            var pass = m_RenderPasses[passIndex];
+            if (!compiledPass.culled &&
                 pass.allowPassCulling &&
                 pass.allowRendererListCulling &&
-                !m_CompiledPassInfos[passIndex].hasSideEffect)
+                !compiledPass.hasSideEffect)
             {
                 if (AreRendererListsEmpty(pass.usedRendererListList))
                 {
                     //Debug.Log($"Culling pass <color=red> {pass.name} </color>");
-                    m_CompiledPassInfos[passIndex].culled = m_CompiledPassInfos[passIndex].culledByRendererList = true;
+                    compiledPass.culled = compiledPass.culledByRendererList = true;
                 }
             }
         }
 
         void CullRendererLists()
         {
-            for (int passIndex = 0; passIndex < m_CompiledPassInfos.size; ++passIndex)
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
+            for (int passIndex = 0; passIndex < compiledPassInfo.size; ++passIndex)
             {
-                if (!m_CompiledPassInfos[passIndex].culled && !m_CompiledPassInfos[passIndex].hasSideEffect)
+                var compiledPass = compiledPassInfo[passIndex];
+
+                if (!compiledPass.culled && !compiledPass.hasSideEffect)
                 {
-                    var pass = m_CompiledPassInfos[passIndex].pass;
+                    var pass = m_RenderPasses[passIndex];
                     if (pass.usedRendererListList.Count > 0)
                     {
                         TryCullPassAtIndex(passIndex);
@@ -1832,30 +1993,56 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             }
         }
 
+        bool UpdateCurrentCompiledGraph(int graphHash, bool forceNoCaching = false)
+        {
+            bool cached = false;
+            if (m_EnableCompilationCaching && !forceNoCaching)
+                cached = m_CompilationCache.GetCompilationCache(graphHash, m_ExecutionCount, out m_CurrentCompiledGraph);
+            else
+                m_CurrentCompiledGraph = m_DefaultCompiledGraph;
+
+            return cached;
+        }
+
         // Internal visibility for testing purpose only
         // Traverse the render graph:
         // - Determines when resources are created/released
         // - Determines async compute pass synchronization
         // - Cull unused render passes.
-        internal void CompileRenderGraph()
+        internal void CompileRenderGraph(int graphHash)
         {
             using (new ProfilingScope(m_RenderGraphContext.cmd, ProfilingSampler.Get(RenderGraphProfileId.CompileRenderGraph)))
             {
-                InitializeCompilationData();
-                CountReferences();
+                bool compilationIsCached = UpdateCurrentCompiledGraph(graphHash);
 
-                // First cull all passes thet produce unused output
-                CullUnusedPasses();
+                if (!compilationIsCached)
+                {
+                    m_CurrentCompiledGraph.Clear();
+                    m_CurrentCompiledGraph.InitializeCompilationData(m_RenderPasses, m_Resources);
+                    CountReferences();
+
+                    // First cull all passes that produce unused output
+                    CullUnusedPasses();
+                }
 
                 // Create the renderer lists of the remaining passes
                 CreateRendererLists();
 
-                // Cull dynamically the graph passes based on the renderer list visibility
-                if (m_RendererListCulling)
-                    CullRendererLists();
+                if (!compilationIsCached)
+                {
+                    // Cull dynamically the graph passes based on the renderer list visibility
+                    if (m_RendererListCulling)
+                        CullRendererLists();
 
-                // After all culling passes, allocate the resources for this frame
-                UpdateResourceAllocationAndSynchronization();
+                    // After all culling passes, allocate the resources for this frame
+                    UpdateResourceAllocationAndSynchronization();
+                }
+                else
+                {
+                    // We need to update all shared resource frame index usage otherwise they might not be in a valid state.
+                    // Otherwise it's done in UpdateResourceAllocationAndSynchronization().
+                    UpdateAllSharedResourceLastFrameIndex();
+                }
 
                 LogRendererListsCreation();
             }
@@ -1863,13 +2050,14 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         ref CompiledPassInfo CompilePassImmediatly(RenderGraphPass pass)
         {
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
             // If we don't have enough pre allocated elements we double the size.
             // It's pretty aggressive but the immediate mode is only for debug purpose so it should be fine.
-            if (m_CurrentImmediatePassIndex >= m_CompiledPassInfos.size)
-                m_CompiledPassInfos.Resize(m_CompiledPassInfos.size * 2);
+            if (m_CurrentImmediatePassIndex >= compiledPassInfo.size)
+                compiledPassInfo.Resize(compiledPassInfo.size * 2);
 
-            ref CompiledPassInfo passInfo = ref m_CompiledPassInfos[m_CurrentImmediatePassIndex++];
-            passInfo.Reset(pass);
+            ref CompiledPassInfo passInfo = ref compiledPassInfo[m_CurrentImmediatePassIndex++];
+            passInfo.Reset(pass, m_CurrentImmediatePassIndex - 1);
             // In immediate mode we don't have proper information to generate synchronization so we disable async compute.
             passInfo.enableAsyncCompute = false;
 
@@ -1879,8 +2067,8 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             {
                 foreach (var res in pass.transientResourceList[iType])
                 {
-                    passInfo.resourceCreateList[iType].Add(res);
-                    passInfo.resourceReleaseList[iType].Add(res);
+                    passInfo.resourceCreateList[iType].Add(res.index);
+                    passInfo.resourceReleaseList[iType].Add(res.index);
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
                     passInfo.debugResourceWrites[iType].Add(m_Resources.GetRenderGraphResourceName(res));
@@ -1895,8 +2083,8 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
                     if (!m_Resources.IsGraphicsResourceCreated(res))
                     {
-                        passInfo.resourceCreateList[iType].Add(res);
-                        m_ImmediateModeResourceList[iType].Add(res);
+                        passInfo.resourceCreateList[iType].Add(res.index);
+                        m_ImmediateModeResourceList[iType].Add(res.index);
                     }
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -1926,32 +2114,32 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             return ref passInfo;
         }
 
-        void ExecutePassImmediatly(RenderGraphPass pass)
+        void ExecutePassImmediately(RenderGraphPass pass)
         {
-            ExecuteCompiledPass(ref CompilePassImmediatly(pass), m_CurrentImmediatePassIndex - 1);
+            ExecuteCompiledPass(ref CompilePassImmediatly(pass));
         }
 
-        void ExecuteCompiledPass(ref CompiledPassInfo passInfo, int passIndex)
+        void ExecuteCompiledPass(ref CompiledPassInfo passInfo)
         {
             if (passInfo.culled)
                 return;
 
-            if (!passInfo.pass.HasRenderFunc())
-            {
-                throw new InvalidOperationException(string.Format("RenderPass {0} was not provided with an execute function.", passInfo.pass.name));
-            }
+            var pass = m_RenderPasses[passInfo.index];
+
+            if (!pass.HasRenderFunc())
+                throw new InvalidOperationException($"RenderPass {pass.name} was not provided with an execute function.");
 
             try
             {
-                using (new ProfilingScope(m_RenderGraphContext.cmd, passInfo.pass.customSampler))
+                using (new ProfilingScope(m_RenderGraphContext.cmd, pass.customSampler))
                 {
                     LogRenderPassBegin(passInfo);
                     using (new RenderGraphLogIndent(m_FrameInformationLogger))
                     {
-                        m_RenderGraphContext.executingPass = passInfo.pass;
-                        PreRenderPassExecute(passInfo, m_RenderGraphContext);
-                        passInfo.pass.Execute(m_RenderGraphContext);
-                        PostRenderPassExecute(ref passInfo, m_RenderGraphContext);
+                        m_RenderGraphContext.executingPass = pass;
+                        PreRenderPassExecute(passInfo, pass, m_RenderGraphContext);
+                        pass.Execute(m_RenderGraphContext);
+                        PostRenderPassExecute(ref passInfo, pass, m_RenderGraphContext);
                     }
                 }
             }
@@ -1962,7 +2150,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                 {
                     // Log exception from the pass that raised it to have improved error logging quality for users
                     m_ExecutionExceptionWasRaised = true;
-                    Debug.LogError($"Render Graph Execution error at pass {passInfo.pass.name} ({passIndex})");
+                    Debug.LogError($"Render Graph execution error at pass '{pass.name}' ({passInfo.index})");
                     Debug.LogException(e);
                 }
                 throw;
@@ -1974,33 +2162,36 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         {
             using (new ProfilingScope(m_RenderGraphContext.cmd, ProfilingSampler.Get(RenderGraphProfileId.ExecuteRenderGraph)))
             {
-                for (int passIndex = 0; passIndex < m_CompiledPassInfos.size; ++passIndex)
+                var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
+                for (int passIndex = 0; passIndex < compiledPassInfo.size; ++passIndex)
                 {
-                    ExecuteCompiledPass(ref m_CompiledPassInfos[passIndex], passIndex);
+                    ExecuteCompiledPass(ref compiledPassInfo[passIndex]);
                 }
             }
         }
 
-        void PreRenderPassSetRenderTargets(in CompiledPassInfo passInfo, InternalRenderGraphContext rgContext)
+        void PreRenderPassSetRenderTargets(in CompiledPassInfo passInfo, RenderGraphPass pass, InternalRenderGraphContext rgContext)
         {
-            var pass = passInfo.pass;
-            if (pass.depthBuffer.IsValid() || pass.colorBufferMaxIndex != -1)
+            var depthBufferIsValid = pass.depthAccess.textureHandle.IsValid();
+            if (depthBufferIsValid || pass.colorBufferMaxIndex != -1)
             {
-                var mrtArray = rgContext.renderGraphPool.GetTempArray<RenderTargetIdentifier>(pass.colorBufferMaxIndex + 1);
-                var colorBuffers = pass.colorBuffers;
-
+                var colorBufferAccess = pass.colorBufferAccess;
                 if (pass.colorBufferMaxIndex > 0)
                 {
+                    var mrtArray = m_TempMRTArrays[pass.colorBufferMaxIndex];
+
                     for (int i = 0; i <= pass.colorBufferMaxIndex; ++i)
                     {
-                        if (!colorBuffers[i].IsValid())
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                        if (!colorBufferAccess[i].textureHandle.IsValid())
                             throw new InvalidOperationException("MRT setup is invalid. Some indices are not used.");
-                        mrtArray[i] = m_Resources.GetTexture(colorBuffers[i]);
+#endif
+                        mrtArray[i] = m_Resources.GetTexture(colorBufferAccess[i].textureHandle);
                     }
 
-                    if (pass.depthBuffer.IsValid())
+                    if (depthBufferIsValid)
                     {
-                        CoreUtils.SetRenderTarget(rgContext.cmd, mrtArray, m_Resources.GetTexture(pass.depthBuffer));
+                        CoreUtils.SetRenderTarget(rgContext.cmd, mrtArray, m_Resources.GetTexture(pass.depthAccess.textureHandle));
                     }
                     else
                     {
@@ -2009,48 +2200,58 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                 }
                 else
                 {
-                    if (pass.depthBuffer.IsValid())
+                    if (depthBufferIsValid)
                     {
                         if (pass.colorBufferMaxIndex > -1)
                         {
-                            CoreUtils.SetRenderTarget(rgContext.cmd, m_Resources.GetTexture(pass.colorBuffers[0]),
-                                m_Resources.GetTexture(pass.depthBuffer));
-                            CoreUtils.SetViewport(rgContext.cmd, m_Resources.GetTexture(pass.colorBuffers[0]));
+                            CoreUtils.SetRenderTarget(rgContext.cmd, m_Resources.GetTexture(pass.colorBufferAccess[0].textureHandle),
+                                m_Resources.GetTexture(pass.depthAccess.textureHandle));
                         }
                         else
                         {
-                            CoreUtils.SetRenderTarget(rgContext.cmd, m_Resources.GetTexture(pass.depthBuffer));
-                            CoreUtils.SetViewport(rgContext.cmd, m_Resources.GetTexture(pass.depthBuffer));
+                            CoreUtils.SetRenderTarget(rgContext.cmd, m_Resources.GetTexture(pass.depthAccess.textureHandle));
                         }
                     }
                     else
                     {
-                        CoreUtils.SetRenderTarget(rgContext.cmd, m_Resources.GetTexture(pass.colorBuffers[0]));
-                        CoreUtils.SetViewport(rgContext.cmd, m_Resources.GetTexture(pass.colorBuffers[0]));
+                        if (pass.colorBufferAccess[0].textureHandle.IsValid())
+                        {
+                            CoreUtils.SetRenderTarget(rgContext.cmd, m_Resources.GetTexture(pass.colorBufferAccess[0].textureHandle));
+                        }
+                        else
+                            throw new InvalidOperationException("Neither Depth nor color render targets are correctly setup at pass " + pass.name + ".");
                     }
                 }
             }
         }
 
-        void PreRenderPassExecute(in CompiledPassInfo passInfo, InternalRenderGraphContext rgContext)
+        void PreRenderPassExecute(in CompiledPassInfo passInfo, RenderGraphPass pass, InternalRenderGraphContext rgContext)
         {
-            RenderGraphPass pass = passInfo.pass;
-
             // Need to save the command buffer to restore it later as the one in the context can changed if running a pass async.
             m_PreviousCommandBuffer = rgContext.cmd;
 
+            bool executedWorkDuringResourceCreation = false;
             for (int type = 0; type < (int)RenderGraphResourceType.Count; ++type)
             {
                 foreach (int resource in passInfo.resourceCreateList[type])
                 {
-                    m_Resources.CreatePooledResource(rgContext, type, resource);
+                    executedWorkDuringResourceCreation |= m_Resources.CreatePooledResource(rgContext, type, resource);
                 }
             }
 
-            PreRenderPassSetRenderTargets(passInfo, rgContext);
+            if (passInfo.enableFoveatedRasterization)
+                rgContext.cmd.SetFoveatedRenderingMode(FoveatedRenderingMode.Enabled);
+
+            PreRenderPassSetRenderTargets(passInfo, pass, rgContext);
 
             if (passInfo.enableAsyncCompute)
             {
+                GraphicsFence previousFence = new GraphicsFence();
+                if (executedWorkDuringResourceCreation)
+                {
+                    previousFence = rgContext.cmd.CreateGraphicsFence(GraphicsFenceType.AsyncQueueSynchronisation, SynchronisationStageFlags.AllGPUOperations);
+                }
+
                 // Flush current command buffer on the render context before enqueuing async commands.
                 if (rgContext.contextlessTesting == false)
                     rgContext.renderContext.ExecuteCommandBuffer(rgContext.cmd);
@@ -2059,18 +2260,26 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                 CommandBuffer asyncCmd = CommandBufferPool.Get(pass.name);
                 asyncCmd.SetExecutionFlags(CommandBufferExecutionFlags.AsyncCompute);
                 rgContext.cmd = asyncCmd;
+
+                if (executedWorkDuringResourceCreation)
+                {
+                    rgContext.cmd.WaitOnAsyncGraphicsFence(previousFence);
+                }
             }
 
             // Synchronize with graphics or compute pipe if needed.
             if (passInfo.syncToPassIndex != -1)
             {
-                rgContext.cmd.WaitOnAsyncGraphicsFence(m_CompiledPassInfos[passInfo.syncToPassIndex].fence);
+                rgContext.cmd.WaitOnAsyncGraphicsFence(m_CurrentCompiledGraph.compiledPassInfos[passInfo.syncToPassIndex].fence);
             }
         }
 
-        void PostRenderPassExecute(ref CompiledPassInfo passInfo, InternalRenderGraphContext rgContext)
+        void PostRenderPassExecute(ref CompiledPassInfo passInfo, RenderGraphPass pass, InternalRenderGraphContext rgContext)
         {
-            RenderGraphPass pass = passInfo.pass;
+            foreach (var tex in pass.setGlobalsList)
+            {
+                rgContext.cmd.SetGlobalTexture(tex.Item2, tex.Item1);
+            }
 
             if (passInfo.needGraphicsFence)
                 passInfo.fence = rgContext.cmd.CreateAsyncGraphicsFence();
@@ -2086,6 +2295,9 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                 CommandBufferPool.Release(rgContext.cmd);
                 rgContext.cmd = m_PreviousCommandBuffer; // Restore the main command buffer.
             }
+
+            if (passInfo.enableFoveatedRasterization)
+                rgContext.cmd.SetFoveatedRenderingMode(FoveatedRenderingMode.Disabled);
 
             m_RenderGraphPool.ReleaseAllTempAlloc();
 
@@ -2139,7 +2351,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         {
             if (m_DebugParameters.enableLogging)
             {
-                RenderGraphPass pass = passInfo.pass;
+                RenderGraphPass pass = m_RenderPasses[passInfo.index];
 
                 m_FrameInformationLogger.LogLine("[{0}][{1}] \"{2}\"", pass.index, pass.enableAsyncCompute ? "Compute" : "Graphics", pass.name);
                 using (new RenderGraphLogIndent(m_FrameInformationLogger))
@@ -2157,9 +2369,10 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                 m_FrameInformationLogger.LogLine("Pass Culling Report:");
                 using (new RenderGraphLogIndent(m_FrameInformationLogger))
                 {
-                    for (int i = 0; i < m_CompiledPassInfos.size; ++i)
+                    var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
+                    for (int i = 0; i < compiledPassInfo.size; ++i)
                     {
-                        if (m_CompiledPassInfos[i].culled)
+                        if (compiledPassInfo[i].culled)
                         {
                             var pass = m_RenderPasses[i];
                             m_FrameInformationLogger.LogLine("[{0}] {1}", pass.index, pass.name);
@@ -2172,6 +2385,9 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         ProfilingSampler GetDefaultProfilingSampler(string name)
         {
+            // In non-dev builds, ProfilingSampler.Get returns null, so we'd always end up executing this.
+            // To avoid that we also ifdef the code out here.
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             int hash = name.GetHashCode();
             if (!m_DefaultProfilingSamplers.TryGetValue(hash, out var sampler))
             {
@@ -2180,9 +2396,12 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             }
 
             return sampler;
+#else
+            return null;
+#endif
         }
 
-        void UpdateImportedResourceLifeTime(ref RenderGraphDebugData.ResourceDebugData data, List<int> passList)
+        void UpdateImportedResourceLifeTime(ref DebugData.ResourceData data, List<int> passList)
         {
             foreach (var pass in passList)
             {
@@ -2203,7 +2422,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             if (m_ExecutionExceptionWasRaised)
                 return;
 
-            if (!requireDebugData)
+            if (!isRenderGraphViewerActive)
             {
                 CleanupDebugData();
                 return;
@@ -2212,21 +2431,44 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             if (!m_DebugData.TryGetValue(m_CurrentExecutionName, out var debugData))
             {
                 onExecutionRegistered?.Invoke(this, m_CurrentExecutionName);
-                debugData = new RenderGraphDebugData();
+                debugData = new DebugData();
                 m_DebugData.Add(m_CurrentExecutionName, debugData);
+                return; // Generate the debug data on the next frame, because script metadata is collected during recording step
             }
+
+            // Only generate debug data on request
+            if (m_CaptureDebugDataForExecution == null || !m_CaptureDebugDataForExecution.Equals(m_CurrentExecutionName))
+                return;
 
             debugData.Clear();
 
+            if (nativeRenderPassesEnabled)
+                nativeCompiler.GenerateNativeCompilerDebugData(ref debugData);
+            else
+                GenerateCompilerDebugData(ref debugData);
+
+            onDebugDataCaptured?.Invoke();
+
+            m_CaptureDebugDataForExecution = null;
+
+            ClearPassDebugMetadata();
+        }
+
+        void GenerateCompilerDebugData(ref DebugData debugData)
+        {
+            var compiledPassInfo = m_CurrentCompiledGraph.compiledPassInfos;
+            var compiledResourceInfo = m_CurrentCompiledGraph.compiledResourcesInfos;
+
             for (int type = 0; type < (int)RenderGraphResourceType.Count; ++type)
             {
-                for (int i = 0; i < m_CompiledResourcesInfos[type].size; ++i)
+                for (int i = 0; i < compiledResourceInfo[type].size; ++i)
                 {
-                    ref var resourceInfo = ref m_CompiledResourcesInfos[type][i];
-                    RenderGraphDebugData.ResourceDebugData newResource = new RenderGraphDebugData.ResourceDebugData();
+                    ref var resourceInfo = ref compiledResourceInfo[type][i];
+                    DebugData.ResourceData newResource = new DebugData.ResourceData();
                     if (i != 0)
                     {
-                        newResource.name = m_Resources.GetRenderGraphResourceName((RenderGraphResourceType)type, i);
+                        var resName = m_Resources.GetRenderGraphResourceName((RenderGraphResourceType)type, i);
+                        newResource.name = !string.IsNullOrEmpty(resName) ? resName : "(unnamed)";
                         newResource.imported = m_Resources.IsRenderGraphResourceImported((RenderGraphResourceType)type, i);
                     }
                     else
@@ -2238,6 +2480,38 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
                     newResource.creationPassIndex = -1;
                     newResource.releasePassIndex = -1;
+
+                    RenderGraphResourceType resourceType = (RenderGraphResourceType) type;
+                    var handle = new ResourceHandle(i, resourceType, false);
+                    if (i != 0 && handle.IsValid())
+                    {
+                        if (resourceType == RenderGraphResourceType.Texture)
+                        {
+                            m_Resources.GetRenderTargetInfo(handle, out var renderTargetInfo);
+
+                            var textureData = new DebugData.TextureResourceData();
+                            textureData.width = renderTargetInfo.width;
+                            textureData.height = renderTargetInfo.height;
+                            textureData.depth = renderTargetInfo.volumeDepth;
+                            textureData.samples = renderTargetInfo.msaaSamples;
+                            textureData.format = renderTargetInfo.format;
+                            textureData.bindMS = renderTargetInfo.bindMS;
+
+                            newResource.textureData = textureData;
+                        }
+                        else if (resourceType == RenderGraphResourceType.Buffer)
+                        {
+                            var bufferDesc = m_Resources.GetBufferResourceDesc(handle, true);
+
+                            var bufferData = new DebugData.BufferResourceData();
+                            bufferData.count = bufferDesc.count;
+                            bufferData.stride = bufferDesc.stride;
+                            bufferData.target = bufferDesc.target;
+                            bufferData.usage = bufferDesc.usageFlags;
+
+                            newResource.bufferData = bufferData;
+                        }
+                    }
 
                     newResource.consumerList = new List<int>(resourceInfo.consumers);
                     newResource.producerList = new List<int>(resourceInfo.producers);
@@ -2252,29 +2526,33 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                 }
             }
 
-            for (int i = 0; i < m_CompiledPassInfos.size; ++i)
+            for (int i = 0; i < compiledPassInfo.size; ++i)
             {
-                ref CompiledPassInfo passInfo = ref m_CompiledPassInfos[i];
+                ref CompiledPassInfo passInfo = ref compiledPassInfo[i];
+                RenderGraphPass pass = m_RenderPasses[passInfo.index];
 
-                RenderGraphDebugData.PassDebugData newPass = new RenderGraphDebugData.PassDebugData();
-                newPass.name = passInfo.pass.name;
+                DebugData.PassData newPass = new DebugData.PassData();
+                newPass.name = pass.name;
+                newPass.type = pass.type;
                 newPass.culled = passInfo.culled;
                 newPass.async = passInfo.enableAsyncCompute;
-                newPass.generateDebugData = passInfo.pass.generateDebugData;
+                newPass.generateDebugData = pass.generateDebugData;
                 newPass.resourceReadLists = new List<int>[(int)RenderGraphResourceType.Count];
                 newPass.resourceWriteLists = new List<int>[(int)RenderGraphResourceType.Count];
                 newPass.syncFromPassIndex = passInfo.syncFromPassIndex;
                 newPass.syncToPassIndex = passInfo.syncToPassIndex;
+
+                DebugData.s_PassScriptMetadata.TryGetValue(pass, out newPass.scriptInfo);
 
                 for (int type = 0; type < (int)RenderGraphResourceType.Count; ++type)
                 {
                     newPass.resourceReadLists[type] = new List<int>();
                     newPass.resourceWriteLists[type] = new List<int>();
 
-                    foreach (var resourceRead in passInfo.pass.resourceReadLists[type])
-                        newPass.resourceReadLists[type].Add(resourceRead);
-                    foreach (var resourceWrite in passInfo.pass.resourceWriteLists[type])
-                        newPass.resourceWriteLists[type].Add(resourceWrite);
+                    foreach (var resourceRead in pass.resourceReadLists[type])
+                        newPass.resourceReadLists[type].Add(resourceRead.index);
+                    foreach (var resourceWrite in pass.resourceWriteLists[type])
+                        newPass.resourceWriteLists[type].Add(resourceWrite.index);
 
                     foreach (var resourceCreate in passInfo.resourceCreateList[type])
                     {
@@ -2310,16 +2588,63 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         }
 
         #endregion
+
+
+        Dictionary<int, TextureHandle> registeredGlobals = new Dictionary<int, TextureHandle>();
+
+        internal void SetGlobal(TextureHandle h, int globalPropertyId)
+        {
+            if (!h.IsValid())
+                throw new ArgumentException("Attempting to register an invalid texture handle as a global");
+
+            registeredGlobals[globalPropertyId] = h;
+        }
+
+        internal bool IsGlobal(int globalPropertyId)
+        {
+            return registeredGlobals.ContainsKey(globalPropertyId);
+        }
+
+        internal Dictionary<int, TextureHandle>.ValueCollection AllGlobals()
+        {
+            return registeredGlobals.Values;
+        }
+
+        internal TextureHandle GetGlobal(int globalPropertyId)
+        {
+            TextureHandle h;
+            registeredGlobals.TryGetValue(globalPropertyId, out h);
+            return h;
+        }
+
+        /// <summary>
+        /// Clears the shader bindings associated with the registered globals in the graph
+        ///
+        /// This prevents later rendering logic from accidentally relying on stale shader bindings that were set
+        /// earlier during graph execution.
+        /// </summary>
+        internal void ClearGlobalBindings()
+        {
+            // Set all the global texture shader bindings to the default black texture.
+            // This doesn't technically "clear" the shader bindings, but it's the closest we can do.
+            foreach (var globalTex in registeredGlobals)
+            {
+                m_RenderGraphContext.cmd.SetGlobalTexture(globalTex.Key, defaultResources.blackTexture);
+            }
+        }
     }
 
     /// <summary>
     /// Render Graph Scoped Profiling markers
     /// </summary>
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public struct RenderGraphProfilingScope : IDisposable
     {
-        bool m_Disposed;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
         ProfilingSampler m_Sampler;
         RenderGraph m_RenderGraph;
+        bool m_Disposed;
+#endif
 
         /// <summary>
         /// Profiling Scope constructor
@@ -2328,10 +2653,12 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <param name="sampler">Profiling Sampler to be used for this scope.</param>
         public RenderGraphProfilingScope(RenderGraph renderGraph, ProfilingSampler sampler)
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             m_RenderGraph = renderGraph;
             m_Sampler = sampler;
             m_Disposed = false;
             renderGraph.BeginProfilingSampler(sampler);
+#endif
         }
 
         /// <summary>
@@ -2345,6 +2672,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         // Protected implementation of Dispose pattern.
         void Dispose(bool disposing)
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             if (m_Disposed)
                 return;
 
@@ -2357,6 +2685,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             }
 
             m_Disposed = true;
+#endif
         }
     }
 }

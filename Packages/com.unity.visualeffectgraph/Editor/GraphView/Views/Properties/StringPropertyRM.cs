@@ -1,16 +1,11 @@
 using System;
-using System.Collections.Generic;
-using System.Reflection;
+
 using UnityEngine;
 using UnityEngine.UIElements;
-using UnityEditor.UIElements;
-using UnityEditor.VFX;
 using UnityEditor.VFX.UIElements;
-using Object = UnityEngine.Object;
+
 using Type = System.Type;
 using EnumField = UnityEditor.VFX.UIElements.VFXEnumField;
-using VFXVector2Field = UnityEditor.VFX.UI.VFXVector2Field;
-using VFXVector4Field = UnityEditor.VFX.UI.VFXVector4Field;
 
 namespace UnityEditor.VFX
 {
@@ -19,12 +14,17 @@ namespace UnityEditor.VFX
         string[] GetAvailableString();
     }
 
+    interface IVFXModelStringProvider
+    {
+        string[] GetAvailableString(VFXModel model);
+    }
+
     [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
     class StringProviderAttribute : PropertyAttribute
     {
         public StringProviderAttribute(Type providerType)
         {
-            if (!typeof(IStringProvider).IsAssignableFrom(providerType))
+            if (!typeof(IStringProvider).IsAssignableFrom(providerType) && !typeof(IVFXModelStringProvider).IsAssignableFrom(providerType))
                 throw new InvalidCastException("StringProviderAttribute excepts a type which implements interface IStringProvider : " + providerType);
             this.providerType = providerType;
         }
@@ -66,7 +66,7 @@ namespace UnityEditor.VFX.UI
             return 140;
         }
 
-        public static Func<string[]> FindStringProvider(object[] customAttributes)
+        public static Func<string[]> FindStringProvider(VFXModel model, object[] customAttributes)
         {
             if (customAttributes != null)
             {
@@ -75,8 +75,14 @@ namespace UnityEditor.VFX.UI
                     if (attribute is StringProviderAttribute)
                     {
                         var instance = Activator.CreateInstance((attribute as StringProviderAttribute).providerType);
-                        var stringProvider = instance as IStringProvider;
-                        return () => stringProvider.GetAvailableString();
+                        if (instance is IStringProvider stringProvider)
+                        {
+                            return () => stringProvider.GetAvailableString();
+                        }
+                        else if (model != null && instance is IVFXModelStringProvider modelStringProvider)
+                        {
+                            return () => modelStringProvider.GetAvailableString(model);
+                        }
                     }
                 }
             }
@@ -122,16 +128,18 @@ namespace UnityEditor.VFX.UI
 
         public override ValueControl<string> CreateField()
         {
-            var stringProvider = FindStringProvider(m_Provider.customAttributes);
+            var stringProvider = FindStringProvider(null, m_Provider.customAttributes);
             var pushButtonProvider = FindPushButtonBehavior(m_Provider.customAttributes);
+            var label = new Label(ObjectNames.NicifyVariableName(provider.name));
+
             if (stringProvider != null)
             {
-                m_StringFieldProvider = new VFXStringFieldProvider(m_Label, stringProvider);
+                m_StringFieldProvider = new VFXStringFieldProvider(label, stringProvider);
                 return m_StringFieldProvider;
             }
             else if (pushButtonProvider.action != null)
             {
-                m_StringFieldPushButton = new VFXStringFieldPushButton(m_Label, pushButtonProvider.action, pushButtonProvider.buttonName);
+                m_StringFieldPushButton = new VFXStringFieldPushButton(label, pushButtonProvider.action, pushButtonProvider.buttonName);
                 if (isDelayed)
                 {
                     VisualElement input = m_StringFieldPushButton.textfield.Q("unity-text-input");
@@ -142,7 +150,7 @@ namespace UnityEditor.VFX.UI
             }
             else
             {
-                m_StringField = new VFXStringField(m_Label);
+                m_StringField = new VFXStringField(label);
                 if (isDelayed)
                 {
                     VisualElement input = m_StringField.textfield.Q("unity-text-input");
@@ -221,16 +229,16 @@ namespace UnityEditor.VFX.UI
         {
             if (!base.IsCompatible(provider)) return false;
 
-            var stringProvider = FindStringProvider(m_Provider.customAttributes);
+            var stringProvider = FindStringProvider(null, m_Provider.customAttributes);
             var pushButtonInfo = FindPushButtonBehavior(m_Provider.customAttributes);
 
             if (stringProvider != null)
             {
-                return m_Field is VFXStringFieldProvider && (m_Field as VFXStringFieldProvider).stringProvider == stringProvider;
+                return m_Field is VFXStringFieldProvider vfxStringFieldProvider && vfxStringFieldProvider.stringProvider == stringProvider;
             }
             else if (pushButtonInfo.action != null)
             {
-                return m_Field is VFXStringFieldPushButton && (m_Field as VFXStringFieldPushButton).pushButtonProvider == pushButtonInfo.action;
+                return m_Field is VFXStringFieldPushButton vfxStringFieldPushButton && vfxStringFieldPushButton.pushButtonProvider == pushButtonInfo.action;
             }
 
             return !(m_Field is VFXStringFieldProvider) && !(m_Field is VFXStringFieldPushButton);

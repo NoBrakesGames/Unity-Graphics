@@ -1,9 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Linq;
-
-using UnityEngine.Profiling;
+using Unity.Profiling;
 using UnityEngine.VFX;
 
 namespace UnityEditor.VFX
@@ -16,7 +14,8 @@ namespace UnityEditor.VFX
         CPUEvaluation = 1 << 1,
         ConstantFolding = 1 << 2,
         GPUDataTransformation = 1 << 3,
-        PatchReadToEventAttribute = 1 << 4
+        PatchReadToEventAttribute = 1 << 4,
+        CollectPerContextData = 1 << 5
     }
 
     abstract partial class VFXExpression
@@ -33,18 +32,28 @@ namespace UnityEditor.VFX
                 return (m_ReductionOptions & options) != 0;
             }
 
-            public Context(VFXExpressionContextOption reductionOption, List<VFXLayoutElementDesc> globalEventAttibutes = null)
+            public Context(VFXExpressionContextOption reductionOption, List<VFXLayoutElementDesc> globalEventAttributes = null)
             {
                 m_ReductionOptions = reductionOption;
-                m_GlobalEventAttribute = globalEventAttibutes;
+                m_GlobalEventAttribute = globalEventAttributes;
 
                 if (Has(VFXExpressionContextOption.CPUEvaluation) && Has(VFXExpressionContextOption.GPUDataTransformation))
                     throw new ArgumentException("Invalid reduction options");
             }
 
-            public void RegisterExpression(VFXExpression expression)
+            public void RegisterExpression(VFXExpression expression, VFXContext sourceContext = null)
             {
-                m_EndExpressions.Add(expression);
+                if (!m_EndExpressions.TryGetValue(expression, out var contexts))
+                {
+                    contexts = new();
+                    m_EndExpressions.Add(expression, contexts);
+                }
+
+                if (sourceContext != null)
+                {
+                    if (!contexts.Add(sourceContext))
+                        throw new InvalidOperationException("Trying to add twice the same context for the same expression.");
+                }
             }
 
             public void UnregisterExpression(VFXExpression expression)
@@ -53,26 +62,163 @@ namespace UnityEditor.VFX
                 m_EndExpressions.Remove(expression);
             }
 
+            class CollectedData
+            {
+                public readonly HashSet<VFXExpression> processedExpressions = new();
+                public readonly HashSet<VFXExpression> markedExpressions = new();
+                public readonly Dictionary<IHLSLCodeHolder, HashSet<VFXExpression>> childrenExpressionHLSLCodeHolder = new();
+                public readonly Dictionary<VFXExpressionBufferWithType, HashSet<VFXExpression>> childrenExpressionBufferWithType = new();
+            }
+
+            private void CollectPerContextDataRecursive(VFXExpression node, Stack<VFXExpression> currentChildren, CollectedData data)
+            {
+                if (data.processedExpressions.Contains(node))
+                {
+                    if (data.markedExpressions.Contains(node))
+                    {
+                        foreach (var hlslCodeHolderCollection in data.childrenExpressionHLSLCodeHolder)
+                        {
+                            if (hlslCodeHolderCollection.Value.Contains(node))
+                            {
+                                foreach (var child in currentChildren)
+                                {
+                                    data.markedExpressions.Add(child);
+                                    hlslCodeHolderCollection.Value.Add(child);
+                                }
+                            }
+                        }
+
+                        foreach (var expressionBufferWithTypeCollection in data.childrenExpressionBufferWithType)
+                        {
+                            if (expressionBufferWithTypeCollection.Value.Contains(node))
+                            {
+                                foreach (var child in currentChildren)
+                                {
+                                    data.markedExpressions.Add(child);
+                                    expressionBufferWithTypeCollection.Value.Add(child);
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                currentChildren.Push(node);
+                if (node is IHLSLCodeHolder hlslCodeHolder)
+                {
+                    if (!data.childrenExpressionHLSLCodeHolder.TryGetValue(hlslCodeHolder, out var childCollection))
+                    {
+                        childCollection = new();
+                        data.childrenExpressionHLSLCodeHolder.Add(hlslCodeHolder, childCollection);
+                    }
+
+                    foreach (var child in currentChildren)
+                    {
+                        data.markedExpressions.Add(child);
+                        childCollection.Add(child);
+                    }
+                }
+
+                if (node is VFXExpressionBufferWithType expressionWithType)
+                {
+                    if (!data.childrenExpressionBufferWithType.TryGetValue(expressionWithType, out var childCollection))
+                    {
+                        childCollection = new();
+                        data.childrenExpressionBufferWithType.Add(expressionWithType, childCollection);
+                    }
+
+                    foreach (var child in currentChildren)
+                    {
+                        data.markedExpressions.Add(child);
+                        childCollection.Add(child);
+                    }
+                }
+
+                foreach (var parent in node.parents)
+                    CollectPerContextDataRecursive(parent, currentChildren, data);
+
+                data.processedExpressions.Add(node);
+                currentChildren.Pop();
+            }
+
+            private void CollectPerContextData()
+            {
+                var collectedDataCache = new CollectedData();
+                var childrenStackCache = new Stack<VFXExpression>();
+                foreach (var exp in m_EndExpressions)
+                {
+                    if (childrenStackCache.Count > 0)
+                        throw new InvalidOperationException("Unexpected Children Stack after dependency collection.");
+                    CollectPerContextDataRecursive(exp.Key, childrenStackCache, collectedDataCache);
+
+                    if (collectedDataCache.markedExpressions.Contains(exp.Key))
+                    {
+                        foreach (var hlslCodeHolderCollection in collectedDataCache.childrenExpressionHLSLCodeHolder)
+                        {
+                            if (hlslCodeHolderCollection.Value.Contains(exp.Key))
+                            {
+                                foreach (var context in exp.Value)
+                                {
+                                    if (!m_HLSLCollectionPerContext.TryGetValue(context, out var codeHolders))
+                                    {
+                                        codeHolders = new();
+                                        m_HLSLCollectionPerContext.Add(context, codeHolders);
+                                    }
+                                    codeHolders.Add(hlslCodeHolderCollection.Key);
+                                }
+                            }
+                        }
+
+                        foreach (var expressionBufferWithTypeCollection in collectedDataCache.childrenExpressionBufferWithType)
+                        {
+                            if (expressionBufferWithTypeCollection.Value.Contains(exp.Key))
+                            {
+                                foreach (var context in exp.Value)
+                                {
+                                    if (!m_GraphicsBufferTypeUsagePerContext.TryGetValue(context, out var usages))
+                                    {
+                                        usages = new();
+                                        m_GraphicsBufferTypeUsagePerContext.Add(context, usages);
+                                    }
+
+                                    var usage = expressionBufferWithTypeCollection.Key.usage;
+                                    var buffer = expressionBufferWithTypeCollection.Key.parents[0];
+                                    if (!usages.TryAdd(buffer, usage) && usages[buffer] != usage)
+                                    {
+                                        throw new InvalidOperationException($"Diverging type usage for GraphicsBuffer : {buffer}, {usage}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            static readonly ProfilerMarker s_CollectPerContextData = new ProfilerMarker("VFXEditor.CollectPerContextData");
+            static readonly ProfilerMarker s_CompileExpressionContext = new ProfilerMarker("VFXEditor.CompileExpressionContext");
+
             public void Compile()
             {
-                Profiler.BeginSample("VFXEditor.CompileExpressionContext");
+                if (Has(VFXExpressionContextOption.CollectPerContextData))
+                {
+                    using (s_CollectPerContextData.Auto())
+                    {
+                        CollectPerContextData();
+                    }
+                }
 
-                try
+                using (s_CompileExpressionContext.Auto())
                 {
                     foreach (var exp in m_EndExpressions)
-                        Compile(exp);
+                        Compile(exp.Key);
 
                     if (HasAny(VFXExpressionContextOption.GPUDataTransformation | VFXExpressionContextOption.PatchReadToEventAttribute))
                     {
                         var gpuTransformation = Has(VFXExpressionContextOption.GPUDataTransformation);
                         var spawnEventPath = Has(VFXExpressionContextOption.PatchReadToEventAttribute);
                         foreach (var exp in m_EndExpressions)
-                            m_ReducedCache[exp] = PatchVFXExpression(GetReduced(exp), null /* no source in end expression */, gpuTransformation, spawnEventPath, m_GlobalEventAttribute);
+                            m_ReducedCache[exp.Key] = PatchVFXExpression(GetReduced(exp.Key), null /* no source in end expression */, gpuTransformation, spawnEventPath, m_GlobalEventAttribute);
                     }
-                }
-                finally
-                {
-                    Profiler.EndSample();
                 }
             }
 
@@ -103,7 +249,13 @@ namespace UnityEditor.VFX
                 if (exp.Is(Flags.Value) && ((exp.m_Flags & (flag | Flags.InvalidOnCPU)) != flag))
                     return false;
 
-                return reducedParents.All(e => (e.m_Flags & (flag | Flags.InvalidOnCPU)) == flag);
+                foreach (var parent in reducedParents)
+                {
+                    if ((parent.m_Flags & (flag | Flags.InvalidOnCPU)) != flag)
+                        return false;
+                }
+
+                return true;
             }
 
             private VFXExpression PatchVFXExpression(VFXExpression input, VFXExpression targetExpression, bool insertGPUTransformation, bool patchReadAttributeForSpawn, IEnumerable<VFXLayoutElementDesc> globalEventAttribute)
@@ -163,51 +315,35 @@ namespace UnityEditor.VFX
                             } //else sourceExpression is null, we can't determine usage but it's possible if value is declared but not used.
                             break;
 
-                        case VFXValueType.Buffer:
-                        {
-                            //Save expression usage for later HLSL shader generation
-                            if (targetExpression is VFXExpressionSampleBuffer)
-                            {
-                                var sampledType = (targetExpression as VFXExpressionSampleBuffer).GetSampledType();
-                                if (!m_GraphicsBufferUsageType.TryGetValue(input, out var registeredType))
-                                {
-                                    m_GraphicsBufferUsageType.Add(input, sampledType);
-                                }
-                                else if (registeredType != sampledType)
-                                {
-                                    throw new InvalidOperationException(string.Format("Diverging type usage for GraphicsBuffer : {0}, {1}", registeredType, sampledType));
-                                }
-                            }
-                        }
-                        break;
-
                         default:
                             //Nothing to patch on this type
                             break;
                     }
-
-                    if (input.valueType == VFXValueType.Buffer && targetExpression is VFXExpressionSampleBuffer)
-                    {
-                        if (!m_GraphicsBufferUsageType.ContainsKey(input))
-                        {
-                            m_GraphicsBufferUsageType.Add(input, (targetExpression as VFXExpressionSampleBuffer).GetSampledType());
-                        }
-                    }
                 }
 
-                if (patchReadAttributeForSpawn && input is VFXAttributeExpression)
+                if (input.valueType == VFXValueType.Buffer && input is VFXExpressionBufferWithType bufferWithType)
                 {
-                    var attribute = input as VFXAttributeExpression;
+                    input = input.parents[0]; //Explicitly skip NoOp expression
+                }
+
+                if (patchReadAttributeForSpawn && input is VFXAttributeExpression attribute)
+                {
                     if (attribute.attributeLocation == VFXAttributeLocation.Current)
                     {
                         if (globalEventAttribute == null)
                             throw new InvalidOperationException("m_GlobalEventAttribute is null");
 
-                        var layoutDesc = globalEventAttribute.FirstOrDefault(o => o.name == attribute.attributeName);
-                        if (layoutDesc.name != attribute.attributeName)
-                            throw new InvalidOperationException("Unable to find " + attribute.attributeName + " in globalEventAttribute");
+                        foreach (var layoutDesc in globalEventAttribute)
+                        {
+                            if (layoutDesc.name == attribute.attributeName)
+                            {
+                                input = new VFXReadEventAttributeExpression(attribute.attribute, layoutDesc.offset.element);
+                                break;
+                            }
+                        }
 
-                        input = new VFXReadEventAttributeExpression(attribute.attribute, layoutDesc.offset.element);
+                        if (input is not VFXReadEventAttributeExpression)
+                            throw new InvalidOperationException("Unable to find " + attribute.attributeName + " in globalEventAttribute");
                     }
                 }
 
@@ -222,21 +358,22 @@ namespace UnityEditor.VFX
                 VFXExpression reduced;
                 if (!m_ReducedCache.TryGetValue(expression, out reduced))
                 {
-                    var parents = expression.parents.Select(e =>
+                    var parents = new VFXExpression[expression.parents.Length];
+                    for (var i = 0; i < expression.parents.Length; i++)
                     {
-                        var parent = Compile(e);
+                        var parent = Compile(expression.parents[i]);
                         bool currentGPUTransformation = gpuTransformation
                             && expression.IsAny(VFXExpression.Flags.NotCompilableOnCPU)
                             && !parent.IsAny(VFXExpression.Flags.NotCompilableOnCPU);
                         parent = PatchVFXExpression(parent, expression, currentGPUTransformation, patchReadAttributeForSpawn, m_GlobalEventAttribute);
-                        return parent;
-                    }).ToArray();
+                        parents[i] = parent;
+                    }
 
                     if (ShouldEvaluate(expression, parents))
                     {
                         reduced = expression.Evaluate(parents);
                     }
-                    else if (HasAny(VFXExpressionContextOption.Reduction | VFXExpressionContextOption.CPUEvaluation | VFXExpressionContextOption.ConstantFolding) || !parents.SequenceEqual(expression.parents))
+                    else if (HasAny(VFXExpressionContextOption.Reduction | VFXExpressionContextOption.CPUEvaluation | VFXExpressionContextOption.ConstantFolding) || !StructuralComparisons.StructuralEqualityComparer.Equals(parents, expression.parents))
                     {
                         reduced = expression.Reduce(parents);
                     }
@@ -252,8 +389,9 @@ namespace UnityEditor.VFX
 
             public void Invalidate()
             {
+                m_HLSLCollectionPerContext.Clear();
                 m_ReducedCache.Clear();
-                m_GraphicsBufferUsageType.Clear();
+                m_GraphicsBufferTypeUsagePerContext.Clear();
             }
 
             public void Invalidate(VFXExpression expression)
@@ -282,21 +420,24 @@ namespace UnityEditor.VFX
             {
                 var reduced = new HashSet<VFXExpression>();
                 foreach (var exp in m_EndExpressions)
-                    if (m_ReducedCache.ContainsKey(exp))
-                        AddReducedGraph(reduced, m_ReducedCache[exp]);
+                    if (m_ReducedCache.ContainsKey(exp.Key))
+                        AddReducedGraph(reduced, m_ReducedCache[exp.Key]);
                 return reduced;
             }
 
-            public ReadOnlyCollection<VFXExpression> RegisteredExpressions { get { return m_EndExpressions.ToList().AsReadOnly(); } }
+            public IEnumerable<VFXExpression> RegisteredExpressions => m_EndExpressions.Keys;
 
-            public IEnumerable<KeyValuePair<VFXExpression, Type>> GraphicsBufferUsageType { get { return m_GraphicsBufferUsageType; } }
+            public Dictionary<VFXContext, Dictionary<VFXExpression, BufferUsage>> GraphicsBufferTypeUsagePerContext => m_GraphicsBufferTypeUsagePerContext;
 
-            private Dictionary<VFXExpression, VFXExpression> m_ReducedCache = new Dictionary<VFXExpression, VFXExpression>();
-            private HashSet<VFXExpression> m_EndExpressions = new HashSet<VFXExpression>();
-            private Dictionary<VFXExpression, Type> m_GraphicsBufferUsageType = new Dictionary<VFXExpression, Type>();
+            public Dictionary<VFXContext, List<IHLSLCodeHolder>> hlslCodeHoldersPerContext => m_HLSLCollectionPerContext;
+
+            private Dictionary<VFXExpression, VFXExpression> m_ReducedCache = new ();
+            private Dictionary<VFXExpression, HashSet<VFXContext>> m_EndExpressions = new ();
+            private Dictionary<VFXContext, Dictionary<VFXExpression, BufferUsage>> m_GraphicsBufferTypeUsagePerContext = new ();
 
             private IEnumerable<VFXLayoutElementDesc> m_GlobalEventAttribute;
             private VFXExpressionContextOption m_ReductionOptions;
+            private readonly Dictionary<VFXContext, List<IHLSLCodeHolder>> m_HLSLCollectionPerContext = new ();
         }
     }
 }

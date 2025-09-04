@@ -1,6 +1,6 @@
 #if UNITY_EDITOR
 #define ENABLE_PICKING
-//#define ENABLE_ERROR_LOADING_MATERIALS
+#define ENABLE_ERROR_LOADING_MATERIALS
 #endif
 
 using System;
@@ -77,7 +77,7 @@ public struct DrawKey : IEquatable<DrawKey>, IComparable<DrawKey>
 
     public bool isTransparent { get { return transparentInstanceID != 0; } }
 
-    public BatchDrawCommandFlags drawCommandFlags { get { 
+    public BatchDrawCommandFlags drawCommandFlags { get {
         var flags = BatchDrawCommandFlags.None;
         if (isTransparent)
             flags |= BatchDrawCommandFlags.HasSortingPosition;
@@ -121,10 +121,10 @@ public unsafe class RenderBRG : MonoBehaviour
 
     private bool m_initialized;
 
-    private NativeHashMap<RangeKey, int> m_rangeHash;
+    private NativeParallelHashMap<RangeKey, int> m_rangeHash;
     private NativeList<DrawRange> m_drawRanges;
 
-    private NativeHashMap<DrawKey, int> m_batchHash;
+    private NativeParallelHashMap<DrawKey, int> m_batchHash;
     private NativeList<DrawBatch> m_drawBatches;
 
     private NativeList<DrawInstance> m_instances;
@@ -138,6 +138,9 @@ public unsafe class RenderBRG : MonoBehaviour
     private BatchBufferTarget m_brgBufferTarget;
     private uint m_brgBatchWindowSize;
     private bool UseConstantBuffer => BatchRendererGroup.BufferTarget == BatchBufferTarget.ConstantBuffer;
+
+    public bool useBatchLayer = false;
+    public int batchLayer = 0;
 
     public static T* Malloc<T>(int count) where T : unmanaged
     {
@@ -228,6 +231,7 @@ public unsafe class RenderBRG : MonoBehaviour
         [ReadOnly]
         public NativeArray<int> pickingIDs;
         public bool isPickingCulling;
+        public int batchLayer;
 
         public void Execute()
         {
@@ -359,13 +363,15 @@ public unsafe class RenderBRG : MonoBehaviour
                                 {
                                     rendererPriority = drawRanges[activeRange].key.rendererPriority,
                                     renderingLayerMask = 1,
-                                    layer = 0,
+                                    layer = 1,
+                                    batchLayer = (byte)batchLayer,
                                     motionMode = MotionVectorGenerationMode.Camera,
                                     shadowCastingMode = drawRanges[activeRange].key.shadows,
                                     receiveShadows = true,
                                     staticShadowCaster = false,
                                     allDepthSorted = false,
                                 },
+                                drawCommandsType = BatchDrawCommandType.Direct,
                             };
                             outRange++;
                         }
@@ -491,7 +497,8 @@ public unsafe class RenderBRG : MonoBehaviour
                 new BatchFilterSettings
                 {
                     renderingLayerMask = 1,
-                    layer = 0,
+                    layer = 1,
+                    batchLayer = (byte)batchLayer,
                     motionMode = MotionVectorGenerationMode.Camera,
                     shadowCastingMode = ShadowCastingMode.Off,
                     receiveShadows = true,
@@ -500,6 +507,7 @@ public unsafe class RenderBRG : MonoBehaviour
                 };
             draws.drawRanges[0].drawCommandsBegin = 0;
             draws.drawRanges[0].drawCommandsCount = (uint)draws.drawCommandCount;
+            draws.drawRanges[0].drawCommandsType = BatchDrawCommandType.Direct;
 
             return draws;
         }
@@ -535,12 +543,12 @@ public unsafe class RenderBRG : MonoBehaviour
 
         // If splits are involved, defer allocation until we know exactly how many we will need
         if (splitCounts.Length > 1)
-        { 
+        {
             drawCommands.drawCommands = null;
             drawCommands.instanceSortingPositions = null;
         }
         else
-        { 
+        {
             drawCommands.drawCommands = Malloc<BatchDrawCommand>(maxDrawCommands);
             drawCommands.instanceSortingPositions = Malloc<float>(3 * maxDrawCommands);
         }
@@ -580,6 +588,7 @@ public unsafe class RenderBRG : MonoBehaviour
             drawCommands = cullingOutput.drawCommands,
             isPickingCulling = needInstanceIDs,
             pickingIDs = m_pickingIDs,
+            batchLayer = useBatchLayer ? batchLayer : 0
         };
 
         var jobHandleCulling = cullingJob.Schedule(visibilityLength, 8);
@@ -799,8 +808,8 @@ public unsafe class RenderBRG : MonoBehaviour
 
         m_renderers = new NativeArray<DrawRenderer>(renderers.Length, Allocator.Persistent);
         m_pickingIDs = new NativeArray<int>(numPickingIDs, Allocator.Persistent);
-        m_batchHash = new NativeHashMap<DrawKey, int>(1024, Allocator.Persistent);
-        m_rangeHash = new NativeHashMap<RangeKey, int>(1024, Allocator.Persistent);
+        m_batchHash = new NativeParallelHashMap<DrawKey, int>(1024, Allocator.Persistent);
+        m_rangeHash = new NativeParallelHashMap<RangeKey, int>(1024, Allocator.Persistent);
         m_drawBatches = new NativeList<DrawBatch>(Allocator.Persistent);
         m_drawRanges = new NativeList<DrawRange>(Allocator.Persistent);
 
@@ -819,7 +828,7 @@ public unsafe class RenderBRG : MonoBehaviour
             sizeOfFloat3x4);
 
         // Bin renderers first so we know exactly how many instances we will need.
-        var renderersByKey = new NativeMultiHashMap<DrawKey, int>(1024, Allocator.Temp);
+        var renderersByKey = new NativeParallelMultiHashMap<DrawKey, int>(1024, Allocator.Temp);
         int totalInstances = BinRenderers(renderers, renderersByKey);
 
         // RawBuffer mode can handle unlimited instances per batch, but
@@ -968,7 +977,7 @@ public unsafe class RenderBRG : MonoBehaviour
 
     private void CreateBatchesForRenderers(
         MeshRenderer[] renderers,
-        NativeMultiHashMap<DrawKey, int> renderersByKey,
+        NativeParallelMultiHashMap<DrawKey, int> renderersByKey,
         BRGBatchAllocator instanceAllocator,
         BRGBatchAllocator.BatchAllocation batchAllocation,
         NativeArray<Vector4> vectorBuffer)
@@ -1068,7 +1077,7 @@ public unsafe class RenderBRG : MonoBehaviour
         internalDrawIndices[drawBatchIndex]++;
     }
 
-    private int BinRenderers(MeshRenderer[] renderers, NativeMultiHashMap<DrawKey, int> renderersByKey)
+    private int BinRenderers(MeshRenderer[] renderers, NativeParallelMultiHashMap<DrawKey, int> renderersByKey)
     {
         int totalInstances = 0;
 
@@ -1114,7 +1123,7 @@ public unsafe class RenderBRG : MonoBehaviour
             {
                 var material = m_BatchRendererGroup.RegisterMaterial(sharedMaterials[matIndex]);
 
-                bool isTransparent = sharedMaterials[matIndex].renderQueue > (int)RenderQueue.GeometryLast;
+                bool isTransparent = sharedMaterials[matIndex]?.renderQueue > (int)RenderQueue.GeometryLast;
 
                 var key = new DrawKey
                 {

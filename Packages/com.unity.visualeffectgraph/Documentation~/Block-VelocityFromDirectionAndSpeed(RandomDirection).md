@@ -1,12 +1,15 @@
 # Velocity from Direction & Speed (Random Direction)
 
+> [!IMPORTANT]
+> This feature is experimental. To use this feature, open the **Preferences** window, go to the **Visual Effects** tab, and enable **Experimental Operators/Blocks**.
+
 Menu Path : **Velocity > [Set/Add] Velocity from Direction & Speed (Random Direction)**
 
 The **Velocity from Direction And Speed (Random Direction)** Block calculates a velocity for the particle based on a blend ratio between a random direction (per-particle), and the direction attribute.
 
 The Block then scales the final direction vector by a speed, and composes it with the velocity attribute.
 
-![](Images/Block-VelocityFromDirectionAndSpeed(RandomDirection)Example.gif)
+![Velocity from Direction And Speed (Random Direction) Block sample.](Images/Block-VelocityFromDirectionAndSpeed(RandomDirection)Example.gif)
 
 ## Block compatibility
 

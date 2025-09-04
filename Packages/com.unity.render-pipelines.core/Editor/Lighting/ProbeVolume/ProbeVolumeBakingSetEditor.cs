@@ -1,5 +1,5 @@
 using System;
-using System.Linq;
+using System.Reflection;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -7,6 +7,28 @@ using UnityEngine.SceneManagement;
 
 namespace UnityEditor.Rendering
 {
+    [CustomPropertyDrawer(typeof(LogarithmicAttribute))]
+    class LogarithmicDrawer : PropertyDrawer
+    {
+        // Draw the property inside the given rect
+        public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
+        {
+            // First get the attribute since it contains the range for the slider
+            var range = attribute as LogarithmicAttribute;
+
+            EditorGUI.showMixedValue = property.hasMultipleDifferentValues;
+            EditorGUI.BeginProperty(position, label, property);
+
+            EditorGUI.BeginChangeCheck();
+            int newValue = EditorGUI.LogarithmicIntSlider(position, label, property.intValue, range.min, range.max, 2, 1, 1 << 30);
+            if (EditorGUI.EndChangeCheck())
+                property.intValue = Mathf.ClosestPowerOfTwo(newValue);
+
+            EditorGUI.EndProperty();
+            EditorGUI.showMixedValue = false;
+        }
+    }
+
     [CanEditMultipleObjects]
     [CustomEditor(typeof(ProbeVolumeBakingSet))]
     internal class ProbeVolumeBakingSetEditor : Editor
@@ -16,38 +38,58 @@ namespace UnityEditor.Rendering
         SerializedProperty m_MinRendererVolumeSize;
         SerializedProperty m_RenderersLayerMask;
         SerializedProperty m_FreezePlacement;
+        SerializedProperty m_ProbeOffset;
         SerializedProperty m_ProbeVolumeBakingSettings;
         SerializedProperty m_LightingScenarios;
+
+        SerializedProperty m_SkyOcclusion;
+        SerializedProperty m_SkyOcclusionBakingSamples;
+        SerializedProperty m_SkyOcclusionBakingBounces;
+        SerializedProperty m_SkyOcclusionAverageAlbedo;
+        SerializedProperty m_SkyOcclusionShadingDirection;
+
+        SerializedProperty m_RenderingLayers;
+        SerializedProperty m_RenderingLayerMasks;
+
         ProbeVolumeBakingSet bakingSet => target as ProbeVolumeBakingSet;
 
         static class Styles
         {
             public static readonly GUIContent scenariosTitle = new GUIContent("Lighting Scenarios");
             public static readonly GUIContent placementTitle = new GUIContent("Probe Placement");
-            public static readonly GUIContent settingsTitle = new GUIContent("Probe Invalidity Settings");
+            public static readonly GUIContent invaliditySettingsTitle = new GUIContent("Probe Invalidity Settings");
+            public static readonly GUIContent skyOcclusionSettingsTitle = new GUIContent("Sky Occlusion Settings");
+            public static readonly GUIContent renderingLayersTitle = new GUIContent("Rendering Layers");
 
             public static readonly GUIContent keepSamePlacement = new GUIContent("Probe Positions", "If set to Don't Recalculate, probe positions are not recalculated when baking. Allows baking multiple Scenarios that include small differences in Scene geometry.");
             public static readonly string[] placementOptions = new string[] { "Recalculate", "Don't Recalculate" };
 
             // Scenario section
-            public static readonly GUIContent invalidLabel = new GUIContent("", CoreEditorStyles.GetMessageTypeIcon(MessageType.Warning), "Lighting data for this scenario is invalid.\nThis can happen when probe positions have changed since lighting was last generated.");
             public static readonly GUIContent emptyLabel = new GUIContent("", CoreEditorStyles.GetMessageTypeIcon(MessageType.Info), "This scenario doesn't have any baked data. Set it as active scenario and click generate lighting to bake the lighting data.");
-            public static readonly GUIContent notLoadedLabel = new GUIContent("", CoreEditorStyles.GetMessageTypeIcon(MessageType.Info), "Some scene(s) in the Baking Set are not currently loaded in the Hierarchy. Scenario status cannot be displayed");
-            public static readonly GUIContent[] scenariosStatusLabel = new GUIContent[] { GUIContent.none, notLoadedLabel, invalidLabel, emptyLabel };
 
             // Probe Placement section
             public static readonly string msgProbeFreeze = "Some scene(s) in this Baking Set are not currently loaded in the Hierarchy. Set Probe Positions to Don't Recalculate to not break compatibility with already baked scenarios.";
-            public static readonly GUIContent maxDistanceBetweenProbes = new GUIContent("Max Probe Spacing", "Maximum distance between probes, in meters. Determines the number of bricks in a streamable unit.");
+            public static readonly GUIContent probeOffset = new GUIContent("Probe Offset", "Offset on world origin used during baking. Can be used to have cells on positions that are not multiples of the probe spacing.");
+            public static readonly GUIContent maxDistanceBetweenProbes = new GUIContent("Max Probe Spacing", "Maximum distance between probes, in meters. Determines the number of Bricks in a streamable unit.");
             public static readonly GUIContent minDistanceBetweenProbes = new GUIContent("Min Probe Spacing", "Minimum distance between probes, in meters.");
-            public static readonly string simplificationLevelsHighWarning = "High simplification levels have a big memory overhead, they are not recommended except for testing purposes.";
+            public static readonly string simplificationLevelsHighWarning = " Using this many brick sizes will result in high memory usage and can cause instabilities.";
             public static readonly GUIContent indexDimensions = new GUIContent("Index Dimensions", "The dimensions of the index buffer.");
             public static readonly GUIContent minRendererVolumeSize = new GUIContent("Min Renderer Size", "The smallest Renderer size to consider when placing probes.");
             public static readonly GUIContent renderersLayerMask = new GUIContent("Layer Mask", "Specify Layers to use when generating probe positions.");
             public static readonly GUIContent rendererFilterSettings = new GUIContent("Renderer Filter Settings");
 
-            // Probe Settings section
+            public static readonly GUIContent skyOcclusion = new GUIContent("Sky Occlusion", "Choose whether to generate Sky Occlusion data for probes within this Probe Volume. When enabled, Scenes can be dynamically re-lit when the sky is changed. This feature increases memory usage.");
+            public static readonly GUIContent skyOcclusionBakingSamples = new GUIContent("Samples", "The number of samples used to calculate the influence of the sky when baking probes. Increasing this value improves the accuracy of Sky Occlusion data, but increases the time required to generate baked lighting.");
+            public static readonly GUIContent skyOcclusionBakingBounces = new GUIContent("Bounces", "The maximum number of bounces allowed for each Sky Occlusion sample. Increasing this value particularly improves the accuracy of occlusion data in areas of the Scene with complicated routes to the sky.");
+            public static readonly GUIContent skyOcclusionAverageAlbedo = new GUIContent("Albedo Override", "Sky Occlusion does not consider the albedo of materials in the Scene when calculating bounced light from the sky. Albedo Override determines the value used instead. Lower values darken and higher values will brighten the Scene.");
+            public static readonly GUIContent skyOcclusionShadingDirection = new GUIContent("Sky Direction", "For each probe, additionally bake the most suitable direction to use for sampling the Scene’s Ambient Probe. When disabled, surface normals are used instead. Sky Direction improves visual quality at the expense of memory.");
+            public static readonly GUIContent cpuLightmapperNotSupportedWarning = new GUIContent("Sky Occlusion is not supported by the current lightmapper. Ensure that Progressive GPU is selected in Lightmapper Settings.");
+
+            // Probe Invalidity section
             public static readonly GUIContent resetDilation = new GUIContent("Reset Dilation Settings");
             public static readonly GUIContent resetVirtualOffset = new GUIContent("Reset Virtual Offset Settings");
+            public static readonly GUIContent renderingLayerMasks = new GUIContent("Rendering Layer Masks", "When enabled, geometry in a Rendering Layer will only receive lighting from probes which see Rendering Layers in the same Rendering Layer Mask. This can be used to prevent leaking across boundaries.\nGeometry not belonging to a Rendering Layer Mask will continue to sample all probes. Requires Leak Reduction Mode to be enabled.");
+            public static readonly string maskTooltip = "The Rendering Layers for this mask.";
         }
 
         static readonly string s_RenameScenarioUndoName = "Rename Baking Set Scenario";
@@ -59,22 +101,25 @@ namespace UnityEditor.Rendering
             m_MinRendererVolumeSize = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.minRendererVolumeSize));
             m_RenderersLayerMask = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.renderersLayerMask));
             m_FreezePlacement = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.freezePlacement));
+            m_ProbeOffset = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.probeOffset));
             m_ProbeVolumeBakingSettings = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.settings));
-            m_LightingScenarios = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.lightingScenarios));
+            m_LightingScenarios = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.m_LightingScenarios));
+			m_SkyOcclusion = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.skyOcclusion));
+            m_SkyOcclusionBakingSamples = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.skyOcclusionBakingSamples));
+            m_SkyOcclusionBakingBounces = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.skyOcclusionBakingBounces));
+            m_SkyOcclusionAverageAlbedo = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.skyOcclusionAverageAlbedo));
+            m_SkyOcclusionShadingDirection = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.skyOcclusionShadingDirection));
+            m_RenderingLayers = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.useRenderingLayers));
+            m_RenderingLayerMasks = serializedObject.FindProperty(nameof(ProbeVolumeBakingSet.renderingLayerMasks));
 
-            if (ProbeReferenceVolume.instance.enableScenarioBlending)
-            {
-                hasPendingScenarioUpdate = true;
-                Lightmapping.lightingDataCleared += UpdateScenarioStatuses;
+            if (ProbeReferenceVolume.instance.supportScenarioBlending)
                 InitializeScenarioList();
-            }
 
             Undo.undoRedoEvent += OnUndoRedo;
         }
 
         private void OnDisable()
         {
-            Lightmapping.lightingDataCleared -= UpdateScenarioStatuses;
             Undo.undoRedoEvent -= OnUndoRedo;
         }
 
@@ -84,26 +129,23 @@ namespace UnityEditor.Rendering
                 bakingSet.EnsureScenarioAssetNameConsistencyForUndo();
         }
 
-        void LightingScenariosGUI()
+        public override bool UseDefaultMargins()
         {
-            if (!ProbeReferenceVolume.instance.supportLightingScenarios)
-                return;
+            return false;
+        }
 
-            if (!ProbeVolumeLightingTab.Foldout(Styles.scenariosTitle, ProbeVolumeLightingTab.Expandable.Scenarios, true))
-                return;
+        public override void OnInspectorGUI()
+        {
+            serializedObject.Update();
 
-            EditorGUI.indentLevel++;
+            ProbePlacementGUI();
+            LightingScenariosGUI();
+            SkyOcclusionSettingsGUI();
+            ProbeInvaliditySettingsGUI();
+            RenderingLayersSettingsGUI();
 
-            if (m_Scenarios == null)
-                InitializeScenarioList();
-            if (hasPendingScenarioUpdate)
-                UpdateScenarioStatuses();
 
-            using (new EditorGUI.IndentLevelScope())
-                ProbeVolumeLightingTab.DrawListWithIndent(m_Scenarios);
-
-            EditorGUI.indentLevel--;
-            EditorGUILayout.Space();
+            serializedObject.ApplyModifiedProperties();
         }
 
         void ProbePlacementGUI()
@@ -112,7 +154,7 @@ namespace UnityEditor.Rendering
                 return;
 
             EditorGUI.indentLevel++;
-            bool canFreezePlacement = ProbeGIBaking.CanFreezePlacement();
+            bool canFreezePlacement = AdaptiveProbeVolumes.CanFreezePlacement();
             if (ProbeReferenceVolume.instance.supportLightingScenarios)
             {
                 using (new EditorGUI.DisabledGroupScope(!canFreezePlacement))
@@ -124,9 +166,9 @@ namespace UnityEditor.Rendering
                         m_FreezePlacement.boolValue = freeze;
                 }
 
-                ProbeGIBaking.isFreezingPlacement = canFreezePlacement && m_FreezePlacement.boolValue;
+                AdaptiveProbeVolumes.isFreezingPlacement = canFreezePlacement && m_FreezePlacement.boolValue;
 
-                if (canFreezePlacement && !ProbeGIBaking.isFreezingPlacement && m_LightingScenarios.arraySize > 1)
+                if (canFreezePlacement && !AdaptiveProbeVolumes.isFreezingPlacement && m_LightingScenarios.arraySize > 1)
                 {
                     foreach (var guid in bakingSet.sceneGUIDs)
                     {
@@ -143,8 +185,24 @@ namespace UnityEditor.Rendering
                 }
             }
 
-            using (new EditorGUI.DisabledScope(Lightmapping.isRunning || (canFreezePlacement && ProbeGIBaking.isFreezingPlacement)))
+            using (new EditorGUI.DisabledScope(Lightmapping.isRunning || (canFreezePlacement && AdaptiveProbeVolumes.isFreezingPlacement)))
             {
+                // Display vector3 ourselves otherwise display is messed up
+                {
+                    var rect = EditorGUILayout.GetControlRect();
+                    EditorGUI.BeginProperty(rect, Styles.probeOffset, m_ProbeOffset);
+
+                    rect = EditorGUI.PrefixLabel(rect, Styles.probeOffset);
+                    rect.xMin -= 10 * EditorGUIUtility.pixelsPerPoint;
+
+                    EditorGUI.BeginChangeCheck();
+                    var value = EditorGUI.Vector3Field(rect, GUIContent.none, m_ProbeOffset.vector3Value);
+                    if (EditorGUI.EndChangeCheck())
+                        m_ProbeOffset.vector3Value = value;
+
+                    EditorGUI.EndProperty();
+                }
+
                 EditorGUI.BeginChangeCheck();
                 EditorGUILayout.PropertyField(m_MinDistanceBetweenProbes, Styles.minDistanceBetweenProbes);
                 if (EditorGUI.EndChangeCheck())
@@ -157,13 +215,13 @@ namespace UnityEditor.Rendering
 
                 SimplificationLevelsSlider();
 
-                int levels = m_SimplificationLevels.intValue + 1;
+                int levels = ProbeVolumeBakingSet.GetMaxSubdivision(m_SimplificationLevels.intValue);
                 MessageType helpBoxType = MessageType.Info;
-                string helpBoxText = $"Probe Volumes can use a maximum of {levels} subdivision levels.";
-                if (levels == 5)
+                string helpBoxText = $"Baked Probe Volume data will contain up-to {levels} different sizes of Brick.";
+                if (levels == 6)
                 {
                     helpBoxType = MessageType.Warning;
-                    helpBoxText += "\n" + Styles.simplificationLevelsHighWarning;
+                    helpBoxText += Styles.simplificationLevelsHighWarning;
                 }
                 EditorGUILayout.HelpBox(helpBoxText, helpBoxType);
 
@@ -183,9 +241,26 @@ namespace UnityEditor.Rendering
             EditorGUILayout.Space();
         }
 
-        void ProbeSettingsGUI()
+        void LightingScenariosGUI()
         {
-            if (!ProbeVolumeLightingTab.Foldout(Styles.settingsTitle, ProbeVolumeLightingTab.Expandable.Settings, true, ResetProbeSettings))
+            if (!ProbeReferenceVolume.instance.supportLightingScenarios)
+                return;
+
+            if (!ProbeVolumeLightingTab.Foldout(Styles.scenariosTitle, ProbeVolumeLightingTab.Expandable.Scenarios, true))
+                return;
+
+            if (m_Scenarios == null)
+                InitializeScenarioList();
+
+            using (new EditorGUI.IndentLevelScope())
+                ProbeVolumeLightingTab.DrawListWithIndent(m_Scenarios);
+
+            EditorGUILayout.Space();
+        }
+
+        void ProbeInvaliditySettingsGUI()
+        {
+            if (!ProbeVolumeLightingTab.Foldout(Styles.invaliditySettingsTitle, ProbeVolumeLightingTab.Expandable.InvaliditySettings, true, ResetProbeSettings))
                 return;
 
             using (new EditorGUI.IndentLevelScope())
@@ -194,20 +269,24 @@ namespace UnityEditor.Rendering
             EditorGUILayout.Space();
         }
 
-        public override void OnInspectorGUI()
+        bool RenameEvent(Rect rect, bool active, bool focused, int index, ref int renameIndex)
         {
-            serializedObject.Update();
+            if (active)
+            {
+                if (Event.current.type == EventType.MouseDown && !rect.Contains(Event.current.mousePosition))
+                    renameIndex = -1;
+                if (Event.current.type == EventType.MouseDown && Event.current.clickCount == 2)
+                {
+                    if (rect.Contains(Event.current.mousePosition))
+                        renameIndex = index;
+                }
+                if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape)
+                    renameIndex = -1;
+            }
+            else if (renameIndex == index && !focused)
+                renameIndex = -1;
 
-            ProbePlacementGUI();
-            LightingScenariosGUI();
-            ProbeSettingsGUI();
-
-            serializedObject.ApplyModifiedProperties();
-        }
-
-        public override bool UseDefaultMargins()
-        {
-            return false;
+            return renameIndex == index;
         }
 
         void ResetProbeSettings(Rect rect)
@@ -219,6 +298,162 @@ namespace UnityEditor.Rendering
                     bakingSet.settings.virtualOffsetSettings.SetDefaults();
             }, null);
         }
+
+        #region Rendering Layer Mask
+        ReorderableList m_MaskList = null;
+        int renamingMask;
+
+        void RenderingLayersSettingsGUI()
+        {
+            if (!ProbeVolumeLightingTab.Foldout(Styles.renderingLayersTitle, ProbeVolumeLightingTab.Expandable.SettingsRenderingLayers, true))
+                return;
+
+            if (m_MaskList == null)
+                m_MaskList = CreateRenderingLayersList();
+
+            DrawRenderingLayersList();
+
+            EditorGUILayout.Space();
+        }
+
+        ReorderableList CreateRenderingLayersList()
+        {
+            return new ReorderableList(serializedObject, m_RenderingLayerMasks, true, false, true, true)
+            {
+                multiSelect = false,
+                elementHeightCallback = _ => EditorGUIUtility.singleLineHeight,
+                onCanAddCallback = _ => m_RenderingLayerMasks.arraySize < APVDefinitions.probeMaxRegionCount,
+                onAddCallback = _ =>
+                {
+                    int index = Mathf.Min(m_MaskList.index + 1, m_MaskList.count);
+                    m_RenderingLayerMasks.InsertArrayElementAtIndex(index);
+                    m_RenderingLayerMasks.GetArrayElementAtIndex(index).FindPropertyRelative("mask").intValue = 0;
+                    m_RenderingLayerMasks.GetArrayElementAtIndex(index).FindPropertyRelative("name").stringValue = "Mask " + (index + 1);
+                    m_MaskList.index = index;
+                },
+                drawElementCallback = (rect, index, active, focused) =>
+                {
+                    var mask = m_RenderingLayerMasks.GetArrayElementAtIndex(index).FindPropertyRelative("mask");
+                    var name = m_RenderingLayerMasks.GetArrayElementAtIndex(index).FindPropertyRelative("name");
+
+                    // Fixup alignment
+                    rect.yMin++;
+                    rect.yMax--;
+
+                    // Name
+                    if (RenameEvent(rect, active, focused, index, ref renamingMask))
+                    {
+                        Rect labelPosition = new Rect(rect.x, rect.y, EditorGUIUtility.labelWidth, EditorGUIUtility.singleLineHeight);
+                        Rect fieldPosition = new Rect(rect.x + EditorGUIUtility.labelWidth + 2, rect.y, rect.width - EditorGUIUtility.labelWidth - 2, rect.height);
+
+                        // Renaming
+                        EditorGUI.BeginChangeCheck();
+                        var newName = EditorGUI.DelayedTextField(labelPosition, name.stringValue, EditorStyles.boldLabel);
+                        if (EditorGUI.EndChangeCheck() && !string.IsNullOrWhiteSpace(newName))
+                        {
+                            renamingMask = -1;
+                            name.stringValue = newName;
+                        }
+
+                        EditorGUI.RenderingLayerMaskField(fieldPosition, "", mask.intValue);
+                    }
+                    else
+                        EditorGUI.RenderingLayerMaskField(rect, EditorGUIUtility.TrTextContent(name.stringValue, Styles.maskTooltip), mask);
+                }
+            };
+        }
+
+        void DrawRenderingLayersList()
+        {
+            var renderPipelineAssetType = GraphicsSettings.currentRenderPipelineAssetType;
+            var supportsLayers = GraphicsSettings.currentRenderPipelineAssetType switch
+            {
+                { Name: "HDRenderPipelineAsset" } => GetHDRPSupportsLayers(renderPipelineAssetType, GraphicsSettings.currentRenderPipeline),
+                { Name: "UniversalRenderPipelineAsset" } => GetURPSupportsLayers(renderPipelineAssetType, GraphicsSettings.currentRenderPipeline),
+                _ => true
+            };
+
+            using var indentLevelScope = new EditorGUI.IndentLevelScope();
+            EditorGUILayout.PropertyField(m_RenderingLayers, Styles.renderingLayerMasks);
+            if (!m_RenderingLayers.boolValue)
+                return;
+
+            using var scope = new EditorGUI.IndentLevelScope();
+            switch (supportsLayers)
+            {
+                case false when renderPipelineAssetType is { Name: "HDRenderPipelineAsset" }:
+                {
+                    var lightingGroup = ProbeVolumeEditor.GetHDRPLightingGroup();
+                    var k_QualitySettingsHelpBox = ProbeVolumeEditor.GetHDRPQualitySettingsHelpBox();
+                    k_QualitySettingsHelpBox.Invoke(null, new[]
+                    {
+                        "The current HDRP Asset does not support Light Layers.", MessageType.Warning, lightingGroup, -1, "m_RenderPipelineSettings.supportLightLayers"
+                    });
+                    break;
+                }
+                case false when renderPipelineAssetType is { Name: "UniversalRenderPipelineAsset" }:
+                {
+                    var k_QualitySettingsHelpBox = ProbeVolumeEditor.GetURPQualitySettingsHelpBox();
+                    var lightingValue = ProbeVolumeEditor.GetURPLightingGroup();
+                    k_QualitySettingsHelpBox.Invoke(null, new[]
+                    {
+                        "The current URP Asset does not support Light Layers.", MessageType.Warning, lightingValue, "m_SupportsLightLayers"
+                    });
+                    break;
+                }
+                default:
+                    ProbeVolumeLightingTab.DrawListWithIndent(m_MaskList);
+                    break;
+            }
+        }
+
+        internal static bool GetURPSupportsLayers(Type renderPipelineAssetType, RenderPipelineAsset currentPipeline)
+        {
+            return (bool)renderPipelineAssetType.GetField("m_SupportsLightLayers", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(currentPipeline);
+        }
+
+        internal static bool GetHDRPSupportsLayers(Type renderPipelineAssetType, RenderPipelineAsset currentPipeline)
+        {
+            var settings = renderPipelineAssetType.GetField("m_RenderPipelineSettings", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(currentPipeline);
+            return (bool)settings.GetType().GetField("supportLightLayers").GetValue(settings);
+        }
+
+        #endregion
+
+        #region Sky occlusion
+        void SkyOcclusionSettingsGUI()
+        {
+            if (!SupportedRenderingFeatures.active.skyOcclusion)
+                return;
+            if (!ProbeVolumeLightingTab.Foldout(Styles.skyOcclusionSettingsTitle, ProbeVolumeLightingTab.Expandable.SettingsSkyOcclusion, true))
+                return;
+
+            using var scope = new EditorGUI.IndentLevelScope();
+
+            var lightmapper = ProbeVolumeLightingTab.GetLightingSettings().lightmapper;
+            bool cpuLightmapperSelected = lightmapper == LightingSettings.Lightmapper.ProgressiveCPU;
+            if (cpuLightmapperSelected)
+            {
+                EditorGUILayout.HelpBox(Styles.cpuLightmapperNotSupportedWarning.text, MessageType.Warning);
+            }
+            using (new EditorGUI.DisabledScope(cpuLightmapperSelected))
+            {
+                EditorGUILayout.PropertyField(m_SkyOcclusion, Styles.skyOcclusion);
+
+                if (m_SkyOcclusion.boolValue)
+                {
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.PropertyField(m_SkyOcclusionBakingSamples, Styles.skyOcclusionBakingSamples);
+                    EditorGUILayout.PropertyField(m_SkyOcclusionBakingBounces, Styles.skyOcclusionBakingBounces);
+                    EditorGUILayout.PropertyField(m_SkyOcclusionAverageAlbedo, Styles.skyOcclusionAverageAlbedo);
+                    EditorGUILayout.PropertyField(m_SkyOcclusionShadingDirection, Styles.skyOcclusionShadingDirection);
+                    EditorGUI.indentLevel--;
+                }
+            }
+
+            EditorGUILayout.Space();
+        }
+        #endregion
 
         #region Probe Placement
 
@@ -249,30 +484,18 @@ namespace UnityEditor.Rendering
 
         #region Lighting Scenarios
 
-        enum ScenariosStatus
-        {
-            Valid,
-            NotLoaded,
-            OutOfDate,
-            NotBaked
-        }
-
-        const string k_RenameFocusKey = "Probe Volume Rename Field";
-
         ReorderableList m_Scenarios = null;
 
-        bool renameSelectedScenario;
-        bool hasPendingScenarioUpdate = false;
-        ScenariosStatus[] scenariosStatuses = new ScenariosStatus[0];
+        int renamingScenario;
 
         void SetActiveScenario(string scenario)
         {
             if (scenario == ProbeReferenceVolume.instance.lightingScenario)
                 return;
 
-            Undo.RegisterCompleteObjectUndo(ProbeReferenceVolume.instance.sceneData.parentAsset, "Change active scenario");
-            ProbeReferenceVolume.instance.SetActiveScenario(scenario, false);
-            EditorUtility.SetDirty(ProbeReferenceVolume.instance.sceneData.parentAsset);
+            Undo.RegisterCompleteObjectUndo(bakingSet, "Change active scenario");
+            bakingSet.SetActiveScenario(scenario, false);
+            EditorUtility.SetDirty(bakingSet);
             SceneView.RepaintAll();
         }
 
@@ -295,26 +518,23 @@ namespace UnityEditor.Rendering
                 onReorderCallback = (ReorderableList list) =>
                 {
                     serializedObject.ApplyModifiedProperties();
-                    UpdateScenarioStatuses();
                 }
             };
 
             m_Scenarios.drawElementCallback = (rect, index, active, focused) =>
             {
                 ProbeVolumeLightingTab.SplitRectInThree(rect, out var left, out var middle, out var right, 70);
-                var scenarioName = bakingSet.lightingScenarios[index];
+                var scenarioName = bakingSet.m_LightingScenarios[index];
 
                 // Status
-                if (index < scenariosStatuses.Length && scenariosStatuses[index] != ScenariosStatus.Valid)
                 {
                     right.xMin += 8f;
                     right.width = right.height;
 
-                    var status = scenariosStatuses[index];
-                    var label = Styles.scenariosStatusLabel[(int)status];
+                    bool baked = bakingSet.scenarios.TryGetValue(scenarioName, out var stateData) && stateData.ComputeHasValidData(ProbeReferenceVolume.instance.shBands);
 
-                    using (new EditorGUI.DisabledScope(status != ScenariosStatus.OutOfDate))
-                        GUI.Label(right, label);
+                    using (new EditorGUI.DisabledScope(true))
+                        GUI.Label(right, baked ? GUIContent.none : Styles.emptyLabel);
                 }
 
                 // Label for active scene
@@ -326,59 +546,39 @@ namespace UnityEditor.Rendering
                 if (EditorGUI.EndChangeCheck() && toggled)
                     SetActiveScenario(scenarioName);
 
-                // Event
-                string key = k_RenameFocusKey + index;
-                if (active)
-                {
-                    if (Event.current.type == EventType.MouseDown && GUI.GetNameOfFocusedControl() != key)
-                        renameSelectedScenario = false;
-                    if (Event.current.type == EventType.MouseDown && Event.current.clickCount == 2)
-                    {
-                        if (left.Contains(Event.current.mousePosition))
-                            renameSelectedScenario = true;
-                    }
-                    if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape)
-                        renameSelectedScenario = false;
-                }
-
                 // Name
-                if (!renameSelectedScenario || !active)
-                    EditorGUI.LabelField(left, scenarioName);
-                else
+                if (RenameEvent(left, active, focused, index, ref renamingScenario))
                 {
                     // Renaming
                     EditorGUI.BeginChangeCheck();
-                    GUI.SetNextControlName(key);
                     var name = EditorGUI.DelayedTextField(left, scenarioName, EditorStyles.boldLabel);
-                    if (EditorGUI.EndChangeCheck())
+                    if (EditorGUI.EndChangeCheck() && !string.IsNullOrWhiteSpace(name))
                     {
-                        renameSelectedScenario = false;
-                        if (ProbeVolumeLightingTab.AllSetScenesAreLoaded(bakingSet) || EditorUtility.DisplayDialog("Rename Lighting Scenario", "Some scenes in the baking set contain probe volumes but are not loaded.\nRenaming the lighting scenario may require you to rebake the scene.", "Rename", "Cancel"))
+                        renamingScenario = -1;
+                        try
                         {
-                            try
-                            {
-                                AssetDatabase.StartAssetEditing();
-                                Undo.RegisterCompleteObjectUndo(bakingSet, s_RenameScenarioUndoName);
-                                bakingSet.RenameScenario(scenarioName, name);
-                            }
-                            finally
-                            {
-                                m_LightingScenarios.GetArrayElementAtIndex(index).stringValue = name;
-                                serializedObject.Update();
-                                serializedObject.ApplyModifiedProperties();
-                                AssetDatabase.StopAssetEditing();
+                            AssetDatabase.StartAssetEditing();
+                            Undo.RegisterCompleteObjectUndo(bakingSet, s_RenameScenarioUndoName);
+                            name = bakingSet.RenameScenario(scenarioName, name);
+                        }
+                        finally
+                        {
+                            AssetDatabase.StopAssetEditing();
+                            m_LightingScenarios.GetArrayElementAtIndex(index).stringValue = name;
+                            serializedObject.Update();
+                            serializedObject.ApplyModifiedProperties();
 
-                                SetActiveScenario(name);
-                                UpdateScenarioStatuses();
-                            }
+                            SetActiveScenario(name);
                         }
                     }
                 }
+                else
+                    EditorGUI.LabelField(left, scenarioName);
             };
 
             m_Scenarios.onSelectCallback = (ReorderableList list) =>
             {
-                SetActiveScenario(bakingSet.lightingScenarios[list.index]);
+                SetActiveScenario(bakingSet.m_LightingScenarios[list.index]);
                 SceneView.RepaintAll();
                 Repaint();
             };
@@ -388,20 +588,17 @@ namespace UnityEditor.Rendering
                 serializedObject.ApplyModifiedProperties();
                 Undo.RegisterCompleteObjectUndo(bakingSet, "Added new lighting scenario");
                 var scenario = bakingSet.CreateScenario("New Lighting Scenario");
-                EditorUtility.SetDirty(bakingSet);
                 serializedObject.Update();
-
-                UpdateScenarioStatuses();
             };
 
             m_Scenarios.onRemoveCallback = (list) =>
             {
                 if (m_Scenarios.count == 1)
                 {
-                    EditorUtility.DisplayDialog("Can't delete scenario", "You can't delete the last scenario. You need to have at least one.", "Ok");
+                    EditorUtility.DisplayDialog("Can't delete scenario", "You can't delete the last scenario. You need to have at least one.", "OK");
                     return;
                 }
-                var scenario = bakingSet.lightingScenarios[list.index];
+                var scenario = bakingSet.m_LightingScenarios[list.index];
                 if (!EditorUtility.DisplayDialog("Delete the selected scenario?", $"Deleting the scenario will also delete corresponding baked data on disk.\nDo you really want to delete the scenario '{scenario}'?\n\nYou cannot undo the delete assets action.", "Yes", "Cancel"))
                     return;
                 serializedObject.ApplyModifiedProperties();
@@ -417,68 +614,10 @@ namespace UnityEditor.Rendering
                 finally
                 {
                     AssetDatabase.StopAssetEditing();
-                    SetActiveScenario(bakingSet.lightingScenarios[0]);
-                    UpdateScenarioStatuses();
+                    SetActiveScenario(bakingSet.m_LightingScenarios[0]);
                 }
             };
-
-            hasPendingScenarioUpdate = true;
         }
-
-        internal void UpdateScenarioStatuses()
-        {
-            hasPendingScenarioUpdate = false;
-
-            if (bakingSet.sceneGUIDs.Count == 0)
-                return;
-
-            DateTime? refTime = null;
-            string mostRecentState = null;
-
-            foreach (var state in bakingSet.lightingScenarios)
-            {
-                if (bakingSet.scenarios.TryGetValue(state, out var stateData) && stateData.cellDataAsset != null)
-                {
-                    var dataPath = stateData.cellDataAsset.GetAssetPath();
-                    var time = System.IO.File.GetLastWriteTime(dataPath);
-                    if (refTime == null || time > refTime)
-                    {
-                        refTime = time;
-                        mostRecentState = state;
-                    }
-                }
-            }
-
-            UpdateScenarioStatuses(mostRecentState);
-        }
-
-        internal void UpdateScenarioStatuses(string mostRecentState)
-        {
-            hasPendingScenarioUpdate = false;
-
-            var initialStatus = ProbeVolumeLightingTab.AllSetScenesAreLoaded(bakingSet) ? ScenariosStatus.Valid : ScenariosStatus.NotLoaded;
-
-            scenariosStatuses = new ScenariosStatus[bakingSet.lightingScenarios.Count];
-
-            for (int i = 0; i < scenariosStatuses.Length; i++)
-            {
-                scenariosStatuses[i] = initialStatus;
-                if (initialStatus == ScenariosStatus.NotLoaded)
-                    continue;
-
-                if (!bakingSet.scenarios.TryGetValue(bakingSet.lightingScenarios[i], out var stateData) || stateData.cellDataAsset == null)
-                {
-                    scenariosStatuses[i] = ScenariosStatus.NotBaked;
-                    continue;
-                }
-                else if (scenariosStatuses[i] != ScenariosStatus.OutOfDate && bakingSet.scenarios.TryGetValue(mostRecentState, out var mostRecentData) &&
-                    mostRecentData.cellDataAsset != null && stateData.sceneHash != mostRecentData.sceneHash)
-                {
-                    scenariosStatuses[i] = ScenariosStatus.OutOfDate;
-                }
-            }
-        }
-
         #endregion
     }
 }

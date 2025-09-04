@@ -1,10 +1,9 @@
-using System;
-using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-Transform(Direction)")]
+    [VFXInfo(name = "Transform (Direction)", category = "Math/Geometry")]
     class TransformDirection : VFXOperator
     {
         public class InputProperties

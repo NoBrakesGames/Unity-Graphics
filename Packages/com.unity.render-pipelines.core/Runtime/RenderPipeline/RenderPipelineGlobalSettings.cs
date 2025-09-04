@@ -1,4 +1,7 @@
-﻿using System;
+using System;
+#if UNITY_EDITOR
+using UnityEditor.Rendering;
+#endif
 
 namespace UnityEngine.Rendering
 {
@@ -17,10 +20,21 @@ namespace UnityEngine.Rendering
         /// </summary>
 #if UNITY_EDITOR
         public static TGlobalRenderPipelineSettings instance =>
-            GraphicsSettings.GetSettingsForRenderPipeline<TRenderPipeline>() as TGlobalRenderPipelineSettings;
+            EditorGraphicsSettings.GetRenderPipelineGlobalSettingsAsset<TRenderPipeline>() as TGlobalRenderPipelineSettings;
 #else
         public static TGlobalRenderPipelineSettings instance => s_Instance.Value;
         private static Lazy<TGlobalRenderPipelineSettings> s_Instance = new (() => GraphicsSettings.GetSettingsForRenderPipeline<TRenderPipeline>() as TGlobalRenderPipelineSettings);
 #endif
+
+        /// <summary>
+        /// Called when settings asset is reset in the editor.
+        /// </summary>
+        public virtual void Reset()
+        {
+#if UNITY_EDITOR
+            EditorGraphicsSettings.PopulateRenderPipelineGraphicsSettings(this);
+            Initialize();
+#endif
+        }
     }
 }

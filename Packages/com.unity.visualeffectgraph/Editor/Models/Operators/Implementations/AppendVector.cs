@@ -1,13 +1,14 @@
 using System;
 using System.Linq;
-using System.Collections.ObjectModel;
 using System.Collections.Generic;
+
 using UnityEngine;
 using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Vector")]
+    [VFXHelpURL("Operator-AppendVector")]
+    [VFXInfo(name = "Append Vector", category = "Math/Vector")]
     class AppendVector : VFXOperatorNumericCascadedUnified
     {
         protected override sealed string operatorName { get { return "AppendVector"; } }

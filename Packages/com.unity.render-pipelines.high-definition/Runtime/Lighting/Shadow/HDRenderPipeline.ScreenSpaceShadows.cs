@@ -1,6 +1,6 @@
 using System;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -189,9 +189,9 @@ namespace UnityEngine.Rendering.HighDefinition
             // Fetch the shaders
             if (m_RayTracingSupported)
             {
-                m_ScreenSpaceShadowsCS = m_GlobalSettings.renderPipelineRayTracingResources.shadowRaytracingCS;
-                m_ScreenSpaceShadowsFilterCS = m_GlobalSettings.renderPipelineRayTracingResources.shadowFilterCS;
-                m_ScreenSpaceShadowsRT = m_GlobalSettings.renderPipelineRayTracingResources.shadowRaytracingRT;
+                m_ScreenSpaceShadowsCS = rayTracingResources.shadowRayTracingCS;
+                m_ScreenSpaceShadowsFilterCS = rayTracingResources.shadowFilterCS;
+                m_ScreenSpaceShadowsRT = rayTracingResources.shadowRayTracingRT;
 
                 // Directional shadow kernels
                 m_ClearShadowTexture = m_ScreenSpaceShadowsCS.FindKernel("ClearShadowTexture");
@@ -223,23 +223,39 @@ namespace UnityEngine.Rendering.HighDefinition
             // Directional shadow material
             s_ScreenSpaceShadowsMat = CoreUtils.CreateEngineMaterial(screenSpaceShadowsShader);
 
-            switch (m_Asset.currentPlatformRenderPipelineSettings.hdShadowInitParams.shadowFilteringQuality)
+            switch (m_Asset.currentPlatformRenderPipelineSettings.hdShadowInitParams.punctualShadowFilteringQuality)
             {
                 case HDShadowFilteringQuality.Low:
-                    s_ScreenSpaceShadowsMat.EnableKeyword("SHADOW_LOW");
+                    s_ScreenSpaceShadowsMat.EnableKeyword("PUNCTUAL_SHADOW_LOW");
                     break;
                 case HDShadowFilteringQuality.Medium:
-                    s_ScreenSpaceShadowsMat.EnableKeyword("SHADOW_MEDIUM");
+                    s_ScreenSpaceShadowsMat.EnableKeyword("PUNCTUAL_SHADOW_MEDIUM");
                     break;
                 case HDShadowFilteringQuality.High:
-                    s_ScreenSpaceShadowsMat.EnableKeyword("SHADOW_HIGH");
+                    s_ScreenSpaceShadowsMat.EnableKeyword("PUNCTUAL_SHADOW_HIGH");
                     break;
                 default:
-                    s_ScreenSpaceShadowsMat.EnableKeyword("SHADOW_MEDIUM");
+                    s_ScreenSpaceShadowsMat.EnableKeyword("PUNCTUAL_SHADOW_MEDIUM");
                     break;
             }
 
-            switch (m_Asset.currentPlatformRenderPipelineSettings.hdShadowInitParams.areaShadowFilteringQuality)
+             switch (m_Asset.currentPlatformRenderPipelineSettings.hdShadowInitParams.directionalShadowFilteringQuality)
+            {
+                case HDShadowFilteringQuality.Low:
+                    s_ScreenSpaceShadowsMat.EnableKeyword("DIRECTIONAL_SHADOW_LOW");
+                    break;
+                case HDShadowFilteringQuality.Medium:
+                    s_ScreenSpaceShadowsMat.EnableKeyword("DIRECTIONAL_SHADOW_MEDIUM");
+                    break;
+                case HDShadowFilteringQuality.High:
+                    s_ScreenSpaceShadowsMat.EnableKeyword("DIRECTIONAL_SHADOW_HIGH");
+                    break;
+                default:
+                    s_ScreenSpaceShadowsMat.EnableKeyword("DIRECTIONAL_SHADOW_MEDIUM");
+                    break;
+            }
+
+           switch (m_Asset.currentPlatformRenderPipelineSettings.hdShadowInitParams.areaShadowFilteringQuality)
             {
                 case HDAreaShadowFilteringQuality.Medium:
                     s_ScreenSpaceShadowsMat.EnableKeyword("AREA_SHADOW_MEDIUM");
@@ -264,7 +280,7 @@ namespace UnityEngine.Rendering.HighDefinition
             GraphicsFormat graphicsFormat = (GraphicsFormat)m_Asset.currentPlatformRenderPipelineSettings.hdShadowInitParams.screenSpaceShadowBufferFormat;
             return renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
             {
-                colorFormat = graphicsFormat,
+                format = graphicsFormat,
                 slices = numShadowTextures * TextureXR.slices,
                 dimension = TextureDimension.Tex2DArray,
                 filterMode = FilterMode.Point,
@@ -313,11 +329,11 @@ namespace UnityEngine.Rendering.HighDefinition
                 passData.debugKernel = m_WriteShadowTextureDebugKernel;
 
                 // TODO: move the debug kernel outside of the ray tracing resources
-                passData.shadowFilter = m_GlobalSettings.renderPipelineRayTracingResources.shadowFilterCS;
+                passData.shadowFilter = rayTracingResources.shadowFilterCS;
 
                 passData.screenSpaceShadowArray = builder.ReadTexture(screenSpaceShadowArray);
                 passData.outputBuffer = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "EvaluateShadowDebug" }));
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "EvaluateShadowDebug" }));
 
                 builder.SetRenderFunc(
                     (ScreenSpaceShadowDebugPassData data, RenderGraphContext ctx) =>

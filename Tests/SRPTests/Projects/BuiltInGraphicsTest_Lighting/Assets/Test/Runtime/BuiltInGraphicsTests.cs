@@ -21,6 +21,7 @@ public class BuiltInGraphicsTests
     [UseGraphicsTestCases(builtinPackagePath)]
     public IEnumerator Run(GraphicsTestCase testCase)
     {
+		Debug.Log($"Running test case '{testCase}' with scene '{testCase.ScenePath}' {testCase.ReferenceImagePathLog}.");
         SceneManager.LoadScene(testCase.ScenePath);
 
         // Always wait one frame for scene load
@@ -55,7 +56,7 @@ public class BuiltInGraphicsTests
         }
 #endif
 
-        ImageAssert.AreEqual(testCase.ReferenceImage, cameras.Where(x => x != null), settings.ImageComparisonSettings);
+        ImageAssert.AreEqual(testCase.ReferenceImage, cameras.Where(x => x != null), settings.ImageComparisonSettings, testCase.ReferenceImagePathLog);
 
         // Does it allocate memory when it renders what's on the main camera?
         bool allocatesMemory = false;

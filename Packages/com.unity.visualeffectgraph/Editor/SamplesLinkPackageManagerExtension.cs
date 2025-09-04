@@ -1,17 +1,16 @@
-
-using System;
-using UnityEditor.PackageManager;
 using UnityEditor.PackageManager.UI;
 using UnityEngine;
 using UnityEngine.UIElements;
 
+namespace UnityEditor.VFX
+{
+
 [UnityEditor.InitializeOnLoad]
-internal class SamplesLinkPackageManagerExtension : IPackageManagerExtension
+class SamplesLinkPackageManagerExtension : IPackageManagerExtension
 {
     VisualElement rootVisualElement;
-    const string SAMPLEBUTTON_TEXT = "open VFX Graph Samples project on Github";
+    const string SAMPLEBUTTON_TEXT = "Open VFX Graph Samples project on Github";
     const string GITHUB_URL = "https://github.com/Unity-Technologies/VisualEffectGraph-Samples";
-    const string VFX_GRAPH_NAME = "com.unity.visualeffectgraph";
 
     private Button samplesButton;
     private VisualElement parent;
@@ -24,18 +23,16 @@ internal class SamplesLinkPackageManagerExtension : IPackageManagerExtension
         return samplesButton;
     }
 
-    static SamplesLinkPackageManagerExtension()
+    void IPackageManagerExtension.OnPackageSelectionChange(PackageManager.PackageInfo packageInfo)
     {
-        PackageManagerExtensions.RegisterExtension(new SamplesLinkPackageManagerExtension());
-    }
+        if (samplesButton == null)
+            return;
 
-    void IPackageManagerExtension.OnPackageSelectionChange(PackageInfo packageInfo)
-    {
         // Prevent the button from rendering on other packages
         if (samplesButton.parent != null)
             parent = samplesButton.parent;
 
-        bool shouldRender = packageInfo?.name == VFX_GRAPH_NAME;
+        bool shouldRender = packageInfo?.name == VisualEffectGraphPackageInfo.name;
         if (!shouldRender)
         {
             samplesButton.RemoveFromHierarchy();
@@ -46,7 +43,15 @@ internal class SamplesLinkPackageManagerExtension : IPackageManagerExtension
         }
     }
 
-    void IPackageManagerExtension.OnPackageAddedOrUpdated(PackageInfo packageInfo) { }
+    void IPackageManagerExtension.OnPackageAddedOrUpdated(PackageManager.PackageInfo packageInfo) { }
 
-    void IPackageManagerExtension.OnPackageRemoved(PackageInfo packageInfo) { }
+    void IPackageManagerExtension.OnPackageRemoved(PackageManager.PackageInfo packageInfo) { }
+
+    static SamplesLinkPackageManagerExtension()
+    {
+        PackageManagerExtensions.RegisterExtension(new SamplesLinkPackageManagerExtension());
+    }
 }
+
+}
+

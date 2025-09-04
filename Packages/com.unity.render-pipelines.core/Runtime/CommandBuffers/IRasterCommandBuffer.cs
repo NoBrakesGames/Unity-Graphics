@@ -1,11 +1,10 @@
 
 using System;
-using UnityEngine.Rendering;
 using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine.Profiling;
 using Unity.Profiling;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 // NOTE  NOTE  NOTE  NOTE  NOTE  NOTE  NOTE  NOTE  NOTE
 //
@@ -24,9 +23,8 @@ using UnityEngine.Experimental.Rendering.RenderGraphModule;
 // <unity root>\Packages\com.unity.render-pipelines.core\Runtime\CommandBuffers\
 //
 // NOTE  NOTE  NOTE  NOTE  NOTE  NOTE  NOTE  NOTE  NOTE
-namespace UnityEngine.Experimental.Rendering
+namespace UnityEngine.Rendering
 {
-    using RendererList = UnityEngine.Rendering.RendererList;
 
     /// <summary>
     /// This interface declares functions that are specific to a rasterization command buffer.
@@ -114,6 +112,16 @@ namespace UnityEngine.Experimental.Rendering
         /// <param name="matrix">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMesh.html)</param>
         /// <param name="material">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMesh.html)</param>
         public void DrawMesh(Mesh mesh, Matrix4x4 matrix, Material material) ;
+
+        /// <summary>Wraps [DrawMultipleMeshes](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMultipleMeshes.html) on a CommandBuffer.</summary>
+        /// <param name="matrices">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMultipleMeshes.html)</param>
+        /// <param name="meshes">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMultipleMeshes.html)</param>
+        /// <param name="subsetIndices">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMultipleMeshes.html)</param>
+        /// <param name="count">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMultipleMeshes.html)</param>
+        /// <param name="material">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMultipleMeshes.html)</param>
+        /// <param name="shaderPass">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMultipleMeshes.html)</param>
+        /// <param name="properties">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawMultipleMeshes.html)</param>
+        public void DrawMultipleMeshes(Matrix4x4[] matrices, Mesh[] meshes, int[] subsetIndices, int count, Material material, int shaderPass, MaterialPropertyBlock properties) ;
 
         /// <summary>Wraps [DrawRenderer](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawRenderer.html) on a CommandBuffer.</summary>
         /// <param name="renderer">[See CommandBuffer documentation](https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer.DrawRenderer.html)</param>

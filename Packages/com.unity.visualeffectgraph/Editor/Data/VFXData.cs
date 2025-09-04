@@ -21,6 +21,8 @@ namespace UnityEditor.VFX
 
     abstract class VFXData : VFXModel
     {
+        public const uint kMaxContexts = 16;
+
         public abstract VFXDataType type { get; }
 
         public virtual uint staticSourceCount
@@ -41,6 +43,8 @@ namespace UnityEditor.VFX
             get { return owners.Where(o => o.CanBeCompiled()); }
         }
 
+        public bool hasTooManyContext => m_Contexts?.Count > kMaxContexts;
+
         public string title;
 
         public virtual IEnumerable<string> additionalHeaders
@@ -48,31 +52,26 @@ namespace UnityEditor.VFX
             get { return Enumerable.Empty<string>(); }
         }
 
-        public static VFXData CreateDataType(VFXGraph graph, VFXDataType type)
+        public static VFXData CreateDataType(VFXDataType type)
         {
-            VFXData newVFXData;
             switch (type)
             {
                 case VFXDataType.Particle:
-                    newVFXData = ScriptableObject.CreateInstance<VFXDataParticle>();
-                    break;
+                    return ScriptableObject.CreateInstance<VFXDataParticle>();
                 case VFXDataType.ParticleStrip:
-                    newVFXData = ScriptableObject.CreateInstance<VFXDataParticle>();
-                    newVFXData.SetSettingValue("dataType", VFXDataParticle.DataType.ParticleStrip);
-                    break;
+                    {
+                        var data = ScriptableObject.CreateInstance<VFXDataParticle>();
+                        data.SetSettingValue("dataType", VFXDataParticle.DataType.ParticleStrip);
+                        return data;
+                    }
                 case VFXDataType.Mesh:
-                    newVFXData = ScriptableObject.CreateInstance<VFXDataMesh>();
-                    break;
+                    return ScriptableObject.CreateInstance<VFXDataMesh>();
                 case VFXDataType.SpawnEvent:
-                    newVFXData = ScriptableObject.CreateInstance<VFXDataSpawner>();
-                    break;
+                    return ScriptableObject.CreateInstance<VFXDataSpawner>();
                 case VFXDataType.OutputEvent:
-                    newVFXData = ScriptableObject.CreateInstance<VFXDataOutputEvent>();
-                    break;
+                    return ScriptableObject.CreateInstance<VFXDataOutputEvent>();
                 default: return null;
             }
-            newVFXData.m_Parent = graph;
-            return newVFXData;
         }
 
         public override void OnEnable()
@@ -112,11 +111,15 @@ namespace UnityEditor.VFX
         {
             base.Sanitize(version);
 
-            if (m_Parent == null)
+            if (m_Parent != null)
             {
-                string assetPath = AssetDatabase.GetAssetPath(this);
-                m_Parent = VisualEffectResource.GetResourceAtPath(assetPath).GetOrCreateGraph();
+                Detach();
             }
+        }
+
+        protected override void OnAdded()
+        {
+            throw new InvalidOperationException("VFXData cannot be attached to a VFXModel but are referenced in VFXContext");
         }
 
         public abstract void CopySettings<T>(T dst) where T : VFXData;
@@ -127,7 +130,8 @@ namespace UnityEditor.VFX
         }
 
         public virtual void FillDescs(
-            VFXCompileErrorReporter reporter,
+            IVFXErrorReporter reporter,
+            VFXCompilationMode compilationMode,
             List<VFXGPUBufferDesc> outBufferDescs,
             List<VFXTemporaryGPUBufferDesc> outTemporaryBufferDescs,
             List<VFXEditorSystemDesc> outSystemDescs,
@@ -137,6 +141,7 @@ namespace UnityEditor.VFX
             Dictionary<VFXContext, int> contextSpawnToBufferIndex,
             VFXDependentBuffersData dependentBuffers,
             Dictionary<VFXContext, List<VFXContextLink>[]> effectiveFlowInputLinks,
+            Dictionary<VFXData, uint> dataToSystemIndex,
             VFXSystemNames systemNames = null)
         {
             // Empty implementation by default
@@ -394,9 +399,8 @@ namespace UnityEditor.VFX
             m_StoredCurrentAttributes.Clear();
             m_LocalCurrentAttributes.Clear();
             m_ReadSourceAttributes.Clear();
-            int contextCount = m_Contexts.Count;
-            if (contextCount > 16)
-                throw new InvalidOperationException(string.Format("Too many contexts that use particle data {0} > 16", contextCount));
+            if (hasTooManyContext)
+                throw new InvalidOperationException($"Too many contexts within the same system: {m_Contexts.Count} > 16");
 
             foreach (var kvp in m_AttributesToContexts)
             {
@@ -468,7 +472,7 @@ namespace UnityEditor.VFX
                     local = true;
                 if (!writtenInInit && (key & 0xAAAAAAAA) == 0) // no write mask
                     local = true;
-                if (VFXAttribute.AllAttributeLocalOnly.Contains(attribute))
+                if (VFXAttributesManager.LocalOnlyAttributes.Contains(attribute))
                     local = true;
 
                 if (local)
@@ -656,6 +660,20 @@ namespace UnityEditor.VFX
         [NonSerialized]
         protected HashSet<VFXData> m_DependenciesOutNotCompilable = new HashSet<VFXData>();
 
+        [NonSerialized]
+        protected Dictionary<VFXContext, List<TaskProfilingData>> m_ContextsToTaskIndex = new Dictionary<VFXContext, List<TaskProfilingData>>();
+
+        internal struct TaskProfilingData
+        {
+            internal int taskIndex;
+            internal string taskName;
+        }
+        public List<TaskProfilingData> GetContextTaskIndices(VFXContext context)
+        {
+            if (m_ContextsToTaskIndex.TryGetValue(context, out List<TaskProfilingData> taskIndices))
+                return taskIndices;
+            return new List<TaskProfilingData>();
+        }
         [NonSerialized]
         protected uint m_Layer;
     }

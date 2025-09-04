@@ -5,11 +5,51 @@ using UnityEngine;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Attribute/{0}/Direction & Speed/{1}", experimental = true, variantProvider = typeof(VelocityBaseProvider))]
+    class VelocityTangentVariantProvider : VariantProvider
+    {
+        public override IEnumerable<Variant> GetVariants()
+        {
+            foreach (var mode in Enum.GetValues(typeof(AttributeCompositionMode)).Cast<AttributeCompositionMode>())
+            {
+                // Skip the composition mode from main provider
+                if (mode == AttributeCompositionMode.Overwrite)
+                    continue;
+
+                var composition = VFXBlockUtility.GetNameString(mode);
+
+                yield return new Variant(
+                    $"{composition} Tangential Velocity from Direction & Speed",
+                    null,
+                    typeof(VelocityTangent),
+                    new[]
+                    {
+                        new KeyValuePair<string, object>("composition", mode),
+                    });
+            }
+        }
+    }
+
+    class VelocityTangentProvider : VariantProvider
+    {
+        public override IEnumerable<Variant> GetVariants()
+        {
+                yield return new Variant(
+                    "Set".Label().AppendLiteral("Velocity from Direction & Speed").AppendLabel("Tangent"),
+                    VelocityBase.Category,
+                    typeof(VelocityTangent),
+                    new[]
+                    {
+                        new KeyValuePair<string, object>("composition", AttributeCompositionMode.Overwrite),
+                    },
+                    () => new VelocityTangentVariantProvider());
+        }
+    }
+
+    [VFXInfo(experimental = true, variantProvider = typeof(VelocityTangentProvider))]
     class VelocityTangent : VelocityBase
     {
-        public override string name { get { return string.Format(base.name, "Tangent"); } }
-        protected override bool altersDirection { get { return true; } }
+        public override string name => base.name.AppendLabel("Tangent");
+        protected override bool altersDirection => true;
 
         public override IEnumerable<VFXAttributeInfo> attributes
         {

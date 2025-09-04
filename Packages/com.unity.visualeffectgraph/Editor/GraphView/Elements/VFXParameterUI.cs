@@ -29,6 +29,7 @@ namespace UnityEditor.VFX.UI
             return base.ContainsPoint(localPoint) && !m_ConnectorText.ContainsPoint(this.ChangeCoordinatesTo(m_ConnectorText, localPoint));
         }
     }
+
     class VFXInputParameterDataAnchor : VFXDataAnchor
     {
         public static new VFXInputParameterDataAnchor Create(VFXDataAnchorController controller, VFXNodeUI node)
@@ -63,6 +64,7 @@ namespace UnityEditor.VFX.UI
             {
                 return path;
             }
+
             return GetUXMLPathRecursive("Assets", name);
         }
 
@@ -110,29 +112,16 @@ namespace UnityEditor.VFX.UI
             RegisterCallback<MouseLeaveEvent>(OnMouseHover);
 
             m_ExposedIcon = this.Q<Image>("exposed-icon");
-            m_SuperCollapsedButton = this.Q("super-collapse-button");
-            m_SuperCollapsedButton.AddManipulator(new Clickable(OnToggleSuperCollapse));
-
             this.AddManipulator(new SuperCollapser());
 
-            m_Pill = this.Q("pill");
+            m_Label = this.Q<Label>("title-label");
         }
 
-        VisualElement m_Pill;
+        Label m_Label;
 
-        void OnToggleSuperCollapse()
-        {
-            controller.superCollapsed = !controller.superCollapsed;
-        }
+        public new VFXParameterNodeController controller => base.controller as VFXParameterNodeController;
 
-        VisualElement m_SuperCollapsedButton;
-
-        public new VFXParameterNodeController controller
-        {
-            get { return base.controller as VFXParameterNodeController; }
-        }
-
-        public override VFXDataAnchor InstantiateDataAnchor(VFXDataAnchorController controller, VFXNodeUI node)
+        protected override VFXDataAnchor InstantiateDataAnchor(VFXDataAnchorController controller, VFXNodeUI node)
         {
             if (controller.direction == Direction.Input)
                 return VFXInputParameterDataAnchor.Create(controller, node);
@@ -141,6 +130,11 @@ namespace UnityEditor.VFX.UI
         }
 
         Image m_ExposedIcon;
+
+        protected override void UpdateTitleUI()
+        {
+            m_Label.text = controller.title;
+        }
 
         protected override void SelfChange()
         {
@@ -158,8 +152,16 @@ namespace UnityEditor.VFX.UI
                 RemoveFromClassList("exposed");
             }
 
-            if (m_Pill != null)
-                m_Pill.tooltip = controller.parentController.model.tooltip;
+            if (controller.parentController.isOutput)
+            {
+                AddToClassList("output");
+            }
+            else
+            {
+                RemoveFromClassList("output");
+            }
+
+            m_Label.parent.tooltip = controller.parentController.model.tooltip;
         }
 
         public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
@@ -178,20 +180,24 @@ namespace UnityEditor.VFX.UI
 
         void OnMouseHover(EventBase evt)
         {
-            VFXView view = GetFirstAncestorOfType<VFXView>();
-            if (view == null)
-                return;
-            VFXBlackboard blackboard = view.blackboard;
-            if (blackboard == null)
-                return;
-            VFXBlackboardRow row = blackboard.GetRowFromController(controller.parentController);
-            if (row == null)
-                return;
+            Profiler.BeginSample("VFXParameterUI.OnMouseOver");
+            try
+            {
+                var view = GetFirstAncestorOfType<VFXView>();
+                var blackboard = view?.blackboard;
+                var row = blackboard?.GetRowFromController(controller.parentController);
+                if (row == null)
+                    return;
 
-            if (evt.eventTypeId == MouseEnterEvent.TypeId())
-                row.AddToClassList("hovered");
-            else
-                row.RemoveFromClassList("hovered");
+                if (evt.eventTypeId == MouseEnterEvent.TypeId())
+                    row.AddToClassList("hovered");
+                else
+                    row.RemoveFromClassList("hovered");
+            }
+            finally
+            {
+                Profiler.EndSample();
+            }
         }
     }
 }

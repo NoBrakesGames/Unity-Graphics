@@ -1,13 +1,32 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Collision")]
-    class CollisionDepth : CollisionBase
+    class CollisionDepthVariants : VariantProvider
+    {
+        public override IEnumerable<Variant> GetVariants()
+        {
+            foreach (var behavior in Enum.GetValues(typeof(CollisionBase.Behavior)).Cast<CollisionBase.Behavior>())
+            {
+                var nameBase = CollisionBase.GetNamePrefix(behavior);
+                yield return new Variant(
+                    nameBase.AppendLabel("Depth Buffer", false),
+                    behavior == CollisionBase.Behavior.Collision ? "Collision" : "Collision/".AppendSeparator(nameBase, 0),
+                    typeof(CollisionDepth),
+                    new[] { new KeyValuePair<string, object>("behavior", behavior) }
+                );
+            }
+        }
+    }
+
+    [VFXHelpURL("Block-CollideWithDepthBuffer")]
+    [VFXInfo(category = "Collision", variantProvider = typeof(CollisionDepthVariants))]
+    sealed class CollisionDepth : CollisionBase
     {
         enum SurfaceThickness
         {
@@ -21,7 +40,7 @@ namespace UnityEditor.VFX.Block
         [VFXSetting, SerializeField, Tooltip("Specifies the thickness mode for the colliding surface. It can have an infinite thickness, or be set to a custom value.")]
         SurfaceThickness surfaceThickness = SurfaceThickness.Infinite;
 
-        public override string name { get { return "Collide with Depth Buffer"; } }
+        public override string name => GetNamePrefix(behavior).AppendLabel("Depth Buffer", false);
 
         public class ThicknessProperties
         {
@@ -30,13 +49,6 @@ namespace UnityEditor.VFX.Block
         }
 
         protected override bool allowInvertedCollision { get { return false; } }
-
-        internal sealed override void GenerateErrors(VFXInvalidateErrorReporter manager)
-        {
-            base.GenerateErrors(manager);
-            if (camera == CameraMode.Main && (UnityEngine.Rendering.RenderPipelineManager.currentPipeline == null || !UnityEngine.Rendering.RenderPipelineManager.currentPipeline.ToString().Contains("HDRenderPipeline")))
-                manager.RegisterError("CollisionDepthUnavailableWithoutHDRP", VFXErrorType.Warning, "Depth collision is currently only supported in the High Definition Render Pipeline (HDRP).");
-        }
 
         public override IEnumerable<VFXAttributeInfo> attributes
         {
@@ -55,7 +67,7 @@ namespace UnityEditor.VFX.Block
                 if (camera == CameraMode.Custom)
                     inputs = inputs.Concat(PropertiesFromType(typeof(CameraHelper.CameraProperties)));
                 if (surfaceThickness == SurfaceThickness.Custom)
-                    inputs = inputs.Concat(PropertiesFromType("ThicknessProperties"));
+                    inputs = inputs.Concat(PropertiesFromType(nameof(ThicknessProperties)));
                 return inputs;
             }
         }
@@ -88,12 +100,12 @@ namespace UnityEditor.VFX.Block
             }
         }
 
-        public override string source
+        protected sealed override string collisionDetection
         {
             get
             {
-                string Source = @"
-float3 nextPos = position + velocity * deltaTime;
+                var Source = new StringBuilder(@"
+float3 nextPos = position + deltaTime * velocity;
 float3 viewPos = mul(VFXToView,float4(nextPos,1.0f)).xyz;
 
 float4 projPos = mul(ViewToClip,float4(viewPos,1.0f));
@@ -103,7 +115,7 @@ float2 aProjPos = abs(projPos.xy);
 if (aProjPos.x < 1.0f && aProjPos.y < 1.0f) // visible on screen
 {
     float2 uv = projPos.xy * 0.5f + 0.5f;
-    float depth = LOAD_TEXTURE2D_X(Camera_depthBuffer.t, uv*Camera_pixelDimensions).r;
+    float depth = LOAD_TEXTURE2D_X(Camera_depthBuffer.t, uv*Camera_scaledPixelDimensions).r;
     #if UNITY_REVERSED_Z
     depth = 1.0f - depth; // reversed z
     #endif
@@ -118,26 +130,27 @@ if (aProjPos.x < 1.0f && aProjPos.y < 1.0f) // visible on screen
     }
     else
     {
-        linearEyeDepth = n + depth * (f-n);
+        linearEyeDepth = n + depth * (f - n);
         offset = 32.0f; //Orthographic depth requires a larger offset to give out correct normals
-    }";
+    }");
 
                 if (surfaceThickness == SurfaceThickness.Infinite)
-                    Source += @"
-    if (viewPos.z > linearEyeDepth - radius)";
+                    Source.AppendLine(@"
+    if (viewPos.z > linearEyeDepth - radius)");
                 else
-                    Source += @"
-    if (viewPos.z > linearEyeDepth - radius && viewPos.z < linearEyeDepth + radius + surfaceThickness)";
+                    Source.AppendLine(@"
+    if (viewPos.z > linearEyeDepth - radius && viewPos.z < linearEyeDepth + radius + surfaceThickness)");
 
-                Source += @"
+                Source.AppendLine(@"
     {
-        const float2 pixelOffset = offset / Camera_pixelDimensions;
+        hit = true;
+        const float2 pixelOffset = offset / Camera_scaledPixelDimensions;
 
         float2 projPos10 = projPos.xy + float2(pixelOffset.x,0.0f);
         float2 projPos01 = projPos.xy + float2(0.0f,pixelOffset.y);
 
-        int2 depthPos10 = clamp(int2((projPos10 * 0.5f + 0.5f) * Camera_pixelDimensions), 0, Camera_pixelDimensions - 1);
-        int2 depthPos01 = clamp(int2((projPos01 * 0.5f + 0.5f) * Camera_pixelDimensions), 0, Camera_pixelDimensions - 1);
+        int2 depthPos10 = clamp(int2((projPos10 * 0.5f + 0.5f) * Camera_scaledPixelDimensions), 0, Camera_scaledPixelDimensions - 1);
+        int2 depthPos01 = clamp(int2((projPos01 * 0.5f + 0.5f) * Camera_scaledPixelDimensions), 0, Camera_scaledPixelDimensions - 1);
 
         float depth10 = LOAD_TEXTURE2D_X(Camera_depthBuffer.t, depthPos10).r;
         float depth01 = LOAD_TEXTURE2D_X(Camera_depthBuffer.t, depthPos01).r;
@@ -167,19 +180,15 @@ if (aProjPos.x < 1.0f && aProjPos.y < 1.0f) // visible on screen
         }
         viewPos *= r; // Position on depth surface
 
-        float3 n = normalize(cross(vPos01.xyz - viewPos,vPos10.xyz - viewPos));
-        n = normalize(mul((float3x3)ViewToVFX,n));
+        hitNormal = normalize(cross(vPos01.xyz - viewPos,vPos10.xyz - viewPos));
+        hitNormal = normalize(mul((float3x3)ViewToVFX, hitNormal));
 
         viewPos *= 1.0f - radius / linearEyeDepth; // Push based on radius
-        position = mul(ViewToVFX,float4(viewPos,1.0f)).xyz;
-";
-
-                Source += collisionResponseSource;
-                Source += @"
+        hitPos = mul(ViewToVFX,float4(viewPos,1.0f)).xyz;
     }
-}";
-
-                return Source;
+}
+");
+                return Source.ToString();
             }
         }
     }

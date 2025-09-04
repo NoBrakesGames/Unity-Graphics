@@ -6,12 +6,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor.Callbacks;
+using UnityEditor.Rendering.Analytics;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Assertions;
 using UnityEngine.Rendering;
-
-using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace UnityEditor.Rendering
 {
@@ -25,7 +24,19 @@ namespace UnityEditor.Rendering
         // Keep these settings in a separate scriptable object so we can handle undo/redo on them
         // without the rest of the debug window interfering
         public int currentStateHash;
-        public int selectedPanel;
+
+        public int selectedPanel
+        {
+            get => Mathf.Max(0, DebugManager.instance.PanelIndex(selectedPanelDisplayName));
+            set
+            {
+                var displayName = DebugManager.instance.PanelDiplayName(value);
+                if (!string.IsNullOrEmpty(displayName))
+                    selectedPanelDisplayName = displayName;
+            }
+        }
+
+        public string selectedPanelDisplayName;
 
         void OnEnable()
         {
@@ -33,6 +44,7 @@ namespace UnityEditor.Rendering
         }
     }
 
+    [CoreRPHelpURL("Rendering-Debugger")]
     sealed class DebugWindow : EditorWindowWithHelpButton, IHasCustomMenu
     {
         static Styles s_Styles;
@@ -58,48 +70,10 @@ namespace UnityEditor.Rendering
         static Dictionary<Type, Type> s_WidgetStateMap; // DebugUI.Widget type -> DebugState type
         static Dictionary<Type, DebugUIDrawer> s_WidgetDrawerMap; // DebugUI.Widget type -> DebugUIDrawer
 
-        static bool s_Open;
         public static bool open
         {
-            get => s_Open;
-            private set
-            {
-                if (s_Open ^ value)
-                    OnDebugWindowToggled?.Invoke(value);
-                s_Open = value;
-            }
-        }
-        static event Action<bool> OnDebugWindowToggled;
-
-        protected override void OnHelpButtonClicked()
-        {
-            //Deduce documentation url and open it in browser
-            var url = GetSpecificURL() ?? GetDefaultURL();
-            Application.OpenURL(url);
-        }
-
-        string GetDefaultURL()
-        {
-            //Find package info of the current CoreRP package
-            return $"https://docs.unity3d.com/Packages/com.unity.render-pipelines.core@{DocumentationInfo.version}/manual/Rendering-Debugger.html";
-        }
-
-        string GetSpecificURL()
-        {
-            //Find package info of the current RenderPipeline
-            var currentPipeline = GraphicsSettings.currentRenderPipeline;
-            if (currentPipeline == null)
-                return null;
-
-            if (!DocumentationUtils.TryGetPackageInfoForType(currentPipeline.GetType(), out var packageName, out var version))
-                return null;
-
-            return packageName switch
-            {
-                "com.unity.render-pipelines.universal" => $"https://docs.unity3d.com/Packages/com.unity.render-pipelines.universal@{version}/manual/features/rendering-debugger.html",
-                "com.unity.render-pipelines.high-definition" => $"https://docs.unity3d.com/Packages/com.unity.render-pipelines.high-definition@{version}/manual/Render-Pipeline-Debug-Window.html",
-                _ => null
-            };
+            get => DebugManager.instance.displayEditorUI;
+            private set => DebugManager.instance.displayEditorUI = value;
         }
 
         [DidReloadScripts]
@@ -109,9 +83,6 @@ namespace UnityEditor.Rendering
 
             //find if it where open, relink static event end propagate the info
             open = (Resources.FindObjectsOfTypeAll<DebugWindow>()?.Length ?? 0) > 0;
-            if (OnDebugWindowToggled == null)
-                OnDebugWindowToggled += DebugManager.instance.ToggleEditorUI;
-            DebugManager.instance.ToggleEditorUI(open);
         }
 
         static void RebuildTypeMaps()
@@ -171,9 +142,6 @@ namespace UnityEditor.Rendering
 
         void OnEnable()
         {
-            if (OnDebugWindowToggled == null)
-                OnDebugWindowToggled += DebugManager.instance.ToggleEditorUI;
-
             open = true;
 
             DebugManager.instance.refreshEditorRequested = false;
@@ -205,6 +173,8 @@ namespace UnityEditor.Rendering
                 && selectedPanelIndex < panels.Count
                 && panels[selectedPanelIndex].editorForceUpdate)
                 EditorApplication.update += Repaint;
+
+            GraphicsToolLifetimeAnalytic.WindowOpened<DebugWindow>();
         }
 
         // Note: this won't get called if the window is opened when the editor itself is closed
@@ -215,6 +185,11 @@ namespace UnityEditor.Rendering
             Undo.ClearUndo(m_Settings);
 
             DestroyWidgetStates();
+        }
+
+        private void OnDisable()
+        {
+            GraphicsToolLifetimeAnalytic.WindowClosed<DebugWindow>();
         }
 
         public void DestroyWidgetStates()
@@ -239,6 +214,7 @@ namespace UnityEditor.Rendering
                 return;
 
             // Clear states from memory that don't have a corresponding widget
+            List<string> keysToRemove = new ();
             foreach (var state in m_WidgetStates)
             {
                 var widget = DebugManager.instance.GetItem(state.Key);
@@ -247,7 +223,14 @@ namespace UnityEditor.Rendering
                     var s = state.Value;
                     Undo.ClearUndo(s); // Don't leave dangling states in the global undo/redo stack
                     DestroyImmediate(s);
+                    keysToRemove.Add(state.Key);
                 }
+            }
+
+            // Cleanup null entries because they can break the dictionary serialization
+            foreach (var key in keysToRemove)
+            {
+                m_WidgetStates.Remove(key);
             }
 
             UpdateWidgetStates();
@@ -494,9 +477,22 @@ namespace UnityEditor.Rendering
                 {
                     using (new EditorGUILayout.VerticalScope())
                     {
+                        var selectedPanel = panels[m_Settings.selectedPanel];
+
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            var style = new GUIStyle(CoreEditorStyles.sectionHeaderStyle) { fontStyle = FontStyle.Bold };
+                            EditorGUILayout.LabelField(new GUIContent(selectedPanel.displayName), style);
+
+                            // Context menu
+                            var rect = GUILayoutUtility.GetLastRect();
+                            var contextMenuRect = new Rect(rect.xMax, rect.y + 4f, 16f, 16f);
+
+                            CoreEditorUtils.ShowHelpButton(contextMenuRect, selectedPanel.documentationUrl, new GUIContent($"{selectedPanel.displayName} panel."));
+                        }
+
                         const float leftMargin = 4f;
                         GUILayout.Space(leftMargin);
-                        var selectedPanel = panels[m_Settings.selectedPanel];
 
                         using (var scrollScope = new EditorGUILayout.ScrollViewScope(m_ContentScroll))
                         {
@@ -548,6 +544,11 @@ namespace UnityEditor.Rendering
             if (widget.isInactiveInEditor || widget.isHidden)
                 return;
 
+            if (widget.queryPath == null)
+            {
+                Debug.LogError($"Widget {widget.GetType()} query path is null");
+                return;
+            }
             // State will be null for stateless widget
             m_WidgetStates.TryGetValue(widget.queryPath, out DebugState state);
 
@@ -611,6 +612,7 @@ namespace UnityEditor.Rendering
             public readonly Color skinBackgroundColor;
 
             public static GUIStyle centeredLeft = new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleLeft };
+            public static GUIStyle centeredLeftAlternate = new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleLeft };
             public static float singleRowHeight = EditorGUIUtility.singleLineHeight + EditorGUIUtility.standardVerticalSpacing;
 
             public static int foldoutColumnWidth = 70;
@@ -621,6 +623,12 @@ namespace UnityEditor.Rendering
                 Color textColorLightSkin = new Color32(102, 102, 102, 255);
                 Color backgroundColorDarkSkin = new Color32(38, 38, 38, 128);
                 Color backgroundColorLightSkin = new Color32(128, 128, 128, 96);
+
+                centeredLeftAlternate.normal.background = CoreEditorUtils.CreateColoredTexture2D(
+                    EditorGUIUtility.isProSkin
+                        ? new Color(63 / 255.0f, 63 / 255.0f, 63 / 255.0f, 255 / 255.0f)
+                        : new Color(202 / 255.0f, 202 / 255.0f, 202 / 255.0f, 255 / 255.0f),
+                    "centeredLeftAlternate Background");
 
                 sectionScrollView = new GUIStyle(sectionScrollView);
                 sectionScrollView.overflow.bottom += 1;
@@ -635,6 +643,15 @@ namespace UnityEditor.Rendering
                 skinBackgroundColor = EditorGUIUtility.isProSkin ? backgroundColorDarkSkin : backgroundColorLightSkin;
 
                 labelWithZeroValueStyle.normal.textColor = Color.gray;
+
+                // Make sure that textures are unloaded on domain reloads.
+                void OnBeforeAssemblyReload()
+                {
+                    UnityEngine.Object.DestroyImmediate(centeredLeftAlternate.normal.background);
+                    AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
+                }
+
+                AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             }
         }
 

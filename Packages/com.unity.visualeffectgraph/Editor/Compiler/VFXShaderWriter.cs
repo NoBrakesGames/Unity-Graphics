@@ -5,7 +5,6 @@ using System.Text;
 using System.Globalization;
 using UnityEngine;
 using UnityEngine.VFX;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Collections.ObjectModel;
 
@@ -26,6 +25,15 @@ namespace UnityEditor.VFX
             }
             return prefix;
         }
+    }
+
+    interface IHLSLCodeHolder : IEquatable<IHLSLCodeHolder>
+    {
+        IEnumerable<string> includes { get; }
+        ShaderInclude shaderFile { get; }
+        string sourceCode { get; set; }
+        string customCode { get; }
+        bool HasShaderFile();
     }
 
     class VFXShaderWriter
@@ -295,10 +303,11 @@ namespace UnityEditor.VFX
             }
         }
 
-        public void WriteBufferTypeDeclaration(IEnumerable<Type> types)
+        public void WriteBufferTypeDeclaration(IEnumerable<BufferUsage> usages)
         {
-            types = types.Select(type =>
+            var types = usages.Select(usage =>
             {
+                var type = usage.actualType;
                 if (IsBufferBuiltinType(type))
                 {
                     //Resolve type which are conflicting behind the same VFXValueType (Vector4 & Color for instance)
@@ -310,22 +319,25 @@ namespace UnityEditor.VFX
 
             var alreadyGeneratedStructure = new HashSet<Type>();
             foreach (var type in types)
+            {
+                if (type == typeof(void))
+                    continue;
+                     
                 WriteBufferTypeDeclaration(type, alreadyGeneratedStructure);
+            }
         }
 
-        public void WriteBuffer(VFXUniformMapper mapper, ReadOnlyDictionary<VFXExpression, Type> usageGraphicsBuffer)
+        public void WriteBuffer(VFXUniformMapper mapper, ReadOnlyDictionary<VFXExpression, BufferUsage> usageBuffer)
         {
             foreach (var buffer in mapper.buffers)
             {
                 var name = mapper.GetName(buffer);
-
-                if (buffer.valueType == VFXValueType.Buffer && usageGraphicsBuffer.TryGetValue(buffer, out var type))
+                if (buffer.valueType == VFXValueType.Buffer && usageBuffer.TryGetValue(buffer, out var type))
                 {
-                    if (type == null)
+                    if (!type.valid)
                         throw new NullReferenceException("Unexpected null type in graphicsBuffer usage");
 
-                    var structureName = GetStructureName(type);
-                    WriteLineFormat("StructuredBuffer<{0}> {1};", structureName, name);
+                    WriteLineFormat("{0} {1};", GetBufferDeclaration(type), name);
                 }
                 else
                 {
@@ -340,8 +352,8 @@ namespace UnityEditor.VFX
             {
                 var names = mapper.GetNames(texture);
                 // TODO At the moment issue all names sharing the same texture as different texture slots. This is not optimized as it required more texture binding than necessary
-                // TODO : Investigate why we need Distinct in the first place
-                foreach (var name in names.Distinct())
+                Debug.Assert(names.Distinct().Count() == names.Count);
+                foreach (var name in names)
                 {
                     if (skipNames != null && skipNames.Contains(name))
                         continue;
@@ -370,7 +382,6 @@ namespace UnityEditor.VFX
         {
             bool needsGraphValueStruct = false;
             var contextUniforms = contextUniformMapper.uniforms;
-
             if (contextUniforms.Any())
             {
                 needsGraphValueStruct = true;
@@ -388,13 +399,26 @@ namespace UnityEditor.VFX
                 Deindent();
                 WriteLine("};");
             }
-
-            if (needsGraphValueStruct)
-            {
-                WriteLine("ByteAddressBuffer graphValuesBuffer;");
-                WriteLine();
-            }
+            WriteLine("ByteAddressBuffer graphValuesBuffer;");
+            WriteLine();
             return needsGraphValueStruct;
+        }
+
+        public void GenerateLoadContextData(VFXDataParticle.GraphValuesLayout graphValuesLayout)
+        {
+            uint structSize = graphValuesLayout.paddedSizeInBytes;
+            WriteLine("struct ContextData");
+            WriteLine("{");
+            WriteLine("    uint maxParticleCount;");
+            WriteLine("    uint systemSeed;");
+            WriteLine("    uint initSpawnIndex;");
+            WriteLine("};");
+
+            WriteLine("ContextData contextData;");
+            WriteLine($"uint4 rawContextData = graphValuesBuffer.Load4(instanceActiveIndex * {structSize});");
+            WriteLine($"contextData.maxParticleCount = rawContextData.x;");
+            WriteLine($"contextData.systemSeed = rawContextData.y;");
+            WriteLine($"contextData.initSpawnIndex = rawContextData.z;");
         }
 
         public void GenerateFillGraphValuesStruct(VFXUniformMapper contextUniformMapper, VFXDataParticle.GraphValuesLayout graphValuesLayout)
@@ -405,10 +429,8 @@ namespace UnityEditor.VFX
             if (contextUniforms.Any())
             {
                 contextUniforms = contextUniforms.OrderBy(o => nameToOffset[contextUniformMapper.GetName(o)]);
-
                 WriteLine("GraphValues graphValues;");
                 WriteLine();
-
                 foreach (var value in contextUniforms)
                 {
                     string name = contextUniformMapper.GetName(value);
@@ -472,9 +494,21 @@ namespace UnityEditor.VFX
             return parameters.Count == 0 ? "" : parameters.Aggregate((a, b) => a + ", " + b);
         }
 
-        private static string GetFunctionParameterType(VFXValueType type)
+        private static string GetBufferDeclaration(BufferUsage bufferUsage)
         {
-            switch (type)
+            if (string.IsNullOrEmpty(bufferUsage.verbatimType))
+                return bufferUsage.container.ToString();
+
+            var verbatimType = IsBufferBuiltinType(bufferUsage.actualType)
+                ? VFXExpression.TypeToCode(VFXExpression.GetVFXValueTypeFromType(bufferUsage.actualType))
+                : bufferUsage.verbatimType;
+
+            return $"{bufferUsage.container}<{verbatimType}>";
+        }
+
+        private static string GetFunctionParameterType(VFXExpression exp, ReadOnlyDictionary<VFXExpression, BufferUsage> usages)
+        {
+            switch (exp.valueType)
             {
                 case VFXValueType.Texture2D: return "VFXSampler2D";
                 case VFXValueType.Texture2DArray: return "VFXSampler2DArray";
@@ -482,8 +516,12 @@ namespace UnityEditor.VFX
                 case VFXValueType.TextureCube: return "VFXSamplerCube";
                 case VFXValueType.TextureCubeArray: return "VFXSamplerCubeArray";
                 case VFXValueType.CameraBuffer: return "VFXSamplerCameraBuffer";
+                case VFXValueType.Buffer:
+                    if (!usages.TryGetValue(exp, out var usage))
+                        throw new KeyNotFoundException("Cannot find appropriate usage for " + exp);
+                    return GetBufferDeclaration(usage);
                 default:
-                    return VFXExpression.TypeToCode(type);
+                    return VFXExpression.TypeToCode(exp.valueType);
             }
         }
 
@@ -519,13 +557,13 @@ namespace UnityEditor.VFX
             public VFXAttributeMode mode;
         }
 
-        public void WriteBlockFunction(VFXExpressionMapper mapper, string functionName, string source, IEnumerable<FunctionParameter> parameters, string commentMethod)
+        public void WriteBlockFunction(VFXTaskCompiledData taskData, string functionName, string source, IEnumerable<FunctionParameter> parameters, string commentMethod)
         {
             var parametersCode = new List<string>();
             foreach (var parameter in parameters)
             {
                 var inputModifier = GetInputModifier(parameter.mode);
-                var parameterType = GetFunctionParameterType(parameter.expression.valueType);
+                var parameterType = GetFunctionParameterType(parameter.expression, taskData.bufferUsage);
                 parametersCode.Add(string.Format("{0}{1} {2}", inputModifier, parameterType, parameter.name));
             }
 

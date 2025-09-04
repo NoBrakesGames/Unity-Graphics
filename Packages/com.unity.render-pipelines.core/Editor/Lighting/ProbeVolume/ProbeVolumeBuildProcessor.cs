@@ -1,12 +1,13 @@
 using System.IO;
 using System.Collections.Generic;
 using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace UnityEditor.Rendering
 {
-    class ProbeVolumeBuildProcessor : BuildPlayerProcessor
+    class ProbeVolumeBuildProcessor : BuildPlayerProcessor, IPostprocessBuildWithReport
     {
         const string kTempAPVStreamingAssetsPath = "TempAPVStreamingAssets";
 
@@ -16,9 +17,29 @@ namespace UnityEditor.Rendering
             return Path.Combine(libraryPath, kTempAPVStreamingAssetsPath);
         }
 
-        void CopyStreamableAsset(in ProbeVolumeBakingSet.StreamableAsset asset, string basePath)
+        // Include an asset in the build. The mechanism for doing so depends on whether we are using StreamingAssets path.
+        static void IncludeStreamableAsset(ProbeVolumeStreamableAsset asset, string basePath, bool useStreamingAsset)
         {
-            var assetPath = AssetDatabase.GUIDToAssetPath(asset.assetGUID);
+            if (useStreamingAsset)
+            {
+                asset.ClearAssetReferenceForBuild();
+                CopyStreamableAsset(asset, basePath);
+            }
+            else
+            {
+                asset.EnsureAssetLoaded();
+            }
+        }
+
+        // Ensure that an asset is not included in the build.
+        static void StripStreambleAsset(ProbeVolumeStreamableAsset asset)
+        {
+            asset.ClearAssetReferenceForBuild();
+        }
+
+        static void CopyStreamableAsset(ProbeVolumeStreamableAsset asset, string basePath)
+        {
+            var assetPath = asset.GetAssetPath();
             if (!File.Exists(assetPath))
             {
                 Debug.LogError($"Missing APV data asset {assetPath}. Please make sure that the lighting has been baked properly.");
@@ -27,14 +48,14 @@ namespace UnityEditor.Rendering
             File.Copy(assetPath, Path.Combine(basePath, asset.assetGUID + ".bytes"));
         }
 
-        void GetProbeVolumeProjectSettings(BuildPlayerContext buildPlayerContext, out ProbeVolumeSHBands maxSHBands, out ProbeVolumeSceneData sceneData)
+        void GetProbeVolumeProjectSettings(BuildTarget target, out bool supportProbeVolume, out ProbeVolumeSHBands maxSHBands)
         {
             // Grab all assets used for the build.
             List<RenderPipelineAsset> srpAssets = new List<RenderPipelineAsset>();
-            buildPlayerContext.BuildPlayerOptions.target.TryGetRenderPipelineAssets(srpAssets);
+            target.TryGetRenderPipelineAssets(srpAssets);
 
             maxSHBands = ProbeVolumeSHBands.SphericalHarmonicsL1;
-            sceneData = null;
+            supportProbeVolume = false;
 
             foreach (var asset in srpAssets)
             {
@@ -42,40 +63,55 @@ namespace UnityEditor.Rendering
                 // If at least one asset needs L2 then we can return.
                 if (probeVolumeEnabledRenderPipeline != null)
                 {
+                    supportProbeVolume |= probeVolumeEnabledRenderPipeline.supportProbeVolume;
+
                     if (probeVolumeEnabledRenderPipeline.maxSHBands == ProbeVolumeSHBands.SphericalHarmonicsL2)
                         maxSHBands = ProbeVolumeSHBands.SphericalHarmonicsL2;
-
-                    sceneData = probeVolumeEnabledRenderPipeline.probeVolumeSceneData;
                 }
             }
         }
 
+        // Keep track of which assets we touched during the build, so we can restore them after the build.
+        private static HashSet<ProbeVolumeBakingSet> s_BakingSetsProcessedLastBuild = new();
+
         public override void PrepareForBuild(BuildPlayerContext buildPlayerContext)
         {
-            GetProbeVolumeProjectSettings(buildPlayerContext, out var maxSHBands, out var probeVolumeSceneData);
+            GetProbeVolumeProjectSettings(buildPlayerContext.BuildPlayerOptions.target, out bool supportProbeVolume, out var maxSHBands);
 
-            // No APV in the project.
-            if (probeVolumeSceneData == null)
+            if (!supportProbeVolume)
                 return;
+
+            // We need to make sure the baking set map is properly initialized.
+            // Since it's done only at APV init, we call it explicitely here in case APV was not used yet in this session.
+            ProbeVolumeBakingSet.SyncBakingSets();
 
             var tempStreamingAssetsPath = GetTempAPVStreamingAssetsPath();
 
             // Delete previously built data. This way we remove any data from scenes that are no longer in the build.
             if (Directory.Exists(tempStreamingAssetsPath))
-                Directory.Delete(tempStreamingAssetsPath, recursive: true);
+            {
+                try
+                {
+                    Directory.Delete(tempStreamingAssetsPath, recursive: true);
+                }
+                catch
+                {
+                    // This can happen if for example the folder is write protected
+                    // This is not ideal but don't block project build
+                }
+            }
 
             Directory.CreateDirectory(tempStreamingAssetsPath);
 
-            HashSet<ProbeVolumeBakingSet> processedBakingSets = new HashSet<ProbeVolumeBakingSet>();
-
+            s_BakingSetsProcessedLastBuild.Clear();
             foreach (var scene in buildPlayerContext.BuildPlayerOptions.scenes)
             {
                 var sceneGUID = AssetDatabase.AssetPathToGUID(scene);
-                var bakingSet = probeVolumeSceneData.GetBakingSetForScene(sceneGUID);
+                var bakingSet = ProbeVolumeBakingSet.GetBakingSetForScene(sceneGUID);
                 if (bakingSet != null)
                 {
                     // Already processed (different scenes can belong to the same baking set).
-                    if (processedBakingSets.Contains(bakingSet))
+                    if (s_BakingSetsProcessedLastBuild.Contains(bakingSet))
                         continue;
 
                     if (!bakingSet.cellSharedDataAsset.IsValid()) // Not baked
@@ -86,26 +122,59 @@ namespace UnityEditor.Rendering
 
                     Directory.CreateDirectory(basePath);
 
-                    CopyStreamableAsset(bakingSet.cellSharedDataAsset, basePath);
-                    CopyStreamableAsset(bakingSet.cellBricksDataAsset, basePath);
+                    bool useStreamingAsset = !GraphicsSettings.GetRenderPipelineSettings<ProbeVolumeGlobalSettings>().probeVolumeDisableStreamingAssets;
+
+                    IncludeStreamableAsset(bakingSet.cellSharedDataAsset, basePath, useStreamingAsset);
+                    IncludeStreamableAsset(bakingSet.cellBricksDataAsset, basePath, useStreamingAsset);
                     // For now we always strip support data in build as it's mostly unsupported.
                     // Later we'll need a proper option to strip it or not.
                     bool stripSupportData = true;
-                    if (!stripSupportData)
-                        CopyStreamableAsset(bakingSet.cellSupportDataAsset, basePath);
+                    if (stripSupportData)
+                        StripStreambleAsset(bakingSet.cellSupportDataAsset);
+                    else
+                        IncludeStreamableAsset(bakingSet.cellSupportDataAsset, basePath, useStreamingAsset);
 
                     foreach (var scenario in bakingSet.scenarios)
                     {
-                        CopyStreamableAsset(scenario.Value.cellDataAsset, basePath);
+                        IncludeStreamableAsset(scenario.Value.cellDataAsset, basePath, useStreamingAsset);
                         if (maxSHBands == ProbeVolumeSHBands.SphericalHarmonicsL2)
-                            CopyStreamableAsset(scenario.Value.cellOptionalDataAsset, basePath);
+                            IncludeStreamableAsset(scenario.Value.cellOptionalDataAsset, basePath, useStreamingAsset);
+                        else
+                            StripStreambleAsset(scenario.Value.cellOptionalDataAsset);
+
+                        if (bakingSet.bakedProbeOcclusion)
+                            IncludeStreamableAsset(scenario.Value.cellProbeOcclusionDataAsset, basePath, useStreamingAsset);
+                        else
+                            StripStreambleAsset(scenario.Value.cellProbeOcclusionDataAsset);
                     }
 
-                    processedBakingSets.Add(bakingSet);
+                    s_BakingSetsProcessedLastBuild.Add(bakingSet);
                 }
             }
 
-            buildPlayerContext.AddAdditionalPathToStreamingAssets(tempStreamingAssetsPath, ProbeGIBaking.kAPVStreamingAssetsPath);
+            buildPlayerContext.AddAdditionalPathToStreamingAssets(tempStreamingAssetsPath, AdaptiveProbeVolumes.kAPVStreamingAssetsPath);
+        }
+
+        public void OnPostprocessBuild(BuildReport report)
+        {
+            if (s_BakingSetsProcessedLastBuild == null || s_BakingSetsProcessedLastBuild.Count == 0)
+                return;
+
+            // Go over each asset reference we touched during the last build, make sure asset references are intact.
+            foreach (var bakingSet in s_BakingSetsProcessedLastBuild)
+            {
+                bakingSet.cellBricksDataAsset.EnsureAssetLoaded();
+                bakingSet.cellSharedDataAsset.EnsureAssetLoaded();
+                bakingSet.cellSupportDataAsset.EnsureAssetLoaded();
+                foreach (var scenario in bakingSet.scenarios)
+                {
+                    scenario.Value.cellDataAsset.EnsureAssetLoaded();
+                    scenario.Value.cellOptionalDataAsset.EnsureAssetLoaded();
+                    scenario.Value.cellProbeOcclusionDataAsset.EnsureAssetLoaded();
+                }
+            }
+
+            s_BakingSetsProcessedLastBuild.Clear();
         }
     }
 }

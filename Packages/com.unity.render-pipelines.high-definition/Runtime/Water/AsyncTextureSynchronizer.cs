@@ -18,9 +18,10 @@ namespace UnityEngine.Rendering.HighDefinition
         // The pair of buffers that allows us to keep doing the async readback "permanently"
         NativeArray<T>[] m_InternalBuffers = new NativeArray<T>[2];
         int2 m_CurrentResolution = new int2(0, 0);
+        int m_CurrentSlices = 0;
 
         // Tracker of the current "valid" buffer
-        int m_CurrentBuffer = 1;
+        int m_CurrentBuffer = -1;
 
         // GPU buffer that the synchronizer will read from
         RenderTexture m_InternalRT;
@@ -35,25 +36,33 @@ namespace UnityEngine.Rendering.HighDefinition
         GraphicsFormat m_InternalGraphicsFormat;
 
         // Callback for the end of the async readback
-        public struct AsyncTextureSynchronizerCallBack
-        {
-            public AsyncTextureSynchronizer<T> ats;
-            public void OnReceive(AsyncGPUReadbackRequest request)
-            {
-                if (!request.hasError)
-                    ats.SwapCurrentBuffer();
-                ats.m_CurrentlyOnGoingJob = false;
-            }
-        }
-        AsyncTextureSynchronizerCallBack callback = new AsyncTextureSynchronizerCallBack();
+        System.Action<AsyncGPUReadbackRequest> m_Callback;
 
         public AsyncTextureSynchronizer(GraphicsFormat format)
         {
-            callback.ats = this;
             m_InternalGraphicsFormat = format;
+            m_Callback = OnReceive;
         }
 
-        public NativeArray<T> CurrentBuffer()
+        public void OnReceive(AsyncGPUReadbackRequest request)
+        {
+            if (!request.hasError)
+                SwapCurrentBuffer();
+            m_CurrentlyOnGoingJob = false;
+        }
+
+        public bool TryGetBuffer(out NativeArray<T> buffer)
+        {
+            if (m_CurrentBuffer == -1)
+            {
+                buffer = default;
+                return false;
+            }
+            buffer = CurrentBuffer();
+            return true;
+        }
+
+        internal NativeArray<T> CurrentBuffer()
         {
             return m_InternalBuffers[m_CurrentBuffer];
         }
@@ -61,6 +70,11 @@ namespace UnityEngine.Rendering.HighDefinition
         public int2 CurrentResolution()
         {
             return m_CurrentResolution;
+        }
+
+        public int CurrentSlices()
+        {
+            return m_CurrentSlices;
         }
 
         void SwapCurrentBuffer()
@@ -79,24 +93,30 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 if (buffer.IsCreated)
                     buffer.Dispose();
-                buffer = new NativeArray<T>(textureSize, Allocator.Persistent);
+                buffer = new NativeArray<T>(textureSize, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             }
         }
 
-        void ValidateResources(int width, int height)
+        void ValidateResources(int width, int height, int slices, TextureDimension dimension)
         {
-            int textureSize = width * height;
+            int textureSize = width * height * slices;
             ValidateNativeBuffer(ref m_InternalBuffers[0], textureSize);
             ValidateNativeBuffer(ref m_InternalBuffers[1], textureSize);
 
             // Make sure the GPU buffer is the right size
-            if (m_InternalRT == null || m_InternalRT.width != width || m_InternalRT.height != height)
+            if (m_InternalRT == null || m_InternalRT.width != width || m_InternalRT.height != height || m_InternalRT.volumeDepth != slices)
             {
                 if (m_InternalRT != null)
                     m_InternalRT.Release();
-                m_InternalRT = new RenderTexture(width, height, 1, m_InternalGraphicsFormat);
+                m_InternalRT = new RenderTexture(width, height, 0, m_InternalGraphicsFormat)
+                {
+                    volumeDepth = slices,
+                    dimension = dimension,
+                    useMipMap = false,
+                };
             }
             m_CurrentResolution = int2(width, height);
+            m_CurrentSlices = slices;
         }
 
         public ReadbackCode EnqueueRequest(CommandBuffer cmd, Texture targetTexture, bool intermediateBlit)
@@ -114,19 +134,22 @@ namespace UnityEngine.Rendering.HighDefinition
             m_CurrentlyOnGoingJob = true;
             m_TargetTextureHash = currentHash;
 
+            int slices = 1;
+            if (targetTexture.dimension == TextureDimension.Tex2DArray)
+                slices = ((RenderTexture)targetTexture).volumeDepth;
+
             // No job is going on, so we can free the resources if needed
-            ValidateResources(targetTexture.width, targetTexture.height);
+            ValidateResources(targetTexture.width, targetTexture.height, slices, targetTexture.dimension);
 
             // Decompress and pick a single channel
-            Texture targetRT = null;
+            Texture targetRT = targetTexture;
             if (intermediateBlit)
             {
-                cmd.Blit(targetTexture, m_InternalRT);
+                if (targetTexture.dimension == TextureDimension.Tex2DArray)
+                    cmd.CopyTexture(targetTexture, m_InternalRT);
+                else
+                    cmd.Blit(targetTexture, m_InternalRT);
                 targetRT = m_InternalRT;
-            }
-            else
-            {
-                targetRT = targetTexture;
             }
 
             // Grab the next buffer
@@ -140,7 +163,7 @@ namespace UnityEngine.Rendering.HighDefinition
 #endif
 
             // Enqueue the job
-            cmd.RequestAsyncReadbackIntoNativeArray(ref nextBuffer, targetRT, 0, m_InternalGraphicsFormat, callback.OnReceive);
+            cmd.RequestAsyncReadbackIntoNativeArray(ref nextBuffer, targetRT, 0, m_InternalGraphicsFormat, m_Callback);
 
             // Notify that we enqueued
             return ReadbackCode.Enqueued;
@@ -162,6 +185,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 m_InternalRT.Release();
 
             m_CurrentResolution = 0;
+            m_TargetTextureHash = 0;
         }
     }
 }

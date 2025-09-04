@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
+
 using UnityEditor.VFX.UI;
 using UnityEngine;
 using UnityEngine.VFX;
@@ -9,12 +10,21 @@ namespace UnityEditor.VFX
 {
     class InitializeVariantProvider : VariantProvider
     {
-        protected sealed override Dictionary<string, object[]> variants { get; } = new Dictionary<string, object[]>
+        public override IEnumerable<Variant> GetVariants()
         {
-            {"dataType", Enum.GetValues(typeof(VFXDataParticle.DataType)).Cast<object>().ToArray()}
-        };
+            foreach (var dataType in Enum.GetValues(typeof(VFXDataParticle.DataType)))
+            {
+                yield return new Variant(
+                    "Initialize " + ObjectNames.NicifyVariableName(dataType.ToString()),
+                    VFXLibraryStringHelper.Separator("Common", 0),
+                    typeof(VFXBasicInitialize),
+                    new[] {new KeyValuePair<string, object>("dataType", dataType)}
+                );
+            }
+        }
     }
 
+    [VFXHelpURL("Context-Initialize")]
     [VFXInfo(variantProvider = typeof(InitializeVariantProvider))]
     class VFXBasicInitialize : VFXContext
     {
@@ -79,14 +89,14 @@ namespace UnityEditor.VFX
             base.OnInvalidate(model, cause);
         }
 
-        internal override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal override void GenerateErrors(VFXErrorReporter report)
         {
             VFXSetting capacitySetting = GetSetting("capacity");
 
             if ((uint)capacitySetting.value > UnityEngine.VFX.VFXManager.maxCapacity)
-                manager.RegisterError("CapacityOverMaximum", VFXErrorType.Error, "Systems capacity is greater than maximum capacity. This system will be skipped during rendering.\nYou can modify this limit in ProjectSettings/VFX.");
+                report.RegisterError("CapacityOverMaximum", VFXErrorType.Error, "Systems capacity is greater than maximum capacity. This system will be skipped during rendering.\nYou can modify this limit in ProjectSettings/VFX.", this);
             else if ((uint)capacitySetting.value > 1000000)
-                manager.RegisterError("CapacityOver1M", VFXErrorType.PerfWarning, "Systems with large capacities can be slow to simulate");
+                report.RegisterError("CapacityOver1M", VFXErrorType.PerfWarning, "Systems with large capacities can be slow to simulate", this);
             var data = GetData() as VFXDataParticle;
             if (data != null && CanBeCompiled())
             {
@@ -95,22 +105,41 @@ namespace UnityEditor.VFX
                     if (VFXViewWindow.GetWindow(GetGraph(), false, false)?.graphView?.attachedComponent == null ||
                         !BoardPreferenceHelper.IsVisible(BoardPreferenceHelper.Board.componentBoard, false))
                     {
-                        manager.RegisterError("NeedsRecording", VFXErrorType.Warning,
-                            "In order to record the bounds, the current graph needs to be attached to a scene instance via the Target Game Object panel");
+                        report.RegisterError("NeedsRecording", VFXErrorType.Warning,
+                            "In order to record the bounds, the current graph needs to be attached to a scene instance via the Target Game Object panel", this);
                     }
                     var boundsSlot = inputSlots.FirstOrDefault(s => s.name == nameof(InputPropertiesBounds.bounds));
                     if (boundsSlot != null && boundsSlot.HasLink(true))
                     {
-                        manager.RegisterError("OverriddenRecording", VFXErrorType.Warning,
-                            "This system bounds will not be recorded because they are set from operators.");
+                        report.RegisterError("OverriddenRecording", VFXErrorType.Warning,
+                            "This system bounds will not be recorded because they are set from operators.", this);
                     }
                 }
 
                 if (data.boundsMode == BoundsSettingMode.Automatic)
                 {
-                    manager.RegisterError("CullingFlagAlwaysSimulate", VFXErrorType.Warning,
+                    report.RegisterError("CullingFlagAlwaysSimulate", VFXErrorType.Warning,
                         "Setting the system Bounds Mode to Automatic will switch the culling flags of the Visual Effect asset" +
-                        " to 'Always recompute bounds and simulate'.");
+                        " to 'Always recompute bounds and simulate'.", this);
+                }
+
+                if (data.hasTooManyContext)
+                {
+                    report.RegisterError("TooManyContexts", VFXErrorType.Error, $"Too many contexts within the same system, maximum is {VFXData.kMaxContexts}", this);
+                }
+
+                if (data.hasStrip)
+                {
+                    bool hasDynamicStripIndex = inputSlots.Any(inputSlot => inputSlot.name == "stripIndex" && inputSlot.HasLink() && inputSlot.LinkedSlots.First().GetExpression().Is(VFXExpression.Flags.PerElement));
+                    if (hasDynamicStripIndex)
+                    {
+                        bool hasParticleCountInStripAttribute = data.GetAttributesForContext(this).Any(attribute => attribute.attrib.Equals(VFXAttribute.ParticleCountInStrip));
+                        if (hasParticleCountInStripAttribute)
+                        {
+                            report.RegisterError("WrongParticleCountInStrip", VFXErrorType.Warning,
+                                "Using \"Get Particle Count In Strip\" or \"Get Ratio Over Strip\" in this context will only return the correct value if \"Strip Index\" is constant for all particles.", this);
+                        }
+                    }
                 }
             }
         }

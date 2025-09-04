@@ -15,6 +15,7 @@ Shader "Hidden/HDRP/Sky/CloudLayer"
 
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
+    #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/AtmosphericScattering/AtmosphericScattering.hlsl"
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Sky/CloudSystem/CloudLayer/CloudLayerCommon.hlsl"
 
     struct Attributes
@@ -49,7 +50,7 @@ Shader "Hidden/HDRP/Sky/CloudLayer"
     struct RenderOutput
     {
         float4 colorBuffer : SV_Target0;
-        float4 opacityBuffer : SV_Target1;
+        float4 transmittanceBuffer : SV_Target1;
     };
     #else
     struct RenderOutput
@@ -61,13 +62,33 @@ Shader "Hidden/HDRP/Sky/CloudLayer"
     RenderOutput FragRender(Varyings input)
     {
         UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-        float4 color = RenderClouds(input.positionCS.xy);
+        float3 V = GetSkyViewDirWS(input.positionCS.xy);
+        float4 color = RenderClouds(-V);
         color.rgb *= GetCurrentExposureMultiplier();
         RenderOutput output;
+
+        if (color.a != 0.0f)
+        {
+            float linearDepth = IntersectSphere(_LowestAltitude(0), -V.y, _PlanetaryRadius).y;
+            float3 positionWS = -V * linearDepth;
+
+            // Compute pos inputs
+            PositionInputs posInput = GetPositionInput(input.positionCS.xy, _ScreenSize.zw, positionWS);
+            posInput.linearDepth = linearDepth * dot(-V, GetViewForwardDir());
+            posInput.deviceDepth = UNITY_NEAR_CLIP_VALUE; // unused, just to avoid culling
+
+            // Apply atmospheric fog
+            float3 volColor, volOpacity;
+            EvaluateAtmosphericScattering(posInput, V, volColor, volOpacity);
+            color.xyz = color.xyz * (1 - volOpacity) + volColor * color.a;
+        }
+
         output.colorBuffer = color;
 
         #ifdef CLOUD_RENDER_OPACITY_MRT
-        output.opacityBuffer = 1.0f - color.a;
+        // We always store the total transmittance in the first channel as we don't want to accumulate cloud layers
+        // for the opacity used in the fog multiple scattering.
+        output.transmittanceBuffer = float4(1 - color.a, 1, 1, 1);
         #endif
 
         return output;
@@ -82,7 +103,8 @@ Shader "Hidden/HDRP/Sky/CloudLayer"
         {
             ZWrite Off
             ZTest Always
-            Blend One OneMinusSrcAlpha // Premultiplied alpha
+            Blend 0 One OneMinusSrcAlpha // Premultiplied alpha
+            Blend 1 DstColor Zero
             Cull Off
 
             HLSLPROGRAM
@@ -94,7 +116,8 @@ Shader "Hidden/HDRP/Sky/CloudLayer"
         {
             ZWrite Off
             ZTest LEqual
-            Blend One OneMinusSrcAlpha // Premultiplied alpha
+            Blend 0 One OneMinusSrcAlpha // Premultiplied alpha
+            Blend 1 DstColor Zero
             Cull Off
 
             HLSLPROGRAM

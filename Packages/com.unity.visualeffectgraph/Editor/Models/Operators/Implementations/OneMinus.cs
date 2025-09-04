@@ -1,8 +1,7 @@
-using System;
-
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Arithmetic")]
+    [VFXHelpURL("Operator-OneMinus")]
+    [VFXInfo(name = "One Minus (1-x)", category = "Math/Arithmetic")]
     class OneMinus : VFXOperatorNumericUniform
     {
         public class InputProperties

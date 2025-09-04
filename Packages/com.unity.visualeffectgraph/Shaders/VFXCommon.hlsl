@@ -13,6 +13,18 @@
 #define FIXED_RAND2(h) float2(FIXED_RAND(h),FIXED_RAND(h))
 #define FIXED_RAND3(h) float3(FIXED_RAND(h),FIXED_RAND(h),FIXED_RAND(h))
 #define FIXED_RAND4(h) float4(FIXED_RAND(h),FIXED_RAND(h),FIXED_RAND(h),FIXED_RAND(h))
+#define FIXED_RAND_INT(h) AnotherHash(particleId ^ asuint(systemSeed) ^ h)
+
+#define VFXRAND Rand(attributes.seed)
+#define VFXRAND2 float2(VFXRAND,VFXRAND)
+#define VFXRAND3 float3(VFXRAND,VFXRAND,VFXRAND)
+#define VFXRAND4 float4(VFXRAND,VFXRAND,VFXRAND,VFXRAND)
+#define VFXFIXED_RAND(h) FixedRand(attributes.particleId ^ asuint(systemSeed) ^ h)
+#define VFXFIXED_RAND2(h) float2(VFXFIXED_RAND(h),VFXFIXED_RAND(h))
+#define VFXFIXED_RAND3(h) float3(VFXFIXED_RAND(h),VFXFIXED_RAND(h),VFXFIXED_RAND(h))
+#define VFXFIXED_RAND4(h) float4(VFXFIXED_RAND(h),VFXFIXED_RAND(h),VFXFIXED_RAND(h),VFXFIXED_RAND(h))
+
+
 #define KILL {kill = true;}
 #define SAMPLE sampleSignal
 #define SAMPLE_SPLINE_POSITION(v,u) sampleSpline(v.x,u)
@@ -37,6 +49,9 @@
 #define UNITY_HALF_PI       1.57079632679f
 #define UNITY_INV_HALF_PI   0.636619772367f
 #endif
+
+#define VFXGradient float3
+#define VFXCurve float4
 
 struct VFXSampler2D
 {
@@ -209,6 +224,15 @@ float SampleSDF(VFXSampler3D s, float3 coords, float level = 0.0f)
 {
     return SampleTexture(s, coords, level).x;
 }
+float3 SampleSDFDerivativesFastComplete(VFXSampler3D s, float3 coords, float3 uvStep, float dist)
+{
+    float3 d;
+    // 3 taps
+    d.x = SampleSDF(s, coords + float3(uvStep.x, 0, 0));
+    d.y = SampleSDF(s, coords + float3(0, uvStep.y, 0));
+    d.z = SampleSDF(s, coords + float3(0, 0, uvStep.z));
+    return d - dist;
+}
 
 float3 SampleSDFDerivativesFast(VFXSampler3D s, float3 coords, float dist, float level = 0.0f)
 {
@@ -229,6 +253,17 @@ float3 SampleSDFDerivatives(VFXSampler3D s, float3 coords, float level = 0.0f)
     d.x = SampleSDF(s, coords + float3(kStep, 0, 0)) - SampleSDF(s, coords - float3(kStep, 0, 0));
     d.y = SampleSDF(s, coords + float3(0, kStep, 0)) - SampleSDF(s, coords - float3(0, kStep, 0));
     d.z = SampleSDF(s, coords + float3(0, 0, kStep)) - SampleSDF(s, coords - float3(0, 0, kStep));
+    return d;
+}
+
+//Sample derivatives with a step size derived from the texture dimensions.
+float3 SampleSDFUnscaledDerivatives(VFXSampler3D s, float3 coords, float3 uvStep, float level = 0.0f)
+{
+    float3 d;
+    // 6 taps
+    d.x = SampleSDF(s, coords + float3(uvStep.x, 0, 0)) - SampleSDF(s, coords - float3(uvStep.x, 0, 0));
+    d.y = SampleSDF(s, coords + float3(0, uvStep.y, 0)) - SampleSDF(s, coords - float3(0, uvStep.y, 0));
+    d.z = SampleSDF(s, coords + float3(0, 0, uvStep.z)) - SampleSDF(s, coords - float3(0, 0, uvStep.z));
     return d;
 }
 
@@ -508,6 +543,14 @@ float SampleCurve(float4 curveData, float u)
     return curveData.y * SampleTexture(VFX_SAMPLER(bakedTexture), float2(uNorm, curveData.z), 0)[asuint(curveData.w) & 0x3];
 }
 
+float RemapCurve(float4 curveData, float u, float t)
+{
+    float startInt, endInt;
+    float startFrac = modf(u, startInt);
+    float endFrac = modf(u + t, endInt);
+    return SampleCurve(curveData, endFrac) - SampleCurve(curveData, startFrac) + endInt - startInt;
+}
+
 ///////////
 // Utils //
 ///////////
@@ -522,6 +565,16 @@ float4x4 VFXCreateMatrixFromColumns(float4 i, float4 j, float4 k, float4 o)
 float4 VFXGetColumnFromMatrix(float4x4 mat, int column)
 {
     return transpose(mat)[column];
+}
+
+float4x4 VFXCreateMatrixFromRows(float4 i, float4 j, float4 k, float4 o)
+{
+    return float4x4(i, j, k, o);
+}
+
+float4 VFXGetRowFromMatrix(float4x4 mat, int column)
+{
+    return mat[column];
 }
 
 // Invert 3D transformation matrix (not perspective). Adapted from graphics gems 2.
@@ -561,6 +614,14 @@ float3x3 GetScaleMatrix(float3 scale)
     return float3x3(scale.x, 0, 0,
         0, scale.y, 0,
         0, 0, scale.z);
+}
+
+float4x4 GetScaleMatrix44(float3 scale)
+{
+    return float4x4(scale.x, 0, 0, 0,
+        0, scale.y, 0, 0,
+        0, 0, scale.z, 0,
+        0, 0, 0, 1);
 }
 
 float3x3 GetRotationMatrix(float3 axis, float angle)
@@ -700,20 +761,24 @@ VFXUVData GetUVData(float2 uv) // no flipbooks
     return data;
 }
 
-VFXUVData GetUVData(float2 flipBookSize, float2 invFlipBookSize, float2 uv, float texIndex) // with flipbooks
+VFXUVData GetUVData(float2 flipBookSize, float2 invFlipBookSize, float2 uv, float texIndex, float texIndexBlend) // with flipbooks
 {
     VFXUVData data = (VFXUVData)0;
     float frameBlend = frac(texIndex);
     float frameIndex = texIndex - frameBlend;
     data.uvs.xy = GetSubUV(frameIndex, uv, flipBookSize, invFlipBookSize);
 #if USE_FLIPBOOK_INTERPOLATION
-    data.uvs.zw = GetSubUV(frameIndex + 1, uv, flipBookSize, invFlipBookSize);
+    data.uvs.zw = GetSubUV(frameIndex + texIndexBlend, uv, flipBookSize, invFlipBookSize);
     data.blend = frameBlend;
 #endif
     return data;
 }
+VFXUVData GetUVData(float2 flipBookSize, float2 invFlipBookSize, float2 uv, float texIndex)
+{
+    return GetUVData(flipBookSize, invFlipBookSize, uv, texIndex, 1.0f);
+}
 
-VFXUVData GetUVData(float flipBookSize, float2 uv, float texIndex) // with flipbooks array layout (flipBookSize is a single float)
+VFXUVData GetUVData(float flipBookSize, float2 uv, float texIndex, float texIndexBlend) // with flipbooks array layout (flipBookSize is a single float)
 {
     VFXUVData data = (VFXUVData)0;
     texIndex = fmod(texIndex, flipBookSize);
@@ -721,17 +786,25 @@ VFXUVData GetUVData(float flipBookSize, float2 uv, float texIndex) // with flipb
     float frameIndex = texIndex - frameBlend;
     data.uvs.xyz = float3(uv, frameIndex);
 #if USE_FLIPBOOK_INTERPOLATION
-    data.uvs.w = fmod(frameIndex + 1, flipBookSize);
+    data.uvs.w = frameIndex + texIndexBlend;
     data.blend = frameBlend;
 #endif
     return data;
 }
+VFXUVData GetUVData(float flipBookSize, float2 uv, float texIndex)
+{
+    return GetUVData(flipBookSize, uv, texIndex, 1.0f);
+}
 
-
+VFXUVData GetUVData(float2 flipBookSize, float2 uv, float texIndex, float texIndexBlend)
+{
+    return GetUVData(flipBookSize, 1.0f / flipBookSize, uv, texIndex, texIndexBlend);
+}
 VFXUVData GetUVData(float2 flipBookSize, float2 uv, float texIndex)
 {
-    return GetUVData(flipBookSize, 1.0f / flipBookSize, uv, texIndex);
+    return GetUVData(flipBookSize, uv, texIndex, 1.0f);
 }
+
 //////////////////
 // Orient Utils //
 //////////////////
@@ -842,6 +915,11 @@ uint GetThreadId(uint3 groupId, uint3 groupThreadId, uint dispatchWidth)
 
 #include "VFXNoise.hlsl"
 
+//////////////////////
+// Instancing Utils //
+//////////////////////
+#include "VFXInstancing.hlsl"
+
 ////////////
 // Strips //
 ////////////
@@ -854,8 +932,8 @@ uint GetThreadId(uint3 groupId, uint3 groupThreadId, uint dispatchWidth)
 
 #include "VFXBoundsUtils.hlsl"
 
+///////////////////////////
+// Shape Distances Utils //
+///////////////////////////
 
-//////////////////////
-// Instancing Utils //
-//////////////////////
-#include "VFXInstancing.hlsl"
+#include "VFXShapes.hlsl"

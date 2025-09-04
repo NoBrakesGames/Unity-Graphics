@@ -1,9 +1,9 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Bitwise")]
+    [VFXHelpURL("Operator-BitwiseAnd")]
+    [VFXInfo(name = "And", category = "Bitwise")]
     class BitwiseAnd : VFXOperator
     {
         override public string name { get { return "And"; } }

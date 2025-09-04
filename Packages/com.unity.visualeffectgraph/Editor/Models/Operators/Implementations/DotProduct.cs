@@ -2,6 +2,7 @@ using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
+    [VFXHelpURL("Operator-DotProduct")]
     [VFXInfo(category = "Math/Vector")]
     class DotProduct : VFXOperatorNumericUniform
     {
@@ -19,8 +20,7 @@ namespace UnityEditor.VFX.Operator
             public float d;
         }
 
-        public override string libraryName { get { return "Dot Product"; } }
-        public override string name { get { return "Dot Product"; } }
+        public override string name => "Dot Product";
 
         protected sealed override ValidTypeRule typeFilter
         {

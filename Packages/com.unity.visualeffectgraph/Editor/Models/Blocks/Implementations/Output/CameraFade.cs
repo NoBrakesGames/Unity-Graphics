@@ -1,11 +1,12 @@
 using System.Collections.Generic;
 using System;
 using System.Linq;
+
 using UnityEngine;
-using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Block
 {
+    [VFXHelpURL("Block-CameraFade")]
     [VFXInfo(category = "Output")]
     class CameraFade : VFXBlock
     {
@@ -33,10 +34,9 @@ namespace UnityEditor.VFX.Block
         [SerializeField, VFXSetting(VFXSettingAttribute.VisibleFlags.InInspector), Tooltip("When enabled, the fade will also affect shadow map generation. This could have unexpected results in the shadow when using multiple cameras.")]
         private bool affectShadows = false;
 
-        public override string libraryName { get { return "Camera Fade"; } }
-        public override string name { get { return string.Format("Camera Fade ({0})", ObjectNames.NicifyVariableName(fadeMode.ToString())); } }
-        public override VFXContextType compatibleContexts { get { return VFXContextType.Output; } }
-        public override VFXDataType compatibleData { get { return VFXDataType.Particle; } }
+        public override string name => $"Camera Fade ({ObjectNames.NicifyVariableName(fadeMode.ToString())})";
+        public override VFXContextType compatibleContexts => VFXContextType.Output;
+        public override VFXDataType compatibleData => VFXDataType.Particle;
 
         public override IEnumerable<VFXAttributeInfo> attributes
         {
@@ -78,11 +78,11 @@ namespace UnityEditor.VFX.Block
             }
         }
 
-        internal sealed override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal sealed override void GenerateErrors(VFXErrorReporter report)
         {
-            base.GenerateErrors(manager);
+            base.GenerateErrors(report);
             if (affectShadows && Camera.allCamerasCount > 1)
-                manager.RegisterError("CameraFadeShadowsMultipleCamera", VFXErrorType.Warning, "Camera fade in shadow maps may be incorrect when rendered in more than one camera.");
+                report.RegisterError("CameraFadeShadowsMultipleCamera", VFXErrorType.Warning, "Camera fade in shadow maps may be incorrect when rendered in more than one camera.", this);
         }
 
         public override string source

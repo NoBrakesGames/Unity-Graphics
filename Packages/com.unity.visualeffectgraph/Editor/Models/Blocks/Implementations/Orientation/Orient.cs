@@ -6,15 +6,51 @@ using UnityEngine;
 
 namespace UnityEditor.VFX.Block
 {
-    class OrientationModeProvider : VariantProvider
+    class OrientationModeSubVariantProvider : VariantProvider
     {
-        protected sealed override Dictionary<string, object[]> variants { get; } = new Dictionary<string, object[]>
+        private readonly Orient.Mode[] mainVariantModes;
+
+        public OrientationModeSubVariantProvider(Orient.Mode[] modes)
         {
-            {"mode", Enum.GetValues(typeof(Orient.Mode)).Cast<object>().ToArray()}
-        };
+            mainVariantModes = modes;
+        }
+
+        public override IEnumerable<Variant> GetVariants()
+        {
+            foreach (Orient.Mode mode in Enum.GetValues(typeof(Orient.Mode)))
+            {
+                if (mainVariantModes.Contains(mode))
+                    continue;
+
+                yield return new Variant(
+                    "Orient".AppendLabel(ObjectNames.NicifyVariableName(mode.ToString())),
+                    string.Empty,
+                    typeof(Orient),
+                    new[] {new KeyValuePair<string, object>("mode", mode)});
+            }
+        }
     }
 
-    [VFXInfo(category = "Attribute/orientation", variantProvider = typeof(OrientationModeProvider))]
+    class OrientationModeProvider : VariantProvider
+    {
+        public override IEnumerable<Variant> GetVariants()
+        {
+            var mainVariantModes = new[] { Orient.Mode.FaceCameraPlane, Orient.Mode.AlongVelocity, Orient.Mode.Advanced };
+            for (var i = 0; i < mainVariantModes.Length; i++)
+            {
+                var mode = mainVariantModes[i];
+                yield return new Variant(
+                    "Orient".AppendLabel(ObjectNames.NicifyVariableName(mode.ToString())),
+                    "Orientation",
+                    typeof(Orient),
+                    new[] { new KeyValuePair<string, object>("mode", mode) },
+                    i == 0 ? () => new OrientationModeSubVariantProvider(mainVariantModes) : null);
+            }
+        }
+    }
+
+    [VFXHelpURL("Block-Orient")]
+    [VFXInfo(variantProvider = typeof(OrientationModeProvider))]
     class Orient : VFXBlock
     {
         public enum Mode
@@ -346,9 +382,9 @@ axisY = cross(axisZ, axisX);
             base.Sanitize(version);
         }
 
-        internal sealed override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal sealed override void GenerateErrors(VFXErrorReporter report)
         {
-            base.GenerateErrors(manager);
+            base.GenerateErrors(report);
 
             if (!canTestStrips)
                 return;
@@ -367,7 +403,34 @@ axisY = cross(axisZ, axisX);
             if (hasInvalidMode)
             {
                 string outputTypeStr = hasStrips ? "strip" : "non strip";
-                manager.RegisterError("InvalidOrientMode", VFXErrorType.Error, string.Format("Orient mode {0} is invalid with {1} output", mode, outputTypeStr));
+                report.RegisterError("InvalidOrientMode", VFXErrorType.Error, string.Format("Orient mode {0} is invalid with {1} output", mode, outputTypeStr), this);
+            }
+
+            if (mode is Mode.Advanced or Mode.FixedAxis)
+            {
+                var context = new VFXExpression.Context(VFXExpressionContextOption.CPUEvaluation | VFXExpressionContextOption.ConstantFolding);
+                var expressions = new VFXExpression[GetNbInputSlots()];
+                for (var i = 0; i < GetNbInputSlots(); i++)
+                {
+                    var expression = GetInputSlot(i).GetExpression();
+                    expressions[i] = expression;
+                    context.RegisterExpression(expression);
+                }
+
+                context.Compile();
+
+                for (var i = 0; i < GetNbInputSlots(); i++)
+                {
+                    var expression = expressions[i];
+                    if (context.GetReduced(expression) is { } direction &&
+                        direction.Is(VFXExpression.Flags.Constant) &&
+                        direction.valueType == UnityEngine.VFX.VFXValueType.Float3 &&
+                        direction.Get<Vector3>() is { sqrMagnitude: var sqrMag } &&
+                        (float.IsNaN(sqrMag) || sqrMag <= Mathf.Epsilon))
+                    {
+                        report.RegisterError("InvalidAxis", VFXErrorType.Error, $"{GetInputSlot(i).property.name} vector must not be zero length", this);
+                    }
+                }
             }
         }
 

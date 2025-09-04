@@ -5,14 +5,16 @@ $splice(VFXDefineSpace)
 $splice(VFXDefines)
 #define NULL_GEOMETRY_INPUT defined(HAVE_VFX_PLANAR_PRIMITIVE)
 
+#if HAS_STRIPS
+#define HAS_STRIPS_DATA 1
+#endif
+
 // Explicitly defined here for now (similar to how it was done in the previous VFX code-gen)
 #define HAS_VFX_ATTRIBUTES 1
 
-#if HAS_STRIPS
-// VFX has some internal functions for strips that assume the generically named "Attributes" struct as input.
+// VFX has some internal functions for strips or CustomBlockHLSL that assume the generically named "VFXAttributes" struct as input.
 // For now, override it. TODO: Improve the generic struct name for VFX shader library.
 #define VFXAttributes InternalAttributesElement
-#endif
 
 #define VFX_NEEDS_COLOR_INTERPOLATOR (VFX_USE_COLOR_CURRENT || VFX_USE_ALPHA_CURRENT)
 #if HAS_STRIPS
@@ -28,11 +30,11 @@ StructuredBuffer<uint> indirectBuffer;
 #endif
 
 #if USE_DEAD_LIST_COUNT
-StructuredBuffer<uint> deadListCount;
+StructuredBuffer<uint> deadList;
 #endif
 
-#if HAS_STRIPS
-Buffer<uint> stripDataBuffer;
+#if HAS_STRIPS_DATA
+StructuredBuffer<uint> stripDataBuffer;
 #endif
 
 #if VFX_FEATURE_MOTION_VECTORS_FORWARD || USE_MOTION_VECTORS_PASS
@@ -58,14 +60,17 @@ UNITY_INSTANCING_BUFFER_END(PerInstance)
     #define VFX_GET_INSTANCE_ID(i)      input.instanceID
 #endif
 
+$splice(VFXPerBlockDefines)
+
 $splice(VFXSRPCommonInclude)
 #include "Packages/com.unity.visualeffectgraph/Shaders/VFXCommon.hlsl"
+$splice(VFXPerBlockIncludes)
+#include "Packages/com.unity.visualeffectgraph/Shaders/VFXCommonOutput.hlsl"
 
 $splice(VFXParameterBuffer)
 
 $splice(VFXGeneratedBlockFunction)
 
-#include "Packages/com.unity.visualeffectgraph/Shaders/VFXCommonOutput.hlsl"
 
 struct AttributesElement
 {
@@ -76,7 +81,7 @@ struct AttributesElement
     InternalAttributesElement attributes;
 
     // Additional attribute information for particle strips.
-#if HAS_STRIPS
+#if HAS_STRIPS_DATA
     uint relativeIndexInStrip;
     StripData stripData;
 #endif
@@ -91,8 +96,14 @@ bool ShouldCullElement(uint index, uint vfxInstanceIndex, uint nbMax)
 {
     uint deadCount = 0;
 #if USE_DEAD_LIST_COUNT
-    deadCount = deadListCount[vfxInstanceIndex];
+    deadCount = deadList[vfxInstanceIndex];
 #endif
+
+#if HAS_STRIPS && !VFX_HAS_INDIRECT_DRAW
+    // We render one particle less for each strip in this case
+    nbMax -= STRIP_COUNT;
+#endif
+
     return (index >= nbMax - deadCount);
 }
 
@@ -143,7 +154,6 @@ float3 GetElementSizeRT(InternalAttributesElement attributes
 }
 
 #if HAS_STRIPS
-#define PARTICLE_IN_EDGE (id & 1)
 float3 GetParticlePosition(uint index, uint instanceIndex)
 {
     InternalAttributesElement attributes;
@@ -160,15 +170,21 @@ float3 GetStripTangent(float3 currentPos, uint instanceIndex, uint relativeIndex
     float3 prevTangent = (float3)0.0f;
     if (relativeIndex > 0)
     {
-        uint prevIndex = GetParticleIndex(relativeIndex - 1,stripData);
-        prevTangent = normalize(currentPos - GetParticlePosition(prevIndex,instanceIndex));
+        uint prevIndex = GetParticleIndex(relativeIndex - 1, stripData);
+        float3 tangent = currentPos - GetParticlePosition(prevIndex, instanceIndex);
+        float sqrLength = dot(tangent, tangent);
+        if (sqrLength > VFX_EPSILON * VFX_EPSILON)
+            prevTangent = tangent * rsqrt(sqrLength);
     }
 
     float3 nextTangent = (float3)0.0f;
     if (relativeIndex < stripData.nextIndex - 1)
     {
-        uint nextIndex = GetParticleIndex(relativeIndex + 1,stripData);
-        nextTangent = normalize(GetParticlePosition(nextIndex, instanceIndex) - currentPos);
+        uint nextIndex = GetParticleIndex(relativeIndex + 1, stripData);
+        float3 tangent = GetParticlePosition(nextIndex, instanceIndex) - currentPos;
+        float sqrLength = dot(tangent, tangent);
+        if (sqrLength > VFX_EPSILON * VFX_EPSILON)
+            nextTangent = tangent * rsqrt(sqrLength);
     }
 
     return normalize(prevTangent + nextTangent);
@@ -189,7 +205,7 @@ void GetElementData(inout AttributesElement element)
 
     $splice(VFXLoadAttribute)
 
-    #if HAS_STRIPS
+    #if HAS_STRIPS_DATA
     const StripData stripData = element.stripData;
     const uint relativeIndexInStrip = element.relativeIndexInStrip;
     InitStripAttributes(index, attributes, element.stripData);
@@ -200,7 +216,12 @@ void GetElementData(inout AttributesElement element)
     element.currentFrameIndex = currentFrameIndex;
 #endif
 
+#if !VFX_HAS_INDIRECT_DRAW && !HAS_STRIPS
+    if (attributes.alive)
+#endif  
+    {
     $splice(VFXProcessBlocks)
+    }
 
     element.attributes = attributes;
 }
@@ -209,8 +230,10 @@ void GetElementData(inout AttributesElement element)
 $OutputType.Mesh:            $include("VFXConfigMesh.template.hlsl")
 $OutputType.PlanarPrimitive: $include("VFXConfigPlanarPrimitive.template.hlsl")
 
+#if !defined(SHADER_STAGE_RAY_TRACING)
+
 // Loads the element-specific attribute data, as well as fills any interpolator.
-bool GetInterpolatorAndElementData(inout VFX_SRP_VARYINGS output, inout AttributesElement element)
+bool GetInterpolatorAndElementData(inout VFX_SRP_ATTRIBUTES input, inout VFX_SRP_VARYINGS output, inout AttributesElement element)
 {
     GetElementData(element);
     #if VFX_USE_GRAPH_VALUES
@@ -223,7 +246,11 @@ bool GetInterpolatorAndElementData(inout VFX_SRP_VARYINGS output, inout Attribut
     if (!attributes.alive)
         return false;
     #endif
-
+    #ifdef ATTRIBUTES_NEED_NORMAL
+    float3 size3 = GetElementSize(element.attributes);
+    float normalFlip = (size3.x * size3.y * size3.z) < 0 ? -1 : 1;
+    input.normalOS *= normalFlip;
+    #endif
     $splice(VFXInterpolantsGeneration)
 
     return true;
@@ -265,15 +292,11 @@ void SetupVFXMatrices(AttributesElement element, inout VFX_SRP_VARYINGS output)
         float3(element.attributes.pivotX, element.attributes.pivotY, element.attributes.pivotZ),
         GetElementSize(element.attributes),
         element.attributes.position
-
-#if VFX_APPLY_CAMERA_POSITION_IN_ELEMENT_MATRIX
-        + _WorldSpaceCameraPos
-#endif
     );
 
 #if VFX_LOCAL_SPACE
     elementToWorld = mul(GetSGVFXUnityObjectToWorld(), elementToWorld);
-#else
+#elif !defined(VFX_HAS_PICKING_MATRIX_CORRECTION)
     elementToWorld = ApplyCameraTranslationToMatrix(elementToWorld);
 #endif
 
@@ -286,16 +309,11 @@ void SetupVFXMatrices(AttributesElement element, inout VFX_SRP_VARYINGS output)
         float3(element.attributes.pivotX,element.attributes.pivotY,element.attributes.pivotZ),
         GetElementSize(element.attributes),
         element.attributes.position
-
-#if VFX_APPLY_CAMERA_POSITION_IN_ELEMENT_MATRIX
-        - _WorldSpaceCameraPos
-#endif
-
     );
 
 #if VFX_LOCAL_SPACE
     worldToElement = mul(worldToElement,GetSGVFXUnityWorldToObject());
-#else
+#elif !defined(VFX_HAS_PICKING_MATRIX_CORRECTION)
     worldToElement = ApplyCameraTranslationToInverseMatrix(worldToElement);
 #endif
 
@@ -312,6 +330,7 @@ void SetupVFXMatrices(AttributesElement element, inout VFX_SRP_VARYINGS output)
     output.worldToElement2 = worldToElement[2];
 #endif
 }
+#endif
 
 float4 VFXGetPreviousClipPosition(VFX_SRP_ATTRIBUTES input, AttributesElement element, float4 cPositionFallback)
 {

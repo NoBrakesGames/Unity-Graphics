@@ -5,7 +5,8 @@ using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Camera")]
+    [VFXHelpURL("Operator-ViewportToWorldPoint")]
+    [VFXInfo(category = "Camera", synonyms = new []{ "Convert" })]
     class ViewportToWorldPoint : VFXOperator
     {
         public class InputProperties

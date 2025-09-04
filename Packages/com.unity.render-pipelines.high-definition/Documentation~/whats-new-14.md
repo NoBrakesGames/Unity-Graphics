@@ -12,12 +12,12 @@ In HDRP 14, the [Ray Tracing Settings](Ray-Tracing-Settings.md) volume includes 
 
 ### Fullscreen Shader Graph
 
-![](Images/HDRP-Fullscreen-Frost-Effect.png)
+![Example: Fullscreen Shader Graph.](Images/HDRP-Fullscreen-Frost-Effect.png)
 
 HDRP 14 introduces a new **Fullscreen** Material type in ShaderGraph.
 You can use Fullscreen shaders in fullscreen custom passes, custom post processes and C# scripting.
 
-For more details on how to use fulscreen shaders, see [FullScreen Shader Graph](Fullscreen-Shader-Graph.md).
+For more details on how to use fullscreen shaders, see [Create a fullscreen Shader Graph](create-a-fullscreen-material.md#create-fullscreen-shadergraph).
 
 #### Fullscreen Sample set
 
@@ -32,8 +32,8 @@ Each shader is associated with a prefab that demonstrates how to implement it in
 
 ### Transparency Material Sample Scene
 
-![](Images/HDRP-MaterialSample-ShadowsTransparency.png)
-![](Images/HDRP-MaterialSample-StackingTransparency.png)
+![Material sample: Shadows transparency.](Images/HDRP-MaterialSample-ShadowsTransparency.png)
+![Material sample: Stacking transparency.](Images/HDRP-MaterialSample-StackingTransparency.png)
 
 HDRP 14 includes new sample scenes that demonstrates transparent Materials using different rendering methods:
 - Rasterization.
@@ -55,15 +55,15 @@ HDRP 14 includes a set of industry-standard color monitors that you can use to c
 You can find these monitors in the Rendering Debugger window (menu: **Windows > Analysis > Rendering Debugger**) in the **Rendering** tab.
 
 - **Waveform**: Displays the full range of luma information in the render
-![](Images/new_waveform.png)
+![Example: Waveform.](Images/new_waveform.png)
 - **Parade**: Splits the image into red, green and blue separately
-![](Images/new_waveform_parade.png)
+![Example: Waveform parade.](Images/new_waveform_parade.png)
 - **Vectorscope**: Measures the overall range of hue and saturation within the image
-![](Images/new_vectorscope.png)
+![Example: Vectorscope.](Images/new_vectorscope.png)
 
 ### Denoising in Path Tracing
 
-![](Images/Path-Tracing-Denoise-banner.png)
+![Example: Denoising in Path Tracing.](Images/Path-Tracing-Denoise-banner.png)
 
 HDRP 14 adds denoising for frames that use path tracing. You can choose from the following denoising methods:
 - Optix Denoiser.
@@ -73,12 +73,12 @@ HDRP 14 adds denoising for frames that use path tracing. You can choose from the
 
 in HDRP 14, Local Volumetric Fog volume supports Materials you create in ShaderGraph.
 
-You can use this to create dynamic fog effects. For more information, see [Volumetric Material](Volumetric-Material.md)
-![](Images/Aurora_Fog.png)
+You can use this to create dynamic fog effects. For more information, see [Volumetric Material](create-a-fog-volume-shader.md)
+![Example: Aurora fog.](Images/Aurora_Fog.png)
 
 ### Local Volumetric Fog blending
 
-HDRP 14 adds a **Blending mode** to the [Local Volumetric Fog](Local-Volumetric-Fog.md) component. You can use this property to create various effects, for example, to remove fog inside a house.
+HDRP 14 adds a **Blending mode** to the [Local Volumetric Fog](create-a-local-fog-effect.md) component. You can use this property to create various effects, for example, to remove fog inside a house.
 
 This version also adds a **Priority** property that you can use to control the order in which HDRP blends multiple volumes.
 
@@ -86,7 +86,7 @@ This version also adds a **Priority** property that you can use to control the o
 
 ### Screen Space Reflection
 
-![](Images/ScreenSpaceReflection_SpeedRejection_Debug_whatsnew.png)
+![Example: World Space Speed Rejection.](Images/ScreenSpaceReflection_SpeedRejection_Debug_whatsnew.png)
 
 HDRP 14 adds new properties to the Screen Space Reflection component that you can use to control how the PBR Accumulation SSR algorithm behaves. For example, enable **World Space Speed Rejection** to reject samples based on speed in world space.
 
@@ -98,7 +98,7 @@ For more information, see [Screen Space Reflection](Override-Screen-Space-Reflec
 
 ### Diffusion Profile Scattering Distance
 
-HDRP 14 replaces the [Diffusion Profile](Diffusion-Profile.md) **Scattering Color** HDR color picker with an LDR color picker. The LDR color picker includes a **Multiplier** slider.
+HDRP 14 replaces the [Diffusion Profile](diffusion-profile-reference.md) **Scattering Color** HDR color picker with an LDR color picker. The LDR color picker includes a **Multiplier** slider.
 
 When you upgrade to HDRP 14, it automatically migrates any existing diffusion profiles.
 
@@ -134,7 +134,7 @@ You can find the new Unity material ball asset in `com.unity.render-pipelines.hi
 
 #### Planar and Triplanar Mapping
 
-From HDRP 14, the [Lit Material](Lit-Shader.md) options include the **Emission UV Mapping** property to perform planar and triplanar mapping in Object space. Use these options to keep the texture mapping consistent when a you change a GameObject's transform.
+From HDRP 14, the [Lit Material](lit-material.md) options include the **Emission UV Mapping** property to perform planar and triplanar mapping in Object space. Use these options to keep the texture mapping consistent when a you change a GameObject's transform.
 
 #### Hair Material Samples
 
@@ -161,7 +161,7 @@ HDRP 14 improves the fallbacks for refractive transparent Materials. These impro
 
 ### Cloud Layer
 
-HDRP 14 makes the following improvements to the [Cloud Layer](Override-Cloud-Layer.md):
+HDRP 14 makes the following improvements to the [Cloud Layer](create-simple-clouds-cloud-layer.md):
 
 - The sun light color correctly takes atmospheric attenuation into account when you use the Cloud Layer in combination with the physically based sky.
 - The sun light color now always impacts the color of the clouds, even if raymarching is disabled.
@@ -169,7 +169,7 @@ HDRP 14 makes the following improvements to the [Cloud Layer](Override-Cloud-Lay
 - Changes the **Distortion** property name to **Wind**.
 - Changes the raymarching algorithm to improve scattering, and to give more consistent results when you change the number of steps. Depending on your lighting conditions, you might have to tweak the **Density** and **Exposure** sliders to get the same result as earlier HDRP versions.
 
-![](Images/cl-whats-new.png)
+![Cloud layer sample.](Images/cl-whats-new.png)
 
 ### Renderer bounds access in ShaderGraph
 
@@ -183,7 +183,7 @@ HDRP 14 adds the **Occlusion remap Curve** property to the Lens Flare component.
 
 ### New Eye Shader Subtype
 
-![](Images/EyeCaustic.gif)
+![Eye caustic sample.](Images/EyeCaustic.gif)
 
 HDRP 14.0 includes a new Eye Shader type called **Eye Cinematic with Caustic**. This Eye Shader uses caustics to give a more realistic effect. This makes it more resource-intensive than other HDRP Eye Shaders.
 
@@ -223,7 +223,7 @@ HDRP 14 improves the precision of the Decal Projector's **Angle Fade** property.
 
 ### Improve area light soft shadows
 
-![](Images/SoftAreaShadowImrpovements.png)
+![Soft area shadow improvements sample.](Images/SoftAreaShadowImrpovements.png)
 
 In HDRP 14, soft area shadows are more accurate to the raytraced reference. This version also makes the following changes:
 - **Shadow Filtering Quality** only affects the quality of regular lights.
@@ -231,7 +231,7 @@ In HDRP 14, soft area shadows are more accurate to the raytraced reference. This
 
 ### Ray-Tracing and Terrain
 
-![](Images/DXRTerrain.png)
+![Ray-Tracing and Terrain sample.](Images/DXRTerrain.png)
 
 From HDRP 14, all raytracing effects support Terrain.
 
@@ -243,16 +243,16 @@ HDRP 14 adds the **Time slicing** property to the [Reflection Probe](Reflection-
 
 #### Reflection probe atlas
 
-![](Images/HDRPAtlasCubemap.png)
+![Atlas Cubemap sample.](Images/HDRPAtlasCubemap.png)
 
 HDRP 14 replaces the cube reflection probe cache array with a 2D texture atlas cache in octahedral projection.
 
 Planar reflection probes now use the same 2D texture cache. This means you can control the cube probe resolution for each reflection probe to save memory.
 
-### Water System
-![](Images/WaterSystem2022-2.png)
+### Water system
+![Water system sample.](Images/WaterSystem2022-2.png)
 
-HDRP 14 introduces the Water System. This feature allows you to render highly realistic water surfaces and interact with them. Among the various features that this version includes:
+HDRP 14 introduces the water system. This feature allows you to render highly realistic water surfaces and interact with them. Among the various features that this version includes:
 
 - A shader graph interaction for advanced visual customizations.
 - A mirrored simulation on the CPU for high-fidelity game interactions.

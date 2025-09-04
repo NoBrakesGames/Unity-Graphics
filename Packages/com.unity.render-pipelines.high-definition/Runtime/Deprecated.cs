@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using UnityEngine.Assertions;
 using UnityEngine.Serialization;
 
 namespace UnityEngine.Rendering.HighDefinition
@@ -419,7 +421,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="spotLightShape"></param>
         /// <param name="unit"></param>
         /// <returns></returns>
-        [Obsolete("This method has been deprecated. Use the IsValidLightUnitForType(LightType, LightUnit) overload instead.", false)]
+        [Obsolete("This method has been deprecated. Use LightUnitUtils.IsLightUnitSupported(LightType, LightUnit) instead.", false)]
         public static bool IsValidLightUnitForType(HDLightType type, SpotLightShape spotLightShape, LightUnit unit)
         {
             LightType ltype = type switch
@@ -436,7 +438,131 @@ namespace UnityEngine.Rendering.HighDefinition
                 HDLightType.Area => LightType.Rectangle,
                 _ => throw new ArgumentOutOfRangeException()
             };
-            return IsValidLightUnitForType(ltype, unit);
+            return LightUnitUtils.IsLightUnitSupported(ltype, unit);
+        }
+
+        [Obsolete("This property has been deprecated. Use Light.enableSpotReflector instead.", false)]
+        [SerializeField, FormerlySerializedAs("enableSpotReflector")]
+        bool m_EnableSpotReflector = true;
+
+        /// <summary>This property has been deprecated and moved to Light.</summary>
+        [Obsolete("This property has been deprecated. Use Light.enableSpotReflector instead.", false)]
+        public bool enableSpotReflector
+        {
+            get => legacyLight.enableSpotReflector;
+            set => legacyLight.enableSpotReflector = value;
+        }
+
+        [Obsolete("This property has been deprecated. Use Light.lightUnit instead.", false)]
+        [SerializeField, FormerlySerializedAs("lightUnit")]
+        LightUnit m_LightUnit = LightUnit.Lumen;
+
+        /// <summary>This property has been deprecated and moved to Light.</summary>
+        [Obsolete("This property has been deprecated. Use Light.lightUnit instead.", false)]
+        public LightUnit lightUnit
+        {
+            get => legacyLight.lightUnit;
+            set => legacyLight.lightUnit = value;
+        }
+
+        /// <summary>This method has been deprecated.</summary>
+        /// <param name="unit">Unit of the light</param>
+        [Obsolete("This property has been deprecated. Directly set Light.lightUnit instead.", false)]
+        public void SetLightUnit(LightUnit unit)
+        {
+            legacyLight.lightUnit = unit;
+        }
+
+        /// <summary>This method has been deprecated. If you need to set a light's intensity measured by some light unit,
+        /// you should use the ConvertIntensity(...) method in LightUnitUtils and set Light.intensity directly.</summary>
+        /// <param name="intensity">Light intensity</param>
+        [Obsolete("This method has been deprecated. Use LightUnitUtils.ConvertIntensity(...) & directly set Light.intensity instead.", false)]
+        public void SetIntensity(float intensity)
+        {
+            legacyLight.intensity = LightUnitUtils.ConvertIntensity(legacyLight, intensity, legacyLight.lightUnit, LightUnitUtils.GetNativeLightUnit(legacyLight.type));
+        }
+
+        /// <summary>This method has been deprecated. If you need to set a light's intensity measured by some light unit,
+        /// you should use the ConvertIntensity(...) method in LightUnitUtils and set Light.intensity directly.
+        /// If you need to change the unit, set Light.lightUnit directly.</summary>
+        /// <param name="intensity">Light intensity</param>
+        /// <param name="unit">Unit must be a valid Light Unit for the current light type</param>
+        [Obsolete("This property has been deprecated. Use LightUnitUtils.ConvertIntensity(...) & directly set Light.lightUnit + Light.intensity instead.", false)]
+        public void SetIntensity(float intensity, LightUnit unit)
+        {
+            legacyLight.intensity = LightUnitUtils.ConvertIntensity(legacyLight, intensity, unit, LightUnitUtils.GetNativeLightUnit(legacyLight.type));
+            legacyLight.lightUnit = unit;
+        }
+
+        [Obsolete("This property has been deprecated. Use Light.luxAtDistance instead.", false)]
+        [SerializeField, FormerlySerializedAs("luxAtDistance")]
+        float m_LuxAtDistance = 1.0f;
+
+        /// <summary>This property has been deprecated and moved to Light.</summary>
+        [Obsolete("This property has been deprecated. Use Light.luxAtDistance instead.", false)]
+        public float luxAtDistance
+        {
+            get => legacyLight.luxAtDistance;
+            set => legacyLight.luxAtDistance = value;
+        }
+
+        /// <summary>This method has been deprecated. If you need to set a light's intensity measured by some light unit,
+        /// you should use the ConvertIntensity(...) method in LightUnitUtils and set Light.intensity directly.
+        /// If you need to change the unit, set Light.lightUnit directly.
+        /// If you need to change lux at distance, set light.luxAtDistance directly.</summary>
+        /// <param name="luxIntensity">Lux intensity</param>
+        /// <param name="distance">Lux at distance</param>
+        [Obsolete("This method has been deprecated. Use LightUnitUtils.ConvertIntensity(...) & directly set Light.luxAtDistance + Light.lightUnit + Light.intensity instead.", false)]
+        public void SetSpotLightLuxAt(float luxIntensity, float distance)
+        {
+            legacyLight.luxAtDistance = distance;
+            legacyLight.intensity = LightUnitUtils.ConvertIntensity(legacyLight, luxIntensity, LightUnit.Lux, LightUnitUtils.GetNativeLightUnit(legacyLight.type));
+            legacyLight.lightUnit = LightUnit.Lux;
+        }
+
+
+        [Obsolete("This property has been deprecated. Use Light.intensity instead.", false)]
+        [SerializeField, FormerlySerializedAs("displayLightIntensity")]
+        float m_Intensity;
+
+        /// <summary>This property has been deprecated and moved to Light.</summary>
+        [Obsolete("This property has been deprecated. Use Light.intensity instead.", false)]
+        public float intensity
+        {
+            get => legacyLight.intensity;
+            set => legacyLight.intensity = value;
+        }
+
+        /// <summary>This method has been deprecated. Use the equivalent function LightUnitUtils.IsLightUnitSupported(...) instead.</summary>
+        /// <param name="type">The type of the light</param>
+        /// <param name="unit">The unit to check</param>
+        /// <returns>True: this unit is supported</returns>
+        [Obsolete("This function has been deprecated. Use LightUnitUtils.IsLightUnitSupported(LightType, LightUnit) instead.", false)]
+        public static bool IsValidLightUnitForType(LightType type, LightUnit unit)
+        {
+            return LightUnitUtils.IsLightUnitSupported(type, unit);
+        }
+
+        /// <summary>This method has been deprecated.</summary>
+        /// <returns>Array of supported units</returns>
+        [Obsolete("This function has been deprecated. Use LightUnitUtils.IsLightUnitSupported(LightType, LightUnit) instead.", false)]
+        public LightUnit[] GetSupportedLightUnits()
+        {
+            return GetSupportedLightUnits(legacyLight.type);
+        }
+
+        /// <summary>This method has been deprecated.</summary>
+        /// <param name="type">The type of the light</param>
+        /// <returns>Array of supported units</returns>
+        [Obsolete("This function has been deprecated. Use LightUnitUtils.IsLightUnitSupported(LightType, LightUnit) instead.", false)]
+        public static LightUnit[] GetSupportedLightUnits(LightType type)
+        {
+            return type switch {
+                LightType.Directional or LightType.Box => new[] { LightUnit.Lux },
+                LightType.Spot or LightType.Pyramid or LightType.Point => new[] { LightUnit.Candela, LightUnit.Lumen, LightUnit.Lux, LightUnit.Ev100 },
+                LightType.Rectangle or LightType.Disc or LightType.Tube => new [] { LightUnit.Nits, LightUnit.Lumen, LightUnit.Ev100 },
+                _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
+            };
         }
     }
 
@@ -484,5 +610,112 @@ namespace UnityEngine.Rendering.HighDefinition
 
             return AddHDLight(gameObject, type);
         }
+    }
+  
+    partial class HDRenderPipelineGlobalSettings
+    {
+        #region Custom Post Processes Injections
+
+        [SerializeField, Obsolete("Keep for migration. #from(23.2)")]
+        private CustomPostProcessOrdersSettings m_CustomPostProcessOrdersSettings = new();
+
+        // List of custom post process Types that will be executed in the project, in the order of the list (top to back)
+        [SerializeField, Obsolete("Keep for migration. #from(23.2)")]
+        internal List<string> beforeTransparentCustomPostProcesses = new List<string>();
+        [SerializeField, Obsolete("Keep for migration. #from(23.2)")]
+        internal List<string> beforePostProcessCustomPostProcesses = new List<string>();
+        [SerializeField, Obsolete("Keep for migration. #from(23.2)")]
+        internal List<string> afterPostProcessBlursCustomPostProcesses = new List<string>();
+        [SerializeField, Obsolete("Keep for migration. #from(23.2)")]
+        internal List<string> afterPostProcessCustomPostProcesses = new List<string>();
+        [SerializeField, Obsolete("Keep for migration. #from(23.2)")]
+        internal List<string> beforeTAACustomPostProcesses = new List<string>();
+
+        #endregion
+
+        [SerializeField, Obsolete("Keep for Migration. #from(23.2)")] internal ShaderStrippingSetting m_ShaderStrippingSetting = new();
+
+#pragma warning disable 0414
+        [SerializeField, FormerlySerializedAs("shaderVariantLogLevel"), Obsolete("Keep for Migration. #from(23.2)")] internal ShaderVariantLogLevel m_ShaderVariantLogLevel = ShaderVariantLogLevel.Disabled;
+        [SerializeField, FormerlySerializedAs("supportRuntimeDebugDisplay"), Obsolete("Keep for Migration. #from(23.2)")] internal bool m_SupportRuntimeDebugDisplay = false;
+
+        [SerializeField, Obsolete("Keep for Migration. #from(23.2)")] internal bool m_ExportShaderVariants = true;
+        [SerializeField, Obsolete("Keep for Migration. #from(23.2)")] internal bool m_StripDebugVariants = false;
+#pragma warning restore 0414
+
+        [SerializeField]
+        [Obsolete("This field is not used anymore. #from(2023.2)")]
+        internal string DLSSProjectId = "000000";
+
+        [SerializeField]
+        [Obsolete("This field is not used anymore. #from(2023.2)")]
+        internal bool useDLSSCustomProjectId = false;
+
+        [SerializeField, Obsolete("Keep for Migration. #from(23.2)")]
+        internal bool supportProbeVolumes = false;
+
+        [Obsolete("Keep for Migration. #from(23.2)")]
+        public bool autoRegisterDiffusionProfiles = true;
+
+        [Obsolete("Keep for Migration. #from(23.2)")]
+        public bool analyticDerivativeEmulation = false;
+
+        [Obsolete("Keep for Migration. #from(23.2)")]
+        public bool analyticDerivativeDebugOutput = false;
+
+        [SerializeField]
+        [Obsolete("Keep for Migration. #from(23.2)")]
+        internal LensAttenuationMode lensAttenuationMode;
+
+        [SerializeField]
+        [Obsolete("Keep for Migration. #from(23.2)")]
+        internal ColorGradingSpace colorGradingSpace;
+
+        [SerializeField, FormerlySerializedAs("diffusionProfileSettingsList")]
+        [Obsolete("Keep for Migration. #from(23.2)")]
+        internal DiffusionProfileSettings[] m_ObsoleteDiffusionProfileSettingsList;
+
+        [SerializeField]
+        [Obsolete("Keep for Migration. #from(23.2)")]
+        internal bool specularFade;
+
+        [SerializeField]
+        [Obsolete("Keep for Migration. #from(23.2)")]
+        internal bool rendererListCulling;
+
+        [SerializeField, FormerlySerializedAs("m_DefaultVolumeProfile"), FormerlySerializedAs("m_VolumeProfileDefault")]
+        [Obsolete("Kept for migration. #from(2023.3)")]
+        internal VolumeProfile m_ObsoleteDefaultVolumeProfile;
+
+#if UNITY_EDITOR
+        [SerializeField, FormerlySerializedAs("m_LookDevVolumeProfile"), FormerlySerializedAs("VolumeProfileLookDev")]
+        [Obsolete("Kept for migration. #from(2023.3)")]
+        internal VolumeProfile m_ObsoleteLookDevVolumeProfile;
+#endif
+
+        #region Camera's FrameSettings
+        // To be able to turn on/off FrameSettings properties at runtime for debugging purpose without affecting the original one
+        // we create a runtime copy (m_ActiveFrameSettings that is used, and any parametrization is done on serialized frameSettings)
+        [SerializeField, FormerlySerializedAs("m_RenderingPathDefaultCameraFrameSettings"), Obsolete("Kept For Migration. #from(2023.2")]
+        FrameSettings m_ObsoleteRenderingPathDefaultCameraFrameSettings = FrameSettingsDefaults.Get(FrameSettingsRenderType.Camera);
+
+        [SerializeField, FormerlySerializedAs("m_RenderingPathDefaultBakedOrCustomReflectionFrameSettings"), Obsolete("Kept For Migration. #from(2023.2")]
+        FrameSettings m_ObsoleteRenderingPathDefaultBakedOrCustomReflectionFrameSettings = FrameSettingsDefaults.Get(FrameSettingsRenderType.CustomOrBakedReflection);
+
+        [SerializeField, FormerlySerializedAs("m_RenderingPathDefaultRealtimeReflectionFrameSettings"), Obsolete("Kept For Migration. #from(2023.2")]
+        FrameSettings m_ObsoleteRenderingPathDefaultRealtimeReflectionFrameSettings = FrameSettingsDefaults.Get(FrameSettingsRenderType.RealtimeReflection);
+
+        [SerializeField, FormerlySerializedAs("m_RenderingPath"), Obsolete("Kept For Migration. #from(2023.2")]
+        internal RenderingPathFrameSettings m_ObsoleteRenderingPath = new();
+
+        [Obsolete("Kept For Migration. #from(2023.2")]
+        internal ref FrameSettings GetDefaultFrameSettings(FrameSettingsRenderType type)
+        {
+#pragma warning disable 618 // Type or member is obsolete
+            return ref m_ObsoleteRenderingPath.GetDefaultFrameSettings(type);
+#pragma warning restore 618
+        }
+
+        #endregion
     }
 }

@@ -68,6 +68,18 @@ namespace UnityEditor.ShaderGraph
 
                 if (target is IHasMetadata metadata)
                     builder.AppendLine($"\"ShaderGraphTargetId\"=\"{metadata.identifier}\"");
+
+                // IgnoreProjector
+                if(!string.IsNullOrEmpty(descriptor.IgnoreProjector))
+                    builder.AppendLine($"\"IgnoreProjector\"=\"{descriptor.IgnoreProjector}\"");
+
+                // PreviewType
+                if(!string.IsNullOrEmpty(descriptor.PreviewType))
+                    builder.AppendLine($"\"PreviewType\"=\"{descriptor.PreviewType}\"");
+
+                // CanUseSpriteAtlas
+                if(!string.IsNullOrEmpty(descriptor.CanUseSpriteAtlas))
+                    builder.AppendLine($"\"CanUseSpriteAtlas\"=\"{descriptor.CanUseSpriteAtlas}\"");
             }
         }
 
@@ -475,6 +487,7 @@ namespace UnityEditor.ShaderGraph
 
         internal static void GetActiveFieldsAndPermutationsForNodes(PassDescriptor pass,
             KeywordCollector keywordCollector, List<AbstractMaterialNode> vertexNodes, List<AbstractMaterialNode> pixelNodes,
+            bool[] texCoordNeedsDerivs,
             List<int>[] vertexNodePermutations, List<int>[] pixelNodePermutations,
             ActiveFields activeFields, out ShaderGraphRequirementsPerKeyword graphRequirements)
         {
@@ -489,8 +502,11 @@ namespace UnityEditor.ShaderGraph
                 for (int i = 0; i < keywordCollector.permutations.Count; i++)
                 {
                     // Get active nodes for this permutation
-                    var localVertexNodes = Pool.ListPool<AbstractMaterialNode>.Get();
-                    var localPixelNodes = Pool.ListPool<AbstractMaterialNode>.Get();
+                    var localVertexNodes = Pool.HashSetPool<AbstractMaterialNode>.Get();
+                    var localPixelNodes = Pool.HashSetPool<AbstractMaterialNode>.Get();
+
+                    localVertexNodes.EnsureCapacity(vertexNodes.Count);
+                    localPixelNodes.EnsureCapacity(pixelNodes.Count);
 
                     foreach (var vertexNode in vertexNodes)
                     {
@@ -523,8 +539,8 @@ namespace UnityEditor.ShaderGraph
                     }
 
                     // Get requirements for this permutation
-                    vertexRequirements[i].SetRequirements(ShaderGraphRequirements.FromNodes(localVertexNodes, ShaderStageCapability.Vertex, false));
-                    pixelRequirements[i].SetRequirements(ShaderGraphRequirements.FromNodes(localPixelNodes, ShaderStageCapability.Fragment, false));
+                    vertexRequirements[i].SetRequirements(ShaderGraphRequirements.FromNodes(localVertexNodes, ShaderStageCapability.Vertex, false, texCoordNeedsDerivs));
+                    pixelRequirements[i].SetRequirements(ShaderGraphRequirements.FromNodes(localPixelNodes, ShaderStageCapability.Fragment, false, texCoordNeedsDerivs));
 
                     // Add active fields
                     var conditionalFields = GetActiveFieldsFromConditionals(GetConditionalFieldsFromPixelRequirements(pixelRequirements[i].requirements));
@@ -542,8 +558,8 @@ namespace UnityEditor.ShaderGraph
             else
             {
                 // Get requirements
-                vertexRequirements.baseInstance.SetRequirements(ShaderGraphRequirements.FromNodes(vertexNodes, ShaderStageCapability.Vertex, false));
-                pixelRequirements.baseInstance.SetRequirements(ShaderGraphRequirements.FromNodes(pixelNodes, ShaderStageCapability.Fragment, false));
+                vertexRequirements.baseInstance.SetRequirements(ShaderGraphRequirements.FromNodes(vertexNodes, ShaderStageCapability.Vertex, false, texCoordNeedsDerivs));
+                pixelRequirements.baseInstance.SetRequirements(ShaderGraphRequirements.FromNodes(pixelNodes, ShaderStageCapability.Fragment, false, texCoordNeedsDerivs));
 
                 // Add active fields
                 var conditionalFields = GetActiveFieldsFromConditionals(GetConditionalFieldsFromPixelRequirements(pixelRequirements.baseInstance.requirements));
@@ -609,11 +625,21 @@ namespace UnityEditor.ShaderGraph
                 new ConditionalField(StructFields.VertexDescriptionInputs.uv2,                                          requirements.requiresMeshUVs.Contains(UVChannel.UV2)),
                 new ConditionalField(StructFields.VertexDescriptionInputs.uv3,                                          requirements.requiresMeshUVs.Contains(UVChannel.UV3)),
 
+                new ConditionalField(GeneratorDerivativeUtils.uv0Ddx,                                                   requirements.requiresMeshUVDerivatives.Contains(UVChannel.UV0)),
+                new ConditionalField(GeneratorDerivativeUtils.uv0Ddy,                                                   requirements.requiresMeshUVDerivatives.Contains(UVChannel.UV0)),
+                new ConditionalField(GeneratorDerivativeUtils.uv1Ddx,                                                   requirements.requiresMeshUVDerivatives.Contains(UVChannel.UV1)),
+                new ConditionalField(GeneratorDerivativeUtils.uv1Ddy,                                                   requirements.requiresMeshUVDerivatives.Contains(UVChannel.UV1)),
+                new ConditionalField(GeneratorDerivativeUtils.uv2Ddx,                                                   requirements.requiresMeshUVDerivatives.Contains(UVChannel.UV2)),
+                new ConditionalField(GeneratorDerivativeUtils.uv2Ddy,                                                   requirements.requiresMeshUVDerivatives.Contains(UVChannel.UV2)),
+                new ConditionalField(GeneratorDerivativeUtils.uv3Ddx,                                                   requirements.requiresMeshUVDerivatives.Contains(UVChannel.UV3)),
+                new ConditionalField(GeneratorDerivativeUtils.uv3Ddy,                                                   requirements.requiresMeshUVDerivatives.Contains(UVChannel.UV3)),
+
                 new ConditionalField(StructFields.VertexDescriptionInputs.TimeParameters,                               requirements.requiresTime),
 
                 new ConditionalField(StructFields.VertexDescriptionInputs.BoneWeights,                                  requirements.requiresVertexSkinning),
                 new ConditionalField(StructFields.VertexDescriptionInputs.BoneIndices,                                  requirements.requiresVertexSkinning),
                 new ConditionalField(StructFields.VertexDescriptionInputs.VertexID,                                     requirements.requiresVertexID),
+                new ConditionalField(StructFields.VertexDescriptionInputs.InstanceID,                                   requirements.requiresInstanceID),
 
                 new ConditionalField(Fields.ObjectToWorld, requirements.requiresTransforms.Contains(NeededTransform.ObjectToWorld)),
                 new ConditionalField(Fields.WorldToObject, requirements.requiresTransforms.Contains(NeededTransform.WorldToObject)),
@@ -673,6 +699,7 @@ namespace UnityEditor.ShaderGraph
                 new ConditionalField(StructFields.SurfaceDescriptionInputs.BoneWeights,                                 requirements.requiresVertexSkinning),
                 new ConditionalField(StructFields.SurfaceDescriptionInputs.BoneIndices,                                 requirements.requiresVertexSkinning),
                 new ConditionalField(StructFields.SurfaceDescriptionInputs.VertexID,                                    requirements.requiresVertexID),
+                new ConditionalField(StructFields.SurfaceDescriptionInputs.InstanceID,                                  requirements.requiresInstanceID),
 
                 new ConditionalField(Fields.ObjectToWorld, requirements.requiresTransforms.Contains(NeededTransform.ObjectToWorld)),
                 new ConditionalField(Fields.WorldToObject, requirements.requiresTransforms.Contains(NeededTransform.WorldToObject)),
@@ -983,6 +1010,11 @@ namespace UnityEditor.ShaderGraph
                 {
                     sb.AppendLine("uint {0};", ShaderGeneratorNames.VertexID);
                 }
+
+                if (requirements.requiresInstanceID)
+                {
+                    sb.AppendLine("uint {0};", ShaderGeneratorNames.InstanceID);
+                }
             }
         }
 
@@ -1029,6 +1061,11 @@ namespace UnityEditor.ShaderGraph
             if (requirements.requiresVertexID)
             {
                 sb.AppendLine($"{variableName}.{ShaderGeneratorNames.VertexID} = IN.{ShaderGeneratorNames.VertexID};");
+            }
+
+            if (requirements.requiresInstanceID)
+            {
+                sb.AppendLine($"{variableName}.{ShaderGeneratorNames.InstanceID} = IN.{ShaderGeneratorNames.InstanceID};");
             }
         }
 

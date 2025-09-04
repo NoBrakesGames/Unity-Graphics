@@ -1,12 +1,12 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.VFX;
-using Type = System.Type;
 
 namespace UnityEditor.VFX
 {
-    abstract class VFXBlock : VFXSlotContainerModel<VFXContext, VFXModel>, IVFXDataGetter
+    abstract class VFXBlock : VFXSlotContainerModel<VFXContext, VFXModel>, IVFXDataGetter, IVFXAttributeUsage
     {
         public readonly static string activationSlotName = "_vfx_enabled";
 
@@ -49,29 +49,23 @@ namespace UnityEditor.VFX
         {
             get
             {
-                if (GetParent() == null) return true; // a block is invalid only if added to incompatible context.
-                if ((compatibleContexts & GetParent().contextType) != GetParent().contextType)
-                    return false;
-                if (GetParent() is VFXBlockSubgraphContext subgraphContext)
-                    return (subgraphContext.compatibleContextType & compatibleContexts) == subgraphContext.compatibleContextType;
+                if (GetParent() == null)
+                    return true;
 
-                return true;
+                return GetParent().Accept(this);
             }
         }
 
-        public bool isActive
-        {
-            get { return enabled && isValid; }
-        }
+        public bool isActive => enabled && isValid;
 
         public abstract VFXContextType compatibleContexts { get; }
         public abstract VFXDataType compatibleData { get; }
+        public virtual IEnumerable<VFXAttribute> usedAttributes => attributes.Select(x => x.attrib);
         public virtual IEnumerable<VFXAttributeInfo> attributes { get { return Enumerable.Empty<VFXAttributeInfo>(); } }
         public virtual IEnumerable<VFXNamedExpression> parameters { get { return GetExpressionsFromSlots(this); } }
         public VFXExpression activationExpression => m_ActivationSlot.GetExpression();
-        public virtual IEnumerable<string> includes { get { return Enumerable.Empty<string>(); } }
         public virtual IEnumerable<string> defines { get { return Enumerable.Empty<string>(); } }
-        public virtual string source { get { return null; } }
+        public virtual string source => null;
 
         public override void OnEnable()
         {
@@ -79,11 +73,34 @@ namespace UnityEditor.VFX
             CreateActivationSlotIfNeeded();
         }
 
+        public override void OnUnknownChange()
+        {
+            base.OnUnknownChange();
+            m_EnableStateUpToDate = false;
+        }
+
         public override void Sanitize(int version)
         {
             if (CreateActivationSlotIfNeeded())
                 Invalidate(InvalidationCause.kStructureChanged);
             base.Sanitize(version);
+        }
+
+        /// <summary>
+        /// Copy input links from source to destination. The input slots must be compatible and in same order between source and destination
+        /// </summary>
+        public static void CopyInputLinks(VFXBlock dst, VFXBlock src, bool notify = true)
+        {
+            for (var i = 0; i < src.GetNbInputSlots(); i++)
+            {
+                VFXSlot.CopyLinksAndValue(dst.inputSlots[i], src.inputSlots[i], notify);
+            }
+            VFXSlot.CopyLinksAndValue(dst.activationSlot, src.activationSlot, notify);
+        }
+
+        public virtual void Rename(string oldName, string newName)
+        {
+            throw new NotSupportedException($"Should not be called on this object type: {GetType()}");
         }
 
         private bool CreateActivationSlotIfNeeded()
@@ -150,15 +167,10 @@ namespace UnityEditor.VFX
         {
             get
             {
-                var attribs = new Dictionary<VFXAttribute, VFXAttributeMode>();
-                foreach (var a in attributes)
+                foreach (var attrib in attributes.GroupBy(x => x.attrib))
                 {
-                    VFXAttributeMode mode = VFXAttributeMode.None;
-                    attribs.TryGetValue(a.attrib, out mode);
-                    mode |= a.mode;
-                    attribs[a.attrib] = mode;
+                    yield return new VFXAttributeInfo(attrib.Key, attrib.Aggregate(VFXAttributeMode.None, (acc, x) => acc | x.mode));
                 }
-                return attribs.Select(kvp => new VFXAttributeInfo(kvp.Key, kvp.Value));
             }
         }
 
@@ -169,16 +181,23 @@ namespace UnityEditor.VFX
             return m_TransientData;
         }
 
-
-        internal override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        public override void RefreshErrors()
         {
-            base.GenerateErrors(manager);
+            if (enabled)
+            {
+                base.RefreshErrors();
+            }
+        }
+
+        internal override void GenerateErrors(VFXErrorReporter report)
+        {
+            base.GenerateErrors(report);
             if (GetParent() is VFXBlockSubgraphContext)
             {
                 var notUndefinedSpace = inputSlots.Where(o => o.space != VFXSpace.None);
                 if (notUndefinedSpace.Any())
                 {
-                    manager.RegisterError("SubgraphBlockSpaceIsIgnored", VFXErrorType.Warning, "Space Local/World are ignored in subgraph blocks.");
+                    report.RegisterError("SubgraphBlockSpaceIsIgnored", VFXErrorType.Warning, "Space Local/World are ignored in subgraph blocks.", this);
                 }
             }
         }

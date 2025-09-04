@@ -1,12 +1,9 @@
-using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
-using UnityEditor.VFX;
-using System;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Output")]
+    [VFXHelpURL("Block-SubpixelAntiAliasing")]
+    [VFXInfo(name = "Subpixel Anti-Aliasing", category = "Output")]
     class SubpixelAA : VFXBlock
     {
         public override string name { get { return "Subpixel Anti-Aliasing"; } }

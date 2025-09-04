@@ -2,7 +2,8 @@ using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-Transform(Vector4)")]
+    [VFXInfo(name = "Transform (Vector4)", category = "Math/Geometry")]
     class TransformVector4 : VFXOperator
     {
         public class InputProperties

@@ -1,9 +1,9 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Logic")]
+    [VFXHelpURL("Operator-LogicOr")]
+    [VFXInfo(name = "Or", category = "Logic")]
     class LogicalOr : VFXOperator
     {
         override public string name { get { return "Or"; } }

@@ -31,9 +31,12 @@ namespace UnityEditor.VFX
             }
             set
             {
-                m_Shader = value;
-                DestroyCachedMaterial();
-                m_ShaderName = m_Shader != null ? m_Shader.name : null;
+                if (m_Shader != value)
+                {
+                    m_Shader = value;
+                    DestroyCachedMaterial();
+                    m_ShaderName = m_Shader != null ? m_Shader.name : null;
+                }
             }
         }
 
@@ -44,8 +47,6 @@ namespace UnityEditor.VFX
         public override void OnEnable()
         {
             base.OnEnable();
-
-            VFXLibrary.OnSRPChanged += OnSRPChanged;
 
             if (object.ReferenceEquals(shader, null)) shader = VFXResources.defaultResources.shader;
 
@@ -61,11 +62,10 @@ namespace UnityEditor.VFX
 
         public virtual void OnDisable()
         {
-            VFXLibrary.OnSRPChanged -= OnSRPChanged;
             DestroyCachedMaterial();
         }
 
-        private void OnSRPChanged()
+        public override void OnSRPChanged()
         {
             DestroyCachedMaterial();
         }
@@ -113,7 +113,8 @@ namespace UnityEditor.VFX
         }
 
         public override void FillDescs(
-            VFXCompileErrorReporter reporter,
+            IVFXErrorReporter reporter,
+            VFXCompilationMode compilationMode,
             List<VFXGPUBufferDesc> outBufferDescs,
             List<VFXTemporaryGPUBufferDesc> outTemporaryBufferDescs,
             List<VFXEditorSystemDesc> outSystemDescs,
@@ -123,6 +124,7 @@ namespace UnityEditor.VFX
             Dictionary<VFXContext, int> contextSpawnToBufferIndex,
             VFXDependentBuffersData dependentBuffers,
             Dictionary<VFXContext, List<VFXContextLink>[]> effectiveFlowInputLinks,
+            Dictionary<VFXData, uint> dataToSystemIndex,
             VFXSystemNames systemNames = null)
         {
             var context = m_Owners[0];

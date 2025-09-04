@@ -1,11 +1,5 @@
-using System;
-using System.Collections.Generic;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.HighDefinition;
-using UnityEditor.ShaderGraph;
-using UnityEngine.UIElements;
-using UnityEditor.UIElements;
 using UnityEngine;
+using UnityEngine.Rendering.HighDefinition;
 
 // We share the name of the properties in the UI to avoid duplication
 using static UnityEditor.Rendering.HighDefinition.SurfaceOptionUIBlock.Styles;
@@ -34,7 +28,9 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 
             base.CreatePropertyGUI();
 
-            AddProperty(Styles.enableClearCoat, () => litData.clearCoat, (newValue) => litData.clearCoat = newValue);
+            if (litData.HasMaterialType(~HDLitData.MaterialTypeMask.ColoredTranslucent))
+                AddProperty(Styles.enableClearCoat, () => litData.clearCoat, (newValue) => litData.clearCoat = newValue);
+
             if (litData.HasMaterialType(HDLitData.MaterialTypeMask.SubsurfaceScattering))
             {
                 AddProperty(transmissionEnableText, () => litData.sssTransmission, (newValue) => litData.sssTransmission = newValue);
@@ -44,7 +40,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                 AddProperty(refractionModelText, () => litData.refractionModel, (newValue) => litData.refractionModel = newValue);
                 if (litData.refractionModel != ScreenSpaceRefraction.RefractionModel.None)
                 {
-                    if (systemData.blendMode != BlendMode.Alpha)
+                    if (systemData.blendingMode != BlendingMode.Alpha)
                         AddHelpBox(RefractionUIBlock.Styles.refractionBlendModeWarning, MessageType.Warning);
                     if (systemData.renderQueueType == HDRenderQueue.RenderQueueType.PreRefraction)
                         AddHelpBox(RefractionUIBlock.Styles.refractionRenderingPassWarning, MessageType.Warning);

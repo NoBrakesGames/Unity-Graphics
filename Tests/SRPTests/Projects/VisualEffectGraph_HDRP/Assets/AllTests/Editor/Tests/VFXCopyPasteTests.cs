@@ -1,14 +1,20 @@
 #if !UNITY_EDITOR_OSX || MAC_FORCE_TESTS
-using System;
+using System.Collections;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using System.Reflection;
+
 using NUnit.Framework;
+
 using UnityEngine;
 using UnityEngine.VFX;
-using UnityEditor.VFX;
 using UnityEditor.VFX.UI;
 using UnityEditor.Experimental.GraphView;
+using UnityEditor.Experimental.VFX.Utility;
+using UnityEditor.VFX.Block;
+using UnityEditor.VFX.Operator;
+using UnityEngine.TestTools;
 using UnityEngine.UIElements;
 
 namespace UnityEditor.VFX.Test
@@ -67,14 +73,14 @@ namespace UnityEditor.VFX.Test
         {
             // Create a BasicInitialize context
             var initContextDesc = VFXLibrary.GetContexts().First(t => typeof(VFXBasicInitialize).IsAssignableFrom(t.modelType));
-            var newContext = m_ViewController.AddVFXContext(new Vector2(100, 100), initContextDesc);
+            var newContext = m_ViewController.AddVFXContext(new Vector2(100, 100), initContextDesc.variant);
             m_ViewController.ApplyChanges();
             Assert.AreEqual(1, m_ViewController.allChildren.Count(t => t is VFXContextController));
             var contextController = m_ViewController.allChildren.OfType<VFXContextController>().Single();
             Assert.AreEqual(contextController.model, newContext);
 
             // Add a block to that context
-            var flipBookBlockDesc = VFXLibrary.GetBlocks().First(t => t.name == "Set Tex Index");
+            var flipBookBlockDesc = VFXLibrary.GetBlocks().First(t => t.modelType == typeof(SetAttribute) && t.HasSettingValue(VFXAttribute.TexIndex.name));
             contextController.AddBlock(0, flipBookBlockDesc.CreateInstance());
             m_ViewController.ApplyChanges();
 
@@ -129,7 +135,7 @@ namespace UnityEditor.VFX.Test
         {
             // Create an operator
             var crossOperatorDesc = VFXLibrary.GetOperators().First(t => t.name == "Cross Product");
-            var newOperator = m_ViewController.AddVFXOperator(new Vector2(100, 100), crossOperatorDesc);
+            var newOperator = m_ViewController.AddVFXOperator(new Vector2(100, 100), crossOperatorDesc.variant);
             m_ViewController.ApplyChanges();
             var operatorController = m_ViewController.allChildren.OfType<VFXOperatorController>().Single();
             Assert.AreEqual(operatorController.model, newOperator);
@@ -177,7 +183,7 @@ namespace UnityEditor.VFX.Test
         {
             // Create a spaceable operator
             var inlineOperatorDesc = VFXLibrary.GetOperators().First(t => t.modelType == typeof(VFXInlineOperator));
-            var newOperator = m_ViewController.AddVFXOperator(new Vector2(100, 100), inlineOperatorDesc);
+            var newOperator = m_ViewController.AddVFXOperator(new Vector2(100, 100), inlineOperatorDesc.variant);
             newOperator.SetSettingValue("m_Type", new SerializableType(typeof(DirectionType)));
             m_ViewController.ApplyChanges();
             var operatorController = m_ViewController.allChildren.OfType<VFXOperatorController>().First();
@@ -291,14 +297,14 @@ namespace UnityEditor.VFX.Test
         {
             // Create a new BasicInitialize context
             var initContextDesc = VFXLibrary.GetContexts().First(t => typeof(VFXBasicInitialize).IsAssignableFrom(t.modelType));
-            var newContext = m_ViewController.AddVFXContext(new Vector2(100, 100), initContextDesc);
+            var newContext = m_ViewController.AddVFXContext(new Vector2(100, 100), initContextDesc.variant);
             m_ViewController.ApplyChanges();
             Assert.AreEqual(1, m_ViewController.allChildren.Count(t => t is VFXContextController));
             var contextController = m_ViewController.allChildren.OfType<VFXContextController>().First();
             Assert.AreEqual(contextController.model, newContext);
 
             // Add a block to that context
-            var flipBookBlockDesc = VFXLibrary.GetBlocks().First(t => t.name == "Set Tex Index");
+            var flipBookBlockDesc = VFXLibrary.GetBlocks().First(t => t.modelType == typeof(SetAttribute) && t.HasSettingValue(VFXAttribute.TexIndex.name));
             contextController.AddBlock(0, flipBookBlockDesc.CreateInstance());
             var newBlock = contextController.model.children.First();
             m_ViewController.ApplyChanges();
@@ -339,6 +345,52 @@ namespace UnityEditor.VFX.Test
         }
 
         [Test]
+        public void CopyPast_Context_With_Objects_In_Settings()
+        {
+            var outputContextDesc = VFXLibrary.GetContexts().First(t => t.modelType == typeof(VFXComposedParticleOutput));
+            m_ViewController.AddVFXContext(new Vector2(100, 100), outputContextDesc.variant);
+            m_ViewController.ApplyChanges();
+
+            var window = EditorWindow.GetWindow<VFXViewWindow>();
+            var view = window.graphView;
+            view.controller = m_ViewController;
+            view.ClearSelection();
+            foreach (var element in view.Query().OfType<VFXContextUI>().ToList().OfType<ISelectable>())
+            {
+                view.AddToSelection(element);
+            }
+
+            var copyData = view.SerializeElements(view.selection.OfType<GraphElement>());
+            view.UnserializeAndPasteElements("Paste", copyData);
+
+            // Retrieve the block from the copied context
+            var copiedContexts = view.Query()
+                .OfType<VFXContextUI>()
+                .ToList()
+                .Select(x => x.controller.model).ToArray();
+
+            Assert.AreEqual(2, copiedContexts.Length);
+
+            Assert.IsInstanceOf<VFXComposedParticleOutput>(copiedContexts[0]);
+            Assert.IsInstanceOf<VFXComposedParticleOutput>(copiedContexts[1]);
+
+            var originalTopology = copiedContexts[0].GetSetting("m_Topology");
+            var originalShading = copiedContexts[0].GetSetting("m_Shading");
+            var copyTopology = copiedContexts[1].GetSetting("m_Topology");
+            var copyShading = copiedContexts[1].GetSetting("m_Shading");
+
+            Assert.IsTrue(originalTopology.valid);
+            Assert.IsTrue(originalShading.valid);
+            Assert.IsTrue(copyTopology.valid);
+            Assert.IsTrue(copyShading.valid);
+
+            Assert.AreEqual(originalTopology.GetType(), copyTopology.GetType());
+            Assert.AreEqual(originalShading.GetType(), copyShading.GetType());
+            Assert.IsFalse(ReferenceEquals(originalTopology.value, copyTopology.value));
+            Assert.IsFalse(ReferenceEquals(originalShading.value, copyShading.value));
+        }
+
+        [Test]
         public void CreateTemplate()
         {
             VFXViewWindow window = EditorWindow.GetWindow<VFXViewWindow>();
@@ -346,7 +398,7 @@ namespace UnityEditor.VFX.Test
             VFXView view = window.graphView;
             view.controller = m_ViewController;
 
-            view.CreateTemplateSystem("Assets/VFXEditor/Editor/Templates/SimpleParticleSystem.vfx", Vector2.zero, null);
+            view.CreateTemplateSystem(VFXTestCommon.simpleParticleSystemPath, Vector2.zero, null);
         }
 
         [Test]
@@ -381,12 +433,205 @@ namespace UnityEditor.VFX.Test
                 .Where(x => !string.IsNullOrEmpty(x))
                 .ToList();
 
-            var vfxDatas = m_ViewController.graph.children.OfType<VFXData>().Distinct().ToArray();
-            Assert.AreEqual(8, vfxDatas.Length, "There should be one distinct VFXData per system (8 spawners and 8 initialize");
+            var models = new HashSet<ScriptableObject>();
+            m_ViewController.graph.CollectDependencies(models);
+            var vfxDatas = models.OfType<VFXData>().ToArray();
 
+            const int dataExpectedCount = 2 * (spawnerCount + GPUSystemsCount);
+            Assert.AreEqual(dataExpectedCount, vfxDatas.Length, "There should be one distinct VFXData per system (8 spawners and 8 initialize");
             // Assert all names are unique, and the expected number of elements was obtained
-            Assert.AreEqual(2 * (spawnerCount + GPUSystemsCount), uniqueNames.Count, "Some systems have the same name or are null or empty.");
+            Assert.AreEqual(dataExpectedCount, uniqueNames.Count, "Some systems have the same name or are null or empty.");
         }
+
+        [UnityTest, Description("UUM-46548")]
+        public IEnumerator PasteMissingPointCacheAsset()
+        {
+            VFXViewWindow window = EditorWindow.GetWindow<VFXViewWindow>();
+
+            VFXView view = window.graphView;
+            view.controller = m_ViewController;
+
+            // Create one system
+            const int spawnerCount = 1, GPUSystemsCount = 1;
+            var spawner = VFXTestCommon.CreateSpawners(view, m_ViewController, spawnerCount).Single();
+            VFXTestCommon.CreateSystems(view, m_ViewController, GPUSystemsCount, 0);
+
+            // Create a point cache operator
+            var pCacheAssetPath = "Assets/AllTests/VFXTests/GraphicsTests/UnityLogoPrimeCount.pcache";
+            var copypCacheAssetPath = Path.Combine(VFXTestCommon.tempBasePath, "pointCache.pcache");
+            File.Copy(pCacheAssetPath, copypCacheAssetPath, true);
+            AssetDatabase.ImportAsset(copypCacheAssetPath);
+            var pointCacheAsset = AssetDatabase.LoadAssetAtPath(copypCacheAssetPath, typeof(PointCacheAsset));
+            var pointCacheOperator = VFXLibrary.GetOperators().Single(x => x.modelType == typeof(VFXOperatorPointCache)).CreateInstance() as VFXOperatorPointCache;
+            pointCacheOperator.SetSettingValue("Asset", pointCacheAsset);
+            m_ViewController.AddVFXModel(Vector2.zero, pointCacheOperator);
+            yield return null;
+
+            // Create a set position from map
+            var setPositionBlock = VFXLibrary.GetBlocks().Single(x => x.name == "Set".Label(false).AppendLiteral("Position from Map").AppendLabel("2D")).CreateInstance() as AttributeFromMap;
+            var initializeContext = m_ViewController.contexts.Single(x => x.model is VFXBasicInitialize);
+            initializeContext.model.LinkFrom(spawner, 0, 0);
+            initializeContext.AddBlock(0, setPositionBlock);
+            setPositionBlock.GetInputSlot(0).Link(pointCacheOperator.GetOutputSlot(1));
+            m_ViewController.ApplyChanges();
+            yield return null;
+
+            // Copy paste them
+            view.ClearSelection();
+            foreach (var element in view.Query().OfType<GraphElement>().ToList().OfType<ISelectable>())
+            {
+                view.AddToSelection(element);
+            }
+            view.CopySelectionCallback();
+            // We delete the point cache asset to check that it does not break the past operation
+            AssetDatabase.DeleteAsset(copypCacheAssetPath);
+            view.PasteCallback();
+            m_ViewController.ApplyChanges();
+            yield return null;
+
+            Assert.AreEqual(1, spawner.outputFlowSlot.Length);
+            Assert.AreEqual(1, initializeContext.model.inputFlowSlot.Length);
+            Assert.AreEqual(1, initializeContext.model.outputFlowSlot.Length);
+        }
+
+        [UnityTest, Description("UUM-75894")]
+        public IEnumerator CopyPasteContextWithCustomAttribute()
+        {
+            var viewController1 = m_ViewController;
+            var window1 = EditorWindow.GetWindow<VFXViewWindow>();
+            var view1 = window1.graphView;
+            view1.controller = viewController1;
+
+            // Create a BasicInitialize context
+            var initContextDesc = VFXLibrary.GetContexts().First(x => x.modelType == typeof(VFXBasicInitialize));
+            var newContext = viewController1.AddVFXContext(new Vector2(100, 100), initContextDesc.variant);
+            viewController1.LightApplyChanges();
+            var contextController = viewController1.allChildren.OfType<VFXContextController>().Single();
+            yield return null;
+
+            // Add a custom attribute
+            var customAttributeName = "initPos";
+            viewController1.graph.TryAddCustomAttribute(customAttributeName, VFXValueType.Float3, "No description", false, out var attribute);
+            yield return null;
+
+            // Add a block to that context
+            var setInitPos = VFXLibrary.GetBlocks().First(x => x.modelType == typeof(SetAttribute)).CreateInstance();
+            setInitPos.SetSettingValue("attribute", customAttributeName);
+            contextController.AddBlock(0, setInitPos);
+            viewController1.LightApplyChanges();
+            yield return null;
+
+            // Select the created context and copy
+            view1.ClearSelection();
+            view1.AddToSelection(view1.Query().OfType<VFXContextUI>().First());
+            window1.graphView.CopySelectionCallback();
+            yield return null;
+
+            // Create a second asset and open window
+            CreateTestAsset();
+            var viewController2 = m_ViewController;
+            var window2 = EditorWindow.GetWindow<VFXViewWindow>();
+            var view2 = window2.graphView;
+            view2.controller = viewController2;
+
+            // Paste selection in the second window
+            window2.graphView.PasteCallback();
+            yield return null;
+
+            // Check that the second window has a single custom attribute of type Vector3
+            Assert.IsTrue(viewController2.graph.TryFindCustomAttributeDescriptor(customAttributeName, out var customAttributeDescriptor));
+            Assert.IsNotNull(customAttributeDescriptor);
+            Assert.AreEqual(CustomAttributeUtility.Signature.Vector3, customAttributeDescriptor.type);
+        }
+
+        [UnityTest, Description("UUM-75894")]
+        public IEnumerator CopyPasteOperatorWithCustomAttribute()
+        {
+            var viewController1 = m_ViewController;
+            var window1 = EditorWindow.GetWindow<VFXViewWindow>();
+            var view1 = window1.graphView;
+            view1.controller = viewController1;
+
+            // Add a custom attribute
+            var customAttributeName = "initPos";
+            viewController1.graph.TryAddCustomAttribute(customAttributeName, VFXValueType.Float3, "No description", false, out var attribute);
+            yield return null;
+
+            // Add a block to that context
+            var getInitPosDesc = VFXLibrary.GetOperators().First(x => x.modelType == typeof(VFXAttributeParameter));
+            var getInitPos = viewController1.AddVFXOperator(Vector2.zero, getInitPosDesc.variant);
+            getInitPos.SetSettingValue("attribute", customAttributeName);
+
+            viewController1.LightApplyChanges();
+            yield return null;
+
+            // Select the created context and copy
+            view1.ClearSelection();
+            view1.AddToSelection(view1.Query().OfType<VFXOperatorUI>().First());
+            window1.graphView.CopySelectionCallback();
+            yield return null;
+
+            // Create a second asset and open window
+            CreateTestAsset();
+            var viewController2 = m_ViewController;
+            var window2 = EditorWindow.GetWindow<VFXViewWindow>();
+            var view2 = window2.graphView;
+            view2.controller = viewController2;
+
+            // Paste selection in the second window
+            window2.graphView.PasteCallback();
+            yield return null;
+
+            // Check that the second window has a single custom attribute of type Vector3
+            Assert.IsTrue(viewController2.graph.TryFindCustomAttributeDescriptor(customAttributeName, out var customAttributeDescriptor));
+            Assert.IsNotNull(customAttributeDescriptor);
+            Assert.AreEqual(CustomAttributeUtility.Signature.Vector3, customAttributeDescriptor.type);
+        }
+        [UnityTest, Description("UUM-75893")]
+        public IEnumerator CopyPasteMultipleParametersWithEdges()
+        {
+            VFXViewWindow window = EditorWindow.GetWindow<VFXViewWindow>();
+            VFXView view = window.graphView;
+            view.controller = m_ViewController;
+
+            // Create a parameter and add a two nodes to the graph
+            var parameter = m_ViewController.AddVFXParameter(Vector2.zero, VFXLibrary.GetParameters().First(x => x.modelType == typeof(float)).variant);
+            m_ViewController.LightApplyChanges();
+
+            var parameterController = m_ViewController.GetParameterController(parameter);
+            parameterController.model.AddNode(new Vector2(123, 456));
+            parameterController.model.AddNode(new Vector2(123, 556));
+            m_ViewController.LightApplyChanges();
+            var parameterNode1 = parameterController.nodes.First();
+            var parameterNode2 = parameterController.nodes.Last();
+            Assert.AreNotEqual(parameterNode1, parameterNode2);
+            yield return null;
+
+            // Create a Add operator
+            var addOperator = VFXLibrary.GetOperators().Single(x => x.modelType == typeof(Add));
+            m_ViewController.AddNode(new Vector2(300, 500), addOperator.variant, null);
+            m_ViewController.LightApplyChanges();
+            var addOperatorController = m_ViewController.nodes.OfType<VFXOperatorController>().Last();
+            yield return null;
+
+            // Create links
+            m_ViewController.CreateLink(addOperatorController.inputPorts.First(), parameterNode1.outputPorts.Single());
+            m_ViewController.CreateLink(addOperatorController.inputPorts.Skip(1).First(), parameterNode2.outputPorts.Single());
+            m_ViewController.LightApplyChanges();
+            yield return null;
+
+            Assert.AreEqual(2, m_ViewController.dataEdges.Count);
+
+            // Select all and copy/paste
+            window.graphView.ExecuteCommand(ExecuteCommandEvent.GetPooled("SelectAll"));
+            window.graphView.CopySelectionCallback();
+            window.graphView.GetType().GetProperty(nameof(VFXView.pasteCenter), BindingFlags.Instance|BindingFlags.NonPublic)?.SetValue(window.graphView, window.graphView.contentViewContainer.LocalToWorld(new Vector2(123, 650)));
+            window.graphView.PasteCallback();
+            yield return null;
+
+            Assert.AreEqual(4, m_ViewController.dataEdges.Count);
+        }
+
     }
 }
 #endif

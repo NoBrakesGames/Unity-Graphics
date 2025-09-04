@@ -18,15 +18,14 @@ ${VFXInclude("Shaders/VFXParticleCommon.template")}
 RWByteAddressBuffer attributeBuffer;
 
 #if USE_DEAD_LIST
-RWStructuredBuffer<uint> deadListOut;
-RWStructuredBuffer<uint> deadListCount;
+RWStructuredBuffer<uint> deadList;
 #endif
 
 #if VFX_HAS_INDIRECT_DRAW
 RWStructuredBuffer<uint> indirectBuffer;
 #endif
 
-#if HAS_STRIPS
+#if HAS_STRIPS_DATA
 RWStructuredBuffer<uint> stripDataBuffer;
 #endif
 
@@ -56,11 +55,9 @@ void CSMain(uint3 groupId          : SV_GroupID,
 {
 	uint id = GetThreadId(groupId, groupThreadId, dispatchWidth);
 
-	uint index = GetThreadId(groupId, 0, dispatchWidth);
-	${VFXInitInstancing}
-	index += groupThreadId.x;
+	${VFXInitInstancingCompute}
 
-	ContextData contextData = instancingContextData[instanceActiveIndex];
+	${VFXLoadContextData}
 	uint systemSeed = contextData.systemSeed;
 	uint nbMax = contextData.maxParticleCount;
 
@@ -70,9 +67,16 @@ void CSMain(uint3 groupId          : SV_GroupID,
 
 	if (index < nbMax)
 	{
-        ${VFXLoadGraphValues}
+#if HAS_STRIPS
+		if (index == 0)
+		{
+			STRIP_PARTICLE_COUNTER(instanceIndex) = 0;
+		}
+#endif
 
-        VFXAttributes attributes = (VFXAttributes)0;
+		${VFXLoadGraphValues}
+
+		VFXAttributes attributes = (VFXAttributes)0;
 		VFXSourceAttributes sourceAttributes = (VFXSourceAttributes)0;
 
 #if VFX_USE_ALIVE_CURRENT
@@ -80,11 +84,12 @@ void CSMain(uint3 groupId          : SV_GroupID,
 		if (attributes.alive)
 		{
 			${VFXLoadAttributes:{(?!(alive|stripAlive))(\b\w)}}
-
+#if VFX_USE_OLDVELOCITY_CURRENT && VFX_USE_VELOCITY_CURRENT
+			attributes.oldVelocity = attributes.velocity;
+#endif
 #if HAS_STRIPS
-            const StripData stripData = GetStripDataFromParticleIndex(index, instanceIndex);
-            InitStripAttributes(index, attributes, stripData);
-            uint stripDataIndex = stripData.stripIndex + instanceIndex * STRIP_COUNT;
+			const StripData stripData = GetStripDataFromParticleIndex(index, instanceIndex);
+			InitStripAttributes(index, attributes, stripData);
 #endif
 
 #if VFX_UPDATE_SKIP_ZERO_DELTA_TIME
@@ -95,27 +100,29 @@ void CSMain(uint3 groupId          : SV_GroupID,
 				${VFXProcessBlocks}
 			}
 
+			${VFXStoreAttributes:{(?!(alive))(\b\w)}}
 			if (attributes.alive)
 			{
-				${VFXStoreAttributes:{(?!(alive))(\b\w)}}
+
 #if VFX_HAS_INDIRECT_DRAW
                 AppendOutputBuffer(indirectBuffer, index, instanceActiveIndex);
 #endif
 
 #if HAS_STRIPS
+				uint bufferIndex = STRIP_DATA_INDEX(instanceIndex, stripData.stripIndex);
 				uint relativeIndexInStrip = GetRelativeIndex(index, stripData);
-				InterlockedMin(STRIP_DATA(STRIP_MIN_ALIVE, stripDataIndex), relativeIndexInStrip);
-				InterlockedMax(STRIP_DATA(STRIP_MAX_ALIVE, stripDataIndex), relativeIndexInStrip);
+				InterlockedMin(STRIP_DATA(STRIP_MIN_ALIVE, bufferIndex), relativeIndexInStrip);
+				InterlockedMax(STRIP_DATA(STRIP_MAX_ALIVE, bufferIndex), relativeIndexInStrip);
 #endif
 			}
 			else
 			{
-				${VFXStoreAttributes:{alive|eventCount}}
+				${VFXStoreAttributes:{alive}}
 #if USE_DEAD_LIST && !VFX_USE_STRIPALIVE_CURRENT
 	            uint deadIndex;
-		        InterlockedAdd(deadListCount[instanceIndex], 1, deadIndex);
-				deadIndex += instanceIndex * RAW_CAPACITY;
-				deadListOut[deadIndex] = index;
+		        InterlockedAdd(deadList[instanceIndex], 1, deadIndex);
+				deadIndex += DEAD_LIST_OFFSET + instanceIndex * RAW_CAPACITY;
+				deadList[deadIndex] = index;
 #endif
 			}
 		}
@@ -125,16 +132,36 @@ void CSMain(uint3 groupId          : SV_GroupID,
             if (STRIP_DATA_X(attachedStripDataBuffer, STRIP_MIN_ALIVE, index) == ~1) // Attached strip is no longer alive, recycle the particle
             {
 	            uint deadIndex;
-		        InterlockedAdd(deadListCount[instanceIndex], 1, deadIndex);
-				deadIndex += instanceIndex * RAW_CAPACITY;
-				deadListOut[deadIndex] = index;
+		        InterlockedAdd(deadList[instanceIndex], 1, deadIndex);
+				deadIndex += DEAD_LIST_OFFSET + instanceIndex * RAW_CAPACITY;
+				deadList[deadIndex] = index;
                 attributes.stripAlive = false;
                 ${VFXStoreAttributes:{stripAlive}}
             }
         }
 #endif
+
+// For strips, we still need to render some dead particles if they are in the middle of the strip
+#if HAS_STRIPS && VFX_HAS_INDIRECT_DRAW
+		if (!attributes.alive)
+		{
+			const StripData stripData = GetStripDataFromParticleIndex(index, instanceIndex);
+			uint relativeIndexInStrip = GetRelativeIndex(index, stripData);
+			if (relativeIndexInStrip > 0 && relativeIndexInStrip < stripData.nextIndex - 1)
+			{
+				AppendOutputBuffer(indirectBuffer, index, instanceActiveIndex);
+			}
+		}
+#endif
+
 #else
 		${VFXLoadAttributes}
+#if VFX_USE_OLDVELOCITY_CURRENT && VFX_USE_VELOCITY_CURRENT
+		attributes.oldVelocity = attributes.velocity;
+#endif
+#if VFX_USE_CONTINUOUSCOLLISIONCOUNT_CURRENT
+		//attributes.continuousCollisionCount = 0;
+#endif
 #if HAS_STRIPS
         const StripData stripData = GetStripDataFromParticleIndex(index, instanceIndex);
         InitStripAttributes(index, attributes, stripData);

@@ -1,9 +1,8 @@
 using System;
-using System.Linq;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 using Unity.Collections;
 using UnityEngine.Rendering.RendererUtils;
 
@@ -533,13 +532,13 @@ namespace UnityEngine.Rendering.HighDefinition
 
         TextureHandle GenerateMaxZPass(RenderGraph renderGraph, HDCamera hdCamera, TextureHandle depthTexture, HDUtils.PackedMipChainInfo depthMipInfo)
         {
-            if (Fog.IsVolumetricFogEnabled(hdCamera) || VolumetricCloudsRequireMaxZ(hdCamera))
+            if (Fog.IsVolumetricFogEnabled(hdCamera))
             {
                 using (var builder = renderGraph.AddRenderPass<GenerateMaxZMaskPassData>("Generate Max Z Mask for Volumetric", out var passData))
                 {
                     //TODO: move the entire vbuffer to hardware DRS mode. When Hardware DRS is enabled we will save performance
                     // on these buffers, however the final vbuffer will be wasting resolution. This requires a bit of more work to optimize.
-                    passData.generateMaxZCS = defaultResources.shaders.maxZCS;
+                    passData.generateMaxZCS = runtimeShaders.maxZCS;
                     passData.generateMaxZCS.shaderKeywords = null;
                     bool planarReflection = hdCamera.camera.cameraType == CameraType.Reflection && hdCamera.parentCamera != null;
                     CoreUtils.SetKeyword(passData.generateMaxZCS, "PLANAR_OBLIQUE_DEPTH", planarReflection);
@@ -576,11 +575,11 @@ namespace UnityEngine.Rendering.HighDefinition
 
                     passData.depthTexture = builder.ReadTexture(depthTexture);
                     passData.maxZ8xBuffer = builder.CreateTransientTexture(new TextureDesc(Vector2.one * 0.125f, true, true)
-                    { colorFormat = GraphicsFormat.R32_SFloat, enableRandomWrite = true, name = "MaxZ mask 8x" });
+                    { format = GraphicsFormat.R32_SFloat, enableRandomWrite = true, name = "MaxZ mask 8x" });
                     passData.maxZBuffer = builder.CreateTransientTexture(new TextureDesc(Vector2.one * 0.125f, true, true)
-                    { colorFormat = GraphicsFormat.R32_SFloat, enableRandomWrite = true, name = "MaxZ mask" });
+                    { format = GraphicsFormat.R32_SFloat, enableRandomWrite = true, name = "MaxZ mask" });
                     passData.dilatedMaxZBuffer = builder.ReadWriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one / 16.0f, true, true)
-                    { colorFormat = GraphicsFormat.R32_SFloat, enableRandomWrite = true, name = "Dilated MaxZ mask" }));
+                    { format = GraphicsFormat.R32_SFloat, enableRandomWrite = true, name = "Dilated MaxZ mask" }));
 
                     builder.SetRenderFunc(
                         (GenerateMaxZMaskPassData data, RenderGraphContext ctx) =>
@@ -758,9 +757,9 @@ namespace UnityEngine.Rendering.HighDefinition
             if (!m_SupportVolumetrics)
                 return;
 
-            m_VolumeVoxelizationCS = defaultResources.shaders.volumeVoxelizationCS;
-            m_VolumetricLightingCS = defaultResources.shaders.volumetricLightingCS;
-            m_VolumetricLightingFilteringCS = defaultResources.shaders.volumetricLightingFilteringCS;
+            m_VolumeVoxelizationCS = runtimeShaders.volumeVoxelizationCS;
+            m_VolumetricLightingCS = runtimeShaders.volumetricLightingCS;
+            m_VolumetricLightingFilteringCS = runtimeShaders.volumetricLightingFilteringCS;
 
             m_PackedCoeffs = new Vector4[7];
             m_PhaseZH = new ZonalHarmonicsL2();
@@ -834,6 +833,22 @@ namespace UnityEngine.Rendering.HighDefinition
             return (priority << 12) | (fogIndex << 0);
         }
 
+        internal static TextureDesc GetOpticalFogTransmittanceDesc(HDCamera hdCamera)
+        {
+            var colorFormat = GraphicsFormat.R16_SFloat;
+            if (LensFlareCommonSRP.IsCloudLayerOpacityNeeded(hdCamera.camera) && Fog.IsMultipleScatteringEnabled(hdCamera, out _))
+                colorFormat = GraphicsFormat.R16G16_SFloat;
+
+            return new TextureDesc(Vector2.one, true, true)
+            {
+                name = "Optical Fog Transmittance",
+                format = colorFormat,
+                clearBuffer = true,
+                clearColor = Color.white,
+                enableRandomWrite = true,
+            };
+        }
+
         void PrepareVisibleLocalVolumetricFogList(HDCamera hdCamera, CommandBuffer cmd)
         {
             if (!Fog.IsVolumetricFogEnabled(hdCamera))
@@ -859,21 +874,28 @@ namespace UnityEngine.Rendering.HighDefinition
                 int maxLocalVolumetricFogOnScreen = asset.currentPlatformRenderPipelineSettings.lightLoopSettings.maxLocalVolumetricFogOnScreen;
                 var fog = hdCamera.volumeStack.GetComponent<Fog>();
 
+                ulong cameraSceneCullingMask =  HDUtils.GetSceneCullingMaskFromCamera(hdCamera.camera);
                 foreach (var volume in volumes)
                 {
+                    var transform = volume.transform;
+                    Vector3 scaleSize = volume.GetScaledSize(transform);
                     Vector3 center = volume.transform.position;
 
                     // Reject volumes that are completely fade out or outside of the volumetric fog using bounding sphere
-                    float boundingSphereRadius = Vector3.Magnitude(volume.parameters.size);
+                    float boundingSphereRadius = Vector3.Magnitude(scaleSize);
                     float minObbDistance = Vector3.Magnitude(center - camPosition) - hdCamera.camera.nearClipPlane - boundingSphereRadius;
                     if (minObbDistance > volume.parameters.distanceFadeEnd || minObbDistance > fog.depthExtent.value)
                         continue;
 
+#if UNITY_EDITOR
+                    if ((volume.gameObject.sceneCullingMask & cameraSceneCullingMask) == 0)
+                        continue;
+#endif
                     // Handle camera-relative rendering.
                     center -= camOffset;
 
-                    var transform = volume.transform;
-                    var bounds = GeometryUtils.OBBToAABB(transform.right, transform.up, transform.forward, volume.parameters.size, center);
+                    
+                    var bounds = GeometryUtils.OBBToAABB(transform.right, transform.up, transform.forward, scaleSize, center);
 
                     // Frustum cull on the CPU for now. TODO: do it on the GPU.
                     // TODO: account for custom near and far planes of the V-Buffer's frustum.
@@ -888,7 +910,7 @@ namespace UnityEngine.Rendering.HighDefinition
                         }
 
                         // TODO: cache these?
-                        var obb = new OrientedBBox(Matrix4x4.TRS(transform.position - camOffset, transform.rotation, volume.parameters.size));
+                        var obb = new OrientedBBox(Matrix4x4.TRS(transform.position - camOffset, transform.rotation, scaleSize));
                         m_VisibleVolumeBounds.Add(obb);
                         m_GlobalVolumeIndices.Add(volume.GetGlobalIndex());
                         var visibleData = volume.parameters.ConvertToEngineData();
@@ -998,6 +1020,12 @@ namespace UnityEngine.Rendering.HighDefinition
 
             public TextureHandle densityBuffer;
             public GraphicsBuffer volumetricAmbientProbeBuffer;
+
+            // Underwater fog
+            public bool water;
+            public BufferHandle waterLine;
+            public BufferHandle waterCameraHeight;
+            public TextureHandle waterStencil;
         }
 
         class VolumetricFogVoxelizationPassData
@@ -1020,12 +1048,11 @@ namespace UnityEngine.Rendering.HighDefinition
             public GraphicsBuffer globalIndirectionBuffer;
             public GraphicsBuffer materialDataBuffer;
             public GraphicsBuffer visibleVolumeGlobalIndices;
-            public List<OrientedBBox> visibleVolumeBounds;
             public int computeRenderingParametersKernel;
             public ComputeBuffer visibleVolumeBoundsBuffer;
         }
 
-        unsafe TextureHandle ClearAndHeightFogVoxelizationPass(RenderGraph renderGraph, HDCamera hdCamera)
+        unsafe TextureHandle ClearAndHeightFogVoxelizationPass(RenderGraph renderGraph, HDCamera hdCamera, TextureHandle depthBuffer, in TransparentPrepassOutput transparentPrepass)
         {
             if (Fog.IsVolumetricFogEnabled(hdCamera))
             {
@@ -1039,8 +1066,6 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 using (var builder = renderGraph.AddRenderPass<HeightFogVoxelizationPassData>("Clear and Height Fog Voxelization", out var passData))
                 {
-                    builder.EnableAsyncCompute(hdCamera.frameSettings.VolumeVoxelizationRunsAsync());
-
                     passData.viewCount = hdCamera.viewCount;
 
                     passData.voxelizationCS = m_VolumeVoxelizationCS;
@@ -1054,15 +1079,35 @@ namespace UnityEngine.Rendering.HighDefinition
                     passData.volumetricCB = m_ShaderVariablesVolumetricCB;
 
                     passData.densityBuffer = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(s_CurrentVolumetricBufferSize.x, s_CurrentVolumetricBufferSize.y, false, false)
-                    { slices = s_CurrentVolumetricBufferSize.z, colorFormat = GraphicsFormat.R16G16B16A16_SFloat, dimension = TextureDimension.Tex3D, enableRandomWrite = true, name = "VBufferDensity" }));
+                    { slices = s_CurrentVolumetricBufferSize.z, format = GraphicsFormat.R16G16B16A16_SFloat, dimension = TextureDimension.Tex3D, enableRandomWrite = true, name = "VBufferDensity" }));
 
                     passData.volumetricAmbientProbeBuffer = m_SkyManager.GetVolumetricAmbientProbeBuffer(hdCamera);
+
+                    passData.water = transparentPrepass.waterGBuffer.valid && transparentPrepass.underWaterSurface != null;
+                    if (passData.water)
+                    {
+                        passData.waterLine = builder.ReadBuffer(transparentPrepass.waterLine);
+                        passData.waterCameraHeight = builder.ReadBuffer(transparentPrepass.waterGBuffer.cameraHeight);
+                        passData.waterStencil = builder.ReadTexture(depthBuffer);
+                    }
+
+                    CoreUtils.SetKeyword(passData.voxelizationCS, "SUPPORT_WATER_ABSORPTION", passData.water);
+                    builder.EnableAsyncCompute(hdCamera.frameSettings.VolumeVoxelizationRunsAsync() && !passData.water);
 
                     builder.SetRenderFunc(
                         (HeightFogVoxelizationPassData data, RenderGraphContext ctx) =>
                         {
                             ctx.cmd.SetComputeTextureParam(data.voxelizationCS, data.voxelizationKernel, HDShaderIDs._VBufferDensity, data.densityBuffer);
                             ctx.cmd.SetComputeBufferParam(data.voxelizationCS, data.voxelizationKernel, HDShaderIDs._VolumeAmbientProbeBuffer, data.volumetricAmbientProbeBuffer);
+
+                            // Underwater fog
+                            if (data.water)
+                            {
+                                ctx.cmd.SetComputeBufferParam(data.voxelizationCS, data.voxelizationKernel, HDShaderIDs._WaterLineBuffer, data.waterLine);
+                                ctx.cmd.SetComputeBufferParam(data.voxelizationCS, data.voxelizationKernel, HDShaderIDs._WaterCameraHeightBuffer, data.waterCameraHeight);
+                                ctx.cmd.SetComputeTextureParam(data.voxelizationCS, data.voxelizationKernel, HDShaderIDs._RefractiveDepthBuffer, data.waterStencil, 0, RenderTextureSubElement.Depth);
+                                ctx.cmd.SetComputeTextureParam(data.voxelizationCS, data.voxelizationKernel, HDShaderIDs._StencilTexture, data.waterStencil, 0, RenderTextureSubElement.Stencil);
+                            }
 
                             ConstantBuffer.Push(ctx.cmd, data.volumetricCB, data.voxelizationCS, HDShaderIDs._ShaderVariablesVolumetric);
 
@@ -1106,7 +1151,7 @@ namespace UnityEngine.Rendering.HighDefinition
                     debugOverdrawTexture = renderGraph.CreateTexture(
                         new TextureDesc(currParams.viewportSize.x, currParams.viewportSize.y, true, true)
                         {
-                            name = "Volumetric Fog Overdraw", colorFormat = GetColorBufferFormat(),
+                            name = "Volumetric Fog Overdraw", format = GetColorBufferFormat(),
                             clearBuffer = true, clearColor = Color.black
                         });
 
@@ -1145,7 +1190,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
                         passData.vfxDebugRendererList = builder.UseRendererList(renderGraph.CreateRendererList(vfxDebugFogRenderListDesc));
                     }
-                    passData.volumetricMaterialCS = defaultResources.shaders.volumetricMaterialCS;
+                    passData.volumetricMaterialCS = runtimeShaders.volumetricMaterialCS;
                     passData.computeRenderingParametersKernel = passData.volumetricMaterialCS.FindKernel("ComputeVolumetricMaterialRenderingParameters");
                     passData.visibleVolumeBoundsBuffer = visibleVolumeBoundsBuffer;
                     passData.globalIndirectBuffer = LocalVolumetricFogManager.manager.globalIndirectBuffer;
@@ -1256,11 +1301,19 @@ namespace UnityEngine.Rendering.HighDefinition
             public TextureHandle maxZBuffer;
             public TextureHandle historyBuffer;
             public TextureHandle feedbackBuffer;
-            public BufferHandle bigTileLightListBuffer;
+            public BufferHandle bigTileVolumetricLightListBuffer;
             public GraphicsBuffer volumetricAmbientProbeBuffer;
+
+            // Underwater
+            public bool water;
+            public BufferHandle waterLine;
+            public BufferHandle waterCameraHeight;
+            public TextureHandle waterStencil;
+            public RenderTargetIdentifier causticsBuffer;
         }
 
-        TextureHandle VolumetricLightingPass(RenderGraph renderGraph, HDCamera hdCamera, TextureHandle depthTexture, TextureHandle densityBuffer, TextureHandle maxZBuffer, BufferHandle bigTileLightListBuffer, ShadowResult shadowResult)
+        TextureHandle VolumetricLightingPass(RenderGraph renderGraph, HDCamera hdCamera, TextureHandle depthTexture, TextureHandle densityBuffer,
+            TextureHandle maxZBuffer, in TransparentPrepassOutput transparentPrepass, TextureHandle depthBuffer, BufferHandle bigTileVolumetricLightListBuffer, ShadowResult shadowResult)
         {
             if (Fog.IsVolumetricFogEnabled(hdCamera))
             {
@@ -1287,11 +1340,14 @@ namespace UnityEngine.Rendering.HighDefinition
                     passData.volumetricLightingCS.shaderKeywords = null;
                     passData.volumetricLightingFilteringCS.shaderKeywords = null;
 
+                    passData.water = transparentPrepass.waterGBuffer.valid && transparentPrepass.underWaterSurface != null && transparentPrepass.underWaterSurface.caustics;
+
                     CoreUtils.SetKeyword(passData.volumetricLightingCS, "LIGHTLOOP_DISABLE_TILE_AND_CLUSTER", !passData.tiledLighting);
                     CoreUtils.SetKeyword(passData.volumetricLightingCS, "ENABLE_REPROJECTION", passData.enableReprojection);
                     CoreUtils.SetKeyword(passData.volumetricLightingCS, "ENABLE_ANISOTROPY", enableAnisotropy);
                     CoreUtils.SetKeyword(passData.volumetricLightingCS, "VL_PRESET_OPTIMAL", optimal);
                     CoreUtils.SetKeyword(passData.volumetricLightingCS, "SUPPORT_LOCAL_LIGHTS", !fog.directionalLightsOnly.value);
+                    CoreUtils.SetKeyword(passData.volumetricLightingCS, "SUPPORT_WATER_ABSORPTION", passData.water);
 
                     passData.volumetricLightingKernel = passData.volumetricLightingCS.FindKernel("VolumetricLighting");
 
@@ -1303,7 +1359,7 @@ namespace UnityEngine.Rendering.HighDefinition
                     passData.viewCount = hdCamera.viewCount;
                     passData.filterVolume = ((int)fog.denoisingMode.value & (int)FogDenoisingMode.Gaussian) != 0;
                     passData.sliceCount = (int)(cvp.z);
-                    passData.filteringNeedsExtraBuffer = !(SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, FormatUsage.LoadStore));
+                    passData.filteringNeedsExtraBuffer = !(SystemInfo.IsFormatSupported(GraphicsFormat.R16G16B16A16_SFloat, GraphicsFormatUsage.LoadStore));
 
                     ComputeVolumetricFogSliceCountAndScreenFraction(fog, out var maxSliceCount, out _);
                     UpdateShaderVariableslVolumetrics(ref m_ShaderVariablesVolumetricCB, hdCamera, passData.resolution, maxSliceCount);
@@ -1311,17 +1367,17 @@ namespace UnityEngine.Rendering.HighDefinition
                     passData.lightListCB = m_ShaderVariablesLightListCB;
 
                     if (passData.tiledLighting)
-                        passData.bigTileLightListBuffer = builder.ReadBuffer(bigTileLightListBuffer);
+                        passData.bigTileVolumetricLightListBuffer = builder.ReadBuffer(bigTileVolumetricLightListBuffer);
                     passData.densityBuffer = builder.ReadTexture(densityBuffer);
                     passData.depthTexture = builder.ReadTexture(depthTexture);
                     passData.maxZBuffer = builder.ReadTexture(maxZBuffer);
                     passData.lightingBuffer = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(s_CurrentVolumetricBufferSize.x, s_CurrentVolumetricBufferSize.y, false, false)
-                    { slices = s_CurrentVolumetricBufferSize.z, colorFormat = GraphicsFormat.R16G16B16A16_SFloat, dimension = TextureDimension.Tex3D, enableRandomWrite = true, name = "VBufferLighting" }));
+                    { slices = s_CurrentVolumetricBufferSize.z, format = GraphicsFormat.R16G16B16A16_SFloat, dimension = TextureDimension.Tex3D, enableRandomWrite = true, name = "VBufferLighting" }));
 
                     if (passData.filterVolume && passData.filteringNeedsExtraBuffer)
                     {
                         passData.filteringOutputBuffer = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(s_CurrentVolumetricBufferSize.x, s_CurrentVolumetricBufferSize.y, false, false)
-                        { slices = s_CurrentVolumetricBufferSize.z, colorFormat = GraphicsFormat.R16G16B16A16_SFloat, dimension = TextureDimension.Tex3D, enableRandomWrite = true, name = "VBufferLightingFiltered" }));
+                        { slices = s_CurrentVolumetricBufferSize.z, format = GraphicsFormat.R16G16B16A16_SFloat, dimension = TextureDimension.Tex3D, enableRandomWrite = true, name = "VBufferLightingFiltered" }));
 
                         CoreUtils.SetKeyword(passData.volumetricLightingFilteringCS, "NEED_SEPARATE_OUTPUT", passData.filteringNeedsExtraBuffer);
                     }
@@ -1334,13 +1390,23 @@ namespace UnityEngine.Rendering.HighDefinition
 
                     passData.volumetricAmbientProbeBuffer = m_SkyManager.GetVolumetricAmbientProbeBuffer(hdCamera);
 
+                    // Water stuff
+                    if (passData.water)
+                    {
+                        passData.waterLine = builder.ReadBuffer(transparentPrepass.waterLine);
+                        passData.waterCameraHeight = builder.ReadBuffer(transparentPrepass.waterGBuffer.cameraHeight);
+                        passData.waterStencil = builder.ReadTexture(depthBuffer);
+                        if (transparentPrepass.underWaterSurface.caustics)
+                            passData.causticsBuffer = waterSystem.GetUnderWaterSurfaceCaustics();
+                    }
+
                     HDShadowManager.ReadShadowResult(shadowResult, builder);
 
                     builder.SetRenderFunc(
                         (VolumetricLightingPassData data, RenderGraphContext ctx) =>
                         {
                             if (data.tiledLighting)
-                                ctx.cmd.SetComputeBufferParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs.g_vBigTileLightList, data.bigTileLightListBuffer);
+                                ctx.cmd.SetComputeBufferParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs.g_vBigTileLightList, data.bigTileVolumetricLightListBuffer);
 
                             ctx.cmd.SetComputeTextureParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs._MaxZMaskTexture, data.maxZBuffer);  // Read
 
@@ -1348,6 +1414,16 @@ namespace UnityEngine.Rendering.HighDefinition
                             ctx.cmd.SetComputeTextureParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs._VBufferDensity, data.densityBuffer);  // Read
                             ctx.cmd.SetComputeTextureParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs._VBufferLighting, data.lightingBuffer); // Write
                             ctx.cmd.SetComputeBufferParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs._VolumeAmbientProbeBuffer, data.volumetricAmbientProbeBuffer);
+
+                            // Underwater
+                            if (data.water)
+                            {
+                                ctx.cmd.SetComputeTextureParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs._WaterCausticsDataBuffer, data.causticsBuffer);
+                                ctx.cmd.SetComputeBufferParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs._WaterLineBuffer, data.waterLine);
+                                ctx.cmd.SetComputeBufferParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs._WaterCameraHeightBuffer, data.waterCameraHeight);
+                                ctx.cmd.SetComputeTextureParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs._RefractiveDepthBuffer, data.waterStencil, 0, RenderTextureSubElement.Depth);
+                                ctx.cmd.SetComputeTextureParam(data.volumetricLightingCS, data.volumetricLightingKernel, HDShaderIDs._StencilTexture, data.waterStencil, 0, RenderTextureSubElement.Stencil);
+                            }
 
                             if (data.enableReprojection)
                             {
@@ -1392,9 +1468,6 @@ namespace UnityEngine.Rendering.HighDefinition
 
             return renderGraph.ImportTexture(HDUtils.clearTexture3DRTH);
         }
-
-        internal Shader GetDefaultFogVolumeShader()
-            => defaultResources.shaderGraphs.defaultFogVolumeShader;
 
         void PrepareAndPushVolumetricCBufferForVFXUpdate(CommandBuffer cmd, HDCamera hdCamera)
         {

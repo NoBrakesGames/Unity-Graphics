@@ -76,15 +76,15 @@ namespace UnityEditor.VFX.UI
         }
     }
 
-    abstract class VFXBaseSliderField<T> : VisualElement, INotifyValueChanged<T>, IVFXDraggedElement
+    abstract class VFXBaseSliderField<T> : VisualElement, IVFXNotifyValueChanged<T>
     {
         protected readonly Slider m_Slider;
         protected readonly TextValueField<T> m_Field;
 
         private static readonly LinearSliderScale s_LinearSliderScale = new LinearSliderScale();
 
-        private Action<IVFXDraggedElement> m_OnValueDragFinished;
-        private Action<IVFXDraggedElement> m_OnValueDragStarted;
+        private Action m_OnValueDragFinished;
+        private Action m_OnValueDragStarted;
         private bool m_IgnoreNotification;
         private ISliderScale m_Scale;
         private T m_Value;
@@ -129,10 +129,11 @@ namespace UnityEditor.VFX.UI
             m_Slider = new Slider(0, 1, SliderDirection.Horizontal);
             m_Slider.AddToClassList("textfield");
             AddToClassList("sliderField");
-            Add(m_Slider);
 
             m_Field = field;
             Add(m_Field);
+            m_Field.Insert(1, m_Slider);
+
             RegisterCallBack();
 
             scale = customScale ?? s_LinearSliderScale;
@@ -144,9 +145,24 @@ namespace UnityEditor.VFX.UI
             set => m_Scale = value ?? s_LinearSliderScale;
         }
 
+        public bool isIndeterminate
+        {
+            get => m_Slider.showMixedValue;
+            set
+            {
+                m_Slider.showMixedValue = value;
+                m_Field.showMixedValue = value;
+            }
+        }
+
         public void SetValueWithoutNotify(T newValue)
         {
             SetValueWithoutNotify(ValueToFloat(newValue), newValue);
+        }
+
+        public void SetValueWithoutNotify(T newValue, bool force)
+        {
+            SetValueWithoutNotify(ValueToFloat(newValue), newValue, force);
         }
 
         public T value
@@ -177,19 +193,19 @@ namespace UnityEditor.VFX.UI
             }
         }
 
-        public void SetOnValueDragStarted(Action<IVFXDraggedElement> callback) => m_OnValueDragStarted = callback;
-        public void SetOnValueDragFinished(Action<IVFXDraggedElement> callback) => m_OnValueDragFinished = callback;
+        public void SetOnValueDragStarted(Action callback) => m_OnValueDragStarted = callback;
+        public void SetOnValueDragFinished(Action callback) => m_OnValueDragFinished = callback;
 
         private bool hasFocus => m_Field.HasFocus() || panel?.focusController.focusedElement == m_Field;
 
         private void ValueDragFinished()
         {
-            m_OnValueDragFinished?.Invoke(this);
+            m_OnValueDragFinished?.Invoke();
         }
 
         private void ValueDragStarted()
         {
-            m_OnValueDragStarted?.Invoke(this);
+            m_OnValueDragStarted?.Invoke();
         }
 
         private void RegisterCallBack()
@@ -238,6 +254,8 @@ namespace UnityEditor.VFX.UI
                     SetValueWithoutNotify(sliderValue, typedNewValue, force);
                     SendEvent(evt);
                 }
+
+                m_Field.value = typedNewValue;
             }
         }
 
@@ -256,7 +274,17 @@ namespace UnityEditor.VFX.UI
         {
             e.StopPropagation();
             if (!m_IgnoreNotification)
-                SetValueAndNotify(ValueToFloat(e.newValue), e.newValue);
+            {
+                var newValue = ValueToFloat(e.newValue);
+                if (newValue >= range.x && newValue <= range.y)
+                {
+                    SetValueAndNotify(ValueToFloat(e.newValue), e.newValue);
+                }
+                else
+                {
+                    m_Field.value = e.previousValue;
+                }
+            }
         }
 
         private float ValueToFloat(T v)
@@ -267,27 +295,38 @@ namespace UnityEditor.VFX.UI
 
         private T FloatToValue(float v)
         {
+            if (typeof(T) == typeof(int))
+            {
+                if ((double)v > int.MaxValue)
+                    return (T)Convert.ChangeType(int.MaxValue, typeof(T));
+            }
+            else if (typeof(T) == typeof(long))
+            {
+                if ((double)v > uint.MaxValue)
+                    return (T)Convert.ChangeType(uint.MaxValue, typeof(T));
+            }
+
             return (T)Convert.ChangeType(v, typeof(T));
         }
     }
 
     class VFXFloatSliderField : VFXBaseSliderField<float>
     {
-        public VFXFloatSliderField() : base(CreateField()) { }
+        public VFXFloatSliderField(string label) : base(CreateField(label)) { }
 
-        private static FloatField CreateField() => new FloatField { name = "Field" };
+        private static FloatField CreateField(string label) => new FloatField(label) { name = "Field" };
     }
 
     class VFXIntSliderField : VFXBaseSliderField<int>
     {
-        public VFXIntSliderField() : base(CreateField()) { }
-        private static IntegerField CreateField() => new IntegerField { name = "Field" };
+        public VFXIntSliderField(string label) : base(CreateField(label)) { }
+        private static IntegerField CreateField(string label) => new IntegerField(label) { name = "Field" };
     }
 
     class VFXLongSliderField : VFXBaseSliderField<long>
     {
-        public VFXLongSliderField() : base(CreateField()) { }
+        public VFXLongSliderField(string label) : base(CreateField(label)) { }
 
-        private static LongField CreateField() => new LongField { name = "Field" };
+        private static LongField CreateField(string label) => new LongField(label) { name = "Field" };
     }
 }

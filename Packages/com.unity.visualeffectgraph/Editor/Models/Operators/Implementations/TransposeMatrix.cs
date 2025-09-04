@@ -1,10 +1,9 @@
-using System;
-using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    //[VFXHelpURL("Operator-TransposeMatrix")]
+    [VFXInfo(name = "Transpose (Matrix)", category = "Math/Geometry")]
     class TransposeMatrix : VFXOperator
     {
         public class InputProperties

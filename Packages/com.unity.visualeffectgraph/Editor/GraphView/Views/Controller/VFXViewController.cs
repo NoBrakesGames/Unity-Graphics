@@ -2,11 +2,10 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Data;
 using System.IO;
 using System.Linq;
+
 using UnityEditor.Experimental.GraphView;
-using UnityEditor.VFX;
 using UnityEngine;
 using UnityEngine.Profiling;
 
@@ -98,7 +97,7 @@ namespace UnityEditor.VFX.UI
         Dictionary<ScriptableObject, bool>[] modifiedModels = NewPrioritizedHashSet();
         Dictionary<ScriptableObject, bool>[] otherModifiedModels = NewPrioritizedHashSet();
 
-        public void OnObjectModified(VFXObject obj, bool uiChange)
+        private void OnObjectModified(VFXObject obj, bool uiChange)
         {
             // uiChange == false is stronger : if we have a uiChange and there was a nonUIChange before we keep the non uichange.
             if (!uiChange)
@@ -121,6 +120,7 @@ namespace UnityEditor.VFX.UI
                 return;
 
             target.onModified += OnObjectModified;
+
             List<Action> notifieds;
             if (m_Notified.TryGetValue(target, out notifieds))
             {
@@ -218,9 +218,9 @@ namespace UnityEditor.VFX.UI
                         }
                     }
                     Profiler.EndSample();
-                    if (!kv.Value && obj is VFXModel model && errorRefresh) // we refresh errors only if it wasn't a ui change
+                    if (!kv.Value && obj is VFXModel vfxModel && errorRefresh) // we refresh errors only if it wasn't a ui change
                     {
-                        model.RefreshErrors();
+                        vfxModel.RefreshErrors();
                     }
                 }
                 m_CurrentlyNotified = null;
@@ -241,11 +241,17 @@ namespace UnityEditor.VFX.UI
 
                 if (model != null && model.name != m_Name)
                 {
+                    bool prevDirty = EditorUtility.IsDirty(model);
                     model.name = m_Name;
+                    if (!prevDirty)
+                        EditorUtility.ClearDirty(model);
                 }
                 if (graph != null && (graph as UnityObject).name != m_Name)
                 {
+                    bool prevDirty = EditorUtility.IsDirty(graph);
                     (graph as UnityObject).name = m_Name;
+                    if (!prevDirty)
+                        EditorUtility.ClearDirty(graph);
                 }
 
                 NotifyChange(Change.assetName);
@@ -384,6 +390,8 @@ namespace UnityEditor.VFX.UI
             foreach (var node in nodeToUpdate)
             {
                 node.UpdateAllEditable();
+                // Mark model as changed since it's connections have changed
+                OnObjectModified(node.model, false);
             }
 
             return nodeToUpdate.Any();
@@ -674,10 +682,20 @@ namespace UnityEditor.VFX.UI
 
         public void RemoveElement(Controller element, bool explicitDelete = false)
         {
-            if (element is VFXContextController)
+            bool HasCustomAttributes(VFXModel model)
             {
-                VFXContextController contextController = ((VFXContextController)element);
+                return model is IVFXAttributeUsage attributeUsage &&
+                       attributeUsage.usedAttributes.Any(x => graph.attributesManager.IsCustom(x.name));
+            }
+
+            VFXModel removedModel = null;
+            bool needSyncCustomAttributes = false;
+
+            if (element is VFXContextController contextController)
+            {
                 VFXContext context = contextController.model;
+                removedModel = context;
+                needSyncCustomAttributes = HasCustomAttributes(removedModel);
                 contextController.NodeGoingToBeRemoved();
 
                 // Remove connections from context
@@ -704,38 +722,42 @@ namespace UnityEditor.VFX.UI
 
                 UnityObject.DestroyImmediate(context, true);
             }
-            else if (element is VFXBlockController)
+            else if (element is VFXBlockController block)
             {
-                var block = element as VFXBlockController;
+                removedModel = block.model;
+                needSyncCustomAttributes = HasCustomAttributes(removedModel);
                 block.NodeGoingToBeRemoved();
                 block.contextController.RemoveBlock(block.model);
 
                 UnityObject.DestroyImmediate(block.model, true);
             }
-            else if (element is VFXParameterNodeController)
+            else if (element is VFXParameterNodeController parameter)
             {
-                var parameter = element as VFXParameterNodeController;
+                removedModel = parameter.model;
+                needSyncCustomAttributes = HasCustomAttributes(removedModel);
                 parameter.NodeGoingToBeRemoved();
                 parameter.parentController.model.RemoveNode(parameter.infos);
-                RemoveFromGroupNodes(element as VFXNodeController);
+                RemoveFromGroupNodes(parameter);
                 DataEdgesMightHaveChanged();
             }
-            else if (element is VFXNodeController || element is VFXParameterController)
+            else if (element is VFXNodeController or VFXParameterController)
             {
                 IVFXSlotContainer container = null;
 
-                if (element is VFXNodeController)
+                if (element is VFXNodeController nodeController)
                 {
-                    VFXNodeController nodeController = (element as VFXNodeController);
-                    container = nodeController.model as IVFXSlotContainer;
+                    removedModel = nodeController.model;
+                    needSyncCustomAttributes = HasCustomAttributes(removedModel);
+                    container = removedModel as IVFXSlotContainer;
                     nodeController.NodeGoingToBeRemoved();
-                    RemoveFromGroupNodes(element as VFXNodeController);
+                    RemoveFromGroupNodes(nodeController);
                 }
                 else
                 {
-                    container = (element as VFXParameterController).model;
-
-                    foreach (var parameterNode in m_SyncedModels[container as VFXModel])
+                    removedModel = ((VFXParameterController)element).model;
+                    needSyncCustomAttributes = HasCustomAttributes(removedModel);
+                    container = (IVFXSlotContainer)removedModel;
+                    foreach (var parameterNode in m_SyncedModels[removedModel])
                     {
                         RemoveFromGroupNodes(parameterNode);
                     }
@@ -758,11 +780,8 @@ namespace UnityEditor.VFX.UI
                 UnityObject.DestroyImmediate(container as VFXModel, true);
                 DataEdgesMightHaveChanged();
             }
-            else if (element is VFXFlowEdgeController)
+            else if (element is VFXFlowEdgeController flowEdge)
             {
-                var flowEdge = element as VFXFlowEdgeController;
-
-
                 var inputAnchor = flowEdge.input as VFXFlowAnchorController;
                 var outputAnchor = flowEdge.output as VFXFlowAnchorController;
 
@@ -806,6 +825,11 @@ namespace UnityEditor.VFX.UI
             else
             {
                 Debug.LogErrorFormat("Unexpected type : {0}", element.GetType().FullName);
+            }
+
+            if (needSyncCustomAttributes)
+            {
+                graph.SyncCustomAttributes();
             }
         }
 
@@ -1183,27 +1207,25 @@ namespace UnityEditor.VFX.UI
             this.graph.AddChild(model);
         }
 
-        public VFXContext AddVFXContext(Vector2 pos, VFXModelDescriptor<VFXContext> desc)
+        public VFXContext AddVFXContext(Vector2 pos, Variant variant)
         {
-            VFXContext model = desc.CreateInstance();
+            VFXContext model = (VFXContext)variant.CreateInstance();
             AddVFXModel(pos, model);
             return model;
         }
 
-        public VFXOperator AddVFXOperator(Vector2 pos, VFXModelDescriptor<VFXOperator> desc)
+        public VFXOperator AddVFXOperator(Vector2 pos, Variant variant)
         {
-            var model = desc.CreateInstance();
+            var model = (VFXOperator)variant.CreateInstance();
             AddVFXModel(pos, model);
             return model;
         }
 
-        public VFXParameter AddVFXParameter(Vector2 pos, VFXModelDescriptorParameters desc, bool parent = true)
+        public VFXParameter AddVFXParameter(Vector2 pos, Variant variant, bool parent = true)
         {
-            var model = desc.CreateInstance();
+            var parameter = (VFXParameter)variant.CreateInstance();
             if (parent)
-                AddVFXModel(pos, model);
-
-            VFXParameter parameter = model as VFXParameter;
+                AddVFXModel(pos, parameter);
 
             Type type = parameter.type;
 
@@ -1215,14 +1237,14 @@ namespace UnityEditor.VFX.UI
                 order = m_ParameterControllers.Keys.Select(t => t.order).Max() + 1;
             }
             parameter.order = order;
-            parameter.SetSettingValue("m_ExposedName", string.Format("New {0}", type.UserFriendlyName()));
+            parameter.SetSettingValue("m_ExposedName", $"New {ObjectNames.NicifyVariableName(type.UserFriendlyName())}");
 
             if (!type.IsPrimitive)
             {
                 parameter.value = VFXTypeExtension.GetDefaultField(type);
             }
 
-            return model;
+            return parameter;
         }
 
         public VFXNodeController GetNewNodeController(VFXModel model)
@@ -1240,42 +1262,37 @@ namespace UnityEditor.VFX.UI
             return nodeControllers.FirstOrDefault();
         }
 
-        public VFXNodeController AddNode(Vector2 tPos, object modelDescriptor, VFXGroupNodeController groupNode)
+        public VFXNodeController AddNode(Vector2 tPos, Variant variant, VFXGroupNodeController groupNode)
         {
             VFXModel newNode = null;
-            if (modelDescriptor is VFXModelDescriptor<VFXOperator>)
+            if (variant.modelType.IsSubclassOf(typeof(VFXOperator)))
             {
-                newNode = AddVFXOperator(tPos, (modelDescriptor as VFXModelDescriptor<VFXOperator>));
+                newNode = AddVFXOperator(tPos, variant);
             }
-            else if (modelDescriptor is VFXModelDescriptor<VFXContext>)
+            else if (variant.modelType.IsSubclassOf(typeof(VFXContext)))
             {
-                newNode = AddVFXContext(tPos, modelDescriptor as VFXModelDescriptor<VFXContext>);
+                newNode = AddVFXContext(tPos, variant);
             }
-            else if (modelDescriptor is VFXModelDescriptorParameters)
+            else if (variant.modelType == typeof(VFXParameter))
             {
-                newNode = AddVFXParameter(tPos, modelDescriptor as VFXModelDescriptorParameters);
+                newNode = AddVFXParameter(tPos, variant);
             }
             if (newNode != null)
             {
-                bool groupNodeChanged = false;
+                var groupNodeChanged = false;
                 SyncControllerFromModel(ref groupNodeChanged);
 
-                List<VFXNodeController> nodeControllers = null;
-                m_SyncedModels.TryGetValue(newNode, out nodeControllers);
+                m_SyncedModels.TryGetValue(newNode, out var nodeControllers);
 
-                if (newNode is VFXParameter)
+                if (newNode is VFXParameter newParameter)
                 {
-                    // Set an exposed name on a new parameter so that uncity is ensured
-                    VFXParameter newParameter = newNode as VFXParameter;
-                    m_ParameterControllers[newParameter].exposedName = string.Format("New {0}", newParameter.type.UserFriendlyName());
+                    // Set an exposed name on a new parameter so that uniqueness is ensured
+                    m_ParameterControllers[newParameter].exposedName = $"New {ObjectNames.NicifyVariableName(newParameter.type.UserFriendlyName())}";
                 }
 
                 NotifyChange(AnyThing);
 
-                if (groupNode != null)
-                {
-                    groupNode.AddNode(nodeControllers.First());
-                }
+                groupNode?.AddNode(nodeControllers.First());
 
                 return nodeControllers[0];
             }
@@ -1285,7 +1302,7 @@ namespace UnityEditor.VFX.UI
 
         public VFXNodeController AddVFXParameter(Vector2 pos, VFXParameterController parameterController, VFXGroupNodeController groupNode)
         {
-            if (parameterController.isOutput && parameterController.nodeCount > 0)
+            if (parameterController.isOutput && parameterController.hasNodes)
             {
                 return parameterController.nodes.First();
             }
@@ -1510,7 +1527,7 @@ namespace UnityEditor.VFX.UI
             {
                 var ui = graph.UIInfos;
                 // Validate category list
-                var categories = ui.categories != null ? ui.categories : new List<VFXUI.CategoryInfo>();
+                var categories = ui.categories ?? new List<VFXUI.CategoryInfo>();
 
                 string[] missingCategories = m_ParameterControllers.Select(t => t.Key.category).Where(t => !string.IsNullOrEmpty(t)).Except(categories.Select(t => t.name)).ToArray();
 
@@ -1583,11 +1600,20 @@ namespace UnityEditor.VFX.UI
 
         Dictionary<VFXParameter, VFXParameterController> m_ParameterControllers = new Dictionary<VFXParameter, VFXParameterController>();
 
-        public IEnumerable<VFXParameterController> parameterControllers
+        public IEnumerable<VFXParameterController> parameterControllers => m_ParameterControllers.Values;
+
+
+        public void ChangeCategory(VFXParameter parameter, string newCategory)
         {
-            get { return m_ParameterControllers.Values; }
+            var parameterController = parameterControllers.Single(x => x.exposedName == parameter.exposedName);
+            parameterController.model.category = newCategory;
+            graph.Invalidate(VFXModel.InvalidationCause.kSettingChanged);
         }
 
+        public int GetCategoryIndex(string category)
+        {
+            return graph.UIInfos.categories.FindIndex(x => string.Compare(x.name, category, StringComparison.OrdinalIgnoreCase) == 0);
+        }
 
         public void MoveCategory(string category, int index)
         {
@@ -1598,7 +1624,7 @@ namespace UnityEditor.VFX.UI
             if (oldIndex == -1 || oldIndex == index)
                 return;
             graph.UIInfos.categories.RemoveAt(oldIndex);
-            if (index < graph.UIInfos.categories.Count)
+            if (index >= 0 && index < graph.UIInfos.categories.Count)
                 graph.UIInfos.categories.Insert(index, new VFXUI.CategoryInfo { name = category });
             else
                 graph.UIInfos.categories.Add(new VFXUI.CategoryInfo { name = category });
@@ -1606,20 +1632,16 @@ namespace UnityEditor.VFX.UI
             graph.Invalidate(VFXModel.InvalidationCause.kUIChanged);
         }
 
-        public bool SetCategoryName(int category, string newName)
+        public bool RenameCategory(string oldName, string newName)
         {
-            if (category >= 0 && graph.UIInfos.categories != null && category < graph.UIInfos.categories.Count)
+            var category = graph.UIInfos.categories.SingleOrDefault(x => x.name == oldName);
+            if (!string.IsNullOrEmpty(category.name))
             {
-                if (graph.UIInfos.categories[category].name == newName)
+                if (graph.UIInfos.categories.All(t => t.name != newName))
                 {
-                    return false;
-                }
-                if (!graph.UIInfos.categories.Any(t => t.name == newName))
-                {
-                    var oldName = graph.UIInfos.categories[category].name;
-                    var catInfo = graph.UIInfos.categories[category];
-                    catInfo.name = newName;
-                    graph.UIInfos.categories[category] = catInfo;
+                    graph.UIInfos.categories.Remove(category);
+                    category.name = newName;
+                    graph.UIInfos.categories.Add(category);
 
                     foreach (var parameter in m_ParameterControllers)
                     {
@@ -1646,37 +1668,34 @@ namespace UnityEditor.VFX.UI
             return false;
         }
 
-        public void RemoveCategory(string name)
+        public bool RemoveCategory(string category)
         {
-            int index = graph.UIInfos.categories.FindIndex(t => t.name == name);
+            var index = graph.UIInfos.categories.FindIndex(x => string.Compare(x.name, category, StringComparison.OrdinalIgnoreCase) == 0);
 
-            if (index > -1)
+            if (index != -1)
             {
-                var parametersToRemove = RemoveCategory(index);
+                graph.UIInfos.categories.RemoveAt(index);
+                var parametersToRemove = m_ParameterControllers
+                    .Where(x => string.Compare(x.Key.category, category, StringComparison.OrdinalIgnoreCase) == 0)
+                    .Select(x => x.Value)
+                    .ToList();
 
-                Remove(parametersToRemove.Cast<Controller>());
-            }
-        }
+                Remove(parametersToRemove);
 
-        public IEnumerable<VFXParameterController> RemoveCategory(int category)
-        {
-            if (category >= 0 && graph.UIInfos.categories != null && category < graph.UIInfos.categories.Count)
-            {
-                string name = graph.UIInfos.categories[category].name;
-
-                graph.UIInfos.categories.RemoveAt(category);
                 graph.Invalidate(VFXModel.InvalidationCause.kUIChanged);
-
-                return m_ParameterControllers.Values.Where(t => t.model.category == name);
+                return true;
             }
-            return Enumerable.Empty<VFXParameterController>();
+
+            return false;
         }
 
-        // The default version
-        public void SetParametersOrder(VFXParameterController controller, int index, bool input)
+        public void SetParametersOrder(VFXParameterController controller, int index)
         {
-            controller.model.category = string.Empty;
-            var orderedParameters = m_ParameterControllers.Where(t => t.Value.isOutput == !input && t.Value.model.category == "").OrderBy(t => t.Value.order).Select(t => t.Value).ToList();
+            var orderedParameters = m_ParameterControllers
+                .Where(t => t.Value.isOutput == controller.isOutput && t.Value.model.category == controller.model.category)
+                .OrderBy(t => t.Value.order)
+                .Select(t => t.Value)
+                .ToList();
 
             int oldIndex = orderedParameters.IndexOf(controller);
 
@@ -1688,70 +1707,47 @@ namespace UnityEditor.VFX.UI
                     --index;
             }
 
-            controller.isOutput = !input;
-
             if (index < orderedParameters.Count)
                 orderedParameters.Insert(index, controller);
             else
                 orderedParameters.Add(controller);
 
-            for (int i = 0; i < orderedParameters.Count; ++i)
+            for (var i = 0; i < orderedParameters.Count; ++i)
             {
                 orderedParameters[i].order = i;
             }
             NotifyChange(AnyThing);
         }
 
-        //The category version
-        public void SetParametersOrder(VFXParameterController controller, int index, string category)
+        public void GetCategoryExpanded(string categoryName, out bool isExpanded)
         {
-            controller.isOutput = false;
-            var orderedParameters = m_ParameterControllers.Where(t => t.Key.category == category).OrderBy(t => t.Value.order).Select(t => t.Value).ToList();
-
-            int oldIndex = orderedParameters.IndexOf(controller);
-
-
-            if (oldIndex != -1)
+            var category = graph.UIInfos.categories?.SingleOrDefault(x => x.name == categoryName);
+            if (!string.IsNullOrEmpty(category?.name))
             {
-                orderedParameters.RemoveAt(oldIndex);
-
-                if (oldIndex < index)
-                {
-                    --index;
-                }
-            }
-
-            controller.model.category = category;
-
-            if (index < orderedParameters.Count)
-            {
-                orderedParameters.Insert(index, controller);
+                isExpanded = !category.Value.collapsed;
             }
             else
             {
-                orderedParameters.Add(controller);
+                isExpanded = false;
             }
-
-            for (int i = 0; i < orderedParameters.Count; ++i)
-            {
-                orderedParameters[i].order = i;
-            }
-            NotifyChange(AnyThing);
         }
 
-        public void SetCategoryExpanded(string category, bool expanded)
+        public void SetCategoryExpanded(string categoryName, bool expanded)
         {
             if (graph.UIInfos.categories != null)
             {
                 for (int i = 0; i < graph.UIInfos.categories.Count; ++i)
                 {
-                    if (graph.UIInfos.categories[i].name == category)
+                    var category = graph.UIInfos.categories[i];
+                    if (category.name == categoryName && category.collapsed != !expanded)
                     {
-                        graph.UIInfos.categories[i] = new VFXUI.CategoryInfo { name = category, collapsed = !expanded };
+                        category.collapsed = !expanded;
+                        graph.UIInfos.categories[i] = category;
+                        NotifyChange(AnyThing);
+                        break;
                     }
                 }
             }
-            NotifyChange(AnyThing);
         }
 
         private void AddControllersFromModel(VFXModel model)
@@ -1927,13 +1923,19 @@ namespace UnityEditor.VFX.UI
             return ui.groupInfos.Last();
         }
 
-        public void GroupNodes(IEnumerable<VFXNodeController> nodes)
+        public void GroupNodes(VFXNodeController[] nodes)
         {
-            foreach (var g in groupNodes) // remove nodes from other exisitings groups
+            // If a node from the selection already belongs to a group, remove it from this group
+            foreach (var g in groupNodes.ToArray())
             {
                 g.RemoveNodes(nodes);
+                if (g.nodes.Count() ==0)
+                {
+                    RemoveGroupNode(g);
+                }
             }
-            VFXUI.GroupInfo info = PrivateAddGroupNode(Vector2.zero);
+
+            var info = PrivateAddGroupNode(Vector2.zero);
 
             info.contents = nodes.Select(t => new VFXNodeID(t.model, t.id)).ToArray();
 

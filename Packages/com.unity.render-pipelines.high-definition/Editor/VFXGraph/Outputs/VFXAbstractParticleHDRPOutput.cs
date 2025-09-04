@@ -27,12 +27,6 @@ namespace UnityEditor.VFX.HDRP
             ColorAndAlpha = Color | Alpha
         }
 
-        protected bool GeneratesWithShaderGraph()
-        {
-            return GetOrRefreshShaderGraphObject() != null &&
-                GetOrRefreshShaderGraphObject().generatesWithShaderGraph;
-        }
-
         [VFXSetting(VFXSettingAttribute.VisibleFlags.InInspector), SerializeField, Tooltip("Specifies what parts of the base color map is applied to the particles. Particles can receive color, alpha, color and alpha, or not receive any values from the base color map.")]
         protected BaseColorMapMode useBaseColorMap = BaseColorMapMode.ColorAndAlpha;
 
@@ -53,6 +47,7 @@ namespace UnityEditor.VFX.HDRP
         protected VFXAbstractParticleHDRPOutput(bool strip = false) : base(strip) { }
 
         protected virtual bool allowTextures { get { return GetOrRefreshShaderGraphObject() == null; } }
+        protected virtual bool useNormalScale => true;
 
         protected IEnumerable<VFXPropertyWithValue> baseColorMapProperties
         {
@@ -74,7 +69,8 @@ namespace UnityEditor.VFX.HDRP
             get
             {
                 yield return new VFXPropertyWithValue(new VFXProperty(GetTextureType(), "normalMap", new TooltipAttribute("Specifies the Normal map to obtain normals in tangent space for the particle.")));
-                yield return new VFXPropertyWithValue(new VFXProperty(typeof(float), "normalScale", new TooltipAttribute("Sets the scale of the normals. Larger values increase the impact of the normals.")), 1.0f);
+                if(useNormalScale)
+                    yield return new VFXPropertyWithValue(new VFXProperty(typeof(float), "normalScale", new TooltipAttribute("Sets the scale of the normals. Larger values increase the impact of the normals.")), 1.0f);
             }
         }
         protected IEnumerable<VFXPropertyWithValue> emissiveMapsProperties
@@ -159,7 +155,8 @@ namespace UnityEditor.VFX.HDRP
                     if (useNormalMap)
                     {
                         yield return slotExpressions.First(o => o.name == "normalMap");
-                        yield return slotExpressions.First(o => o.name == "normalScale");
+                        if(useNormalScale)
+                            yield return slotExpressions.First(o => o.name == "normalScale");
                     }
                     if (useEmissiveMap)
                     {
@@ -247,8 +244,36 @@ namespace UnityEditor.VFX.HDRP
                 {
                     yield return "onlyAmbientLighting";
                     yield return "preserveSpecularLighting";
-                    yield return "excludeFromTAA";
+                    yield return "excludeFromTUAndAA";
                 }
+            }
+        }
+
+        public override IEnumerable<VFXAttributeInfo> attributes
+        {
+            get
+            {
+                yield return new VFXAttributeInfo(VFXAttribute.Position, VFXAttributeMode.Read);
+                if (colorMode != ColorMode.None)
+                    yield return new VFXAttributeInfo(VFXAttribute.Color, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.Alpha, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.Alive, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AxisX, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AxisY, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AxisZ, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AngleX, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AngleY, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AngleZ, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.PivotX, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.PivotY, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.PivotZ, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.Size, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.ScaleX, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.ScaleY, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.ScaleZ, VFXAttributeMode.Read);
+
+                foreach (var attribute in flipbookAttributes)
+                    yield return attribute;
             }
         }
 

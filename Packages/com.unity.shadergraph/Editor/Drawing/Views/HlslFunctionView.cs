@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor.UIElements;
 using UnityEditor.Graphing;
+using UnityEditor.ShaderGraph.Drawing.Inspector;
 
 namespace UnityEditor.ShaderGraph.Drawing
 {
@@ -15,6 +16,7 @@ namespace UnityEditor.ShaderGraph.Drawing
         private EnumField m_Type;
         private TextField m_FunctionName;
         private ObjectField m_FunctionSource;
+        private Toggle m_FunctionSourceUsePragmas;
         private TextField m_FunctionBody;
 
         internal HlslFunctionView(CustomFunctionNode node)
@@ -37,6 +39,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                     node.owner.owner.RegisterCompleteObjectUndo("Change Function Type");
                     node.sourceType = (HlslSourceType)s.newValue;
                     Draw(node);
+                    node.owner.ClearErrorsForNode(node);
                     node.ValidateNode();
                     node.Dirty(ModificationScope.Graph);
                 }
@@ -61,6 +64,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                     node.functionName = m_FunctionName.value;
                     node.ValidateNode();
                     node.Dirty(ModificationScope.Graph);
+                    this.GetFirstAncestorOfType<InspectorView>()?.RefreshInspectables();
                 }
             });
 
@@ -84,7 +88,29 @@ namespace UnityEditor.ShaderGraph.Drawing
                 }
             });
 
+            m_FunctionSourceUsePragmas = new Toggle
+            {
+                value = node.functionSourceUsePragmas
+            };
+            m_FunctionSourceUsePragmas.RegisterValueChangedCallback(s =>
+            {
+                if (s.newValue != node.functionSourceUsePragmas)
+                {
+                    node.owner.owner.RegisterCompleteObjectUndo("Change Function Source Pragma Usage");
+                    node.functionSourceUsePragmas = s.newValue;
+                    node.ValidateNode();
+                    node.Dirty(ModificationScope.Graph);
+                }
+            });
+
             m_FunctionBody = new TextField { value = node.functionBody, multiline = true };
+            m_FunctionBody.AddToClassList("sg-hlsl-function-view__body");
+            m_FunctionBody.verticalScrollerVisibility = ScrollerVisibility.Auto;
+
+            var functionBodyScrollView = m_FunctionBody.Q<ScrollView>();
+            functionBodyScrollView.mode = ScrollViewMode.VerticalAndHorizontal;
+            functionBodyScrollView.horizontalScrollerVisibility = ScrollerVisibility.Auto;
+
             m_FunctionBody.RegisterCallback<FocusInEvent>(s =>
             {
                 if (m_FunctionBody.value == CustomFunctionNode.defaultFunctionBody)
@@ -125,6 +151,15 @@ namespace UnityEditor.ShaderGraph.Drawing
                         sourceRow.Add(m_FunctionSource);
                     }
                     Add(sourceRow);
+
+                    VisualElement functionSourceUsePragmasRow = new VisualElement() { name = "Row" };
+                    {
+                        functionSourceUsePragmasRow.Add(new Label("Use Pragmas"));
+                        functionSourceUsePragmasRow.Add(m_FunctionSourceUsePragmas);
+                        functionSourceUsePragmasRow.tooltip = "Determines whether or not Unity pragmas from the included file will be used in the generated shader.";
+                    }
+                    Add(functionSourceUsePragmasRow);
+
                     break;
                 case HlslSourceType.String:
                     VisualElement bodyRow = new VisualElement() { name = "Row" };

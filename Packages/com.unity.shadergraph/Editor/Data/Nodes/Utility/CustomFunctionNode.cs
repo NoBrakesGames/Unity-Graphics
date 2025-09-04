@@ -125,6 +125,15 @@ namespace UnityEditor.ShaderGraph
         }
 
         [SerializeField]
+        private bool m_FunctionSourceUsePragmas = true;
+
+        public bool functionSourceUsePragmas
+        {
+            get => m_FunctionSourceUsePragmas;
+            set => m_FunctionSourceUsePragmas = value;
+        }
+
+        [SerializeField]
         string m_FunctionBody = k_DefaultFunctionBody;
 
         const string k_DefaultFunctionBody = "Enter function body here...";
@@ -264,16 +273,19 @@ namespace UnityEditor.ShaderGraph
                     if (string.IsNullOrEmpty(path))
                         path = functionSource;
 
-                    registry.RequiresIncludePath(path);
+                    registry.RequiresIncludePath(path, shouldIncludeWithPragmas: functionSourceUsePragmas);
                     break;
                 case HlslSourceType.String:
                     registry.ProvideFunction(hlslFunctionName, builder =>
                     {
+                        // add a hint for the analytic derivative code to ignore user functions
+                        builder.AddLine("// unity-custom-func-begin");
                         GetFunctionHeader(builder);
                         using (builder.BlockScope())
                         {
                             builder.AppendLines(functionBody);
                         }
+                        builder.AddLine("// unity-custom-func-end");
                     });
                     break;
                 default:

@@ -1,14 +1,13 @@
-using System;
-using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Force")]
+    [VFXHelpURL("Block-ConformToSignedDistanceField")]
+    [VFXInfo(name = "Attractor Shape|Signed Distance Field", category = "Force")]
     class ConformToSDF : VFXBlock
     {
-        public override string name { get { return "Conform to Signed Distance Field"; } }
+        public override string name => "Attractor Shape Signed Distance Field";
         public override VFXContextType compatibleContexts { get { return VFXContextType.Update; } }
         public override VFXDataType compatibleData { get { return VFXDataType.Particle; } }
 

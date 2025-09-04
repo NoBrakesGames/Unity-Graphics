@@ -1,5 +1,5 @@
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -31,26 +31,24 @@ namespace UnityEngine.Rendering.HighDefinition
         uint m_SSSTexturingModeFlags;        // 1 bit/profile: 0 = PreAndPostScatter, 1 = PostScatter
         uint m_SSSTransmissionFlags;         // 1 bit/profile: 0 = regular, 1 = thin
 
-        internal DiffusionProfileSettings defaultDiffusionProfile => m_SSSDefaultDiffusionProfile;
-
         void InitializeSubsurfaceScattering()
         {
             // Disney SSS (compute + combine)
             string kernelName = "SubsurfaceScattering";
-            m_SubsurfaceScatteringCS = defaultResources.shaders.subsurfaceScatteringCS;
+            m_SubsurfaceScatteringCS = runtimeShaders.subsurfaceScatteringCS;
             m_SubsurfaceScatteringKernel = m_SubsurfaceScatteringCS.FindKernel(kernelName);
 
-            m_SubsurfaceScatteringDownsampleCS = defaultResources.shaders.subsurfaceScatteringDownsampleCS;
+            m_SubsurfaceScatteringDownsampleCS = runtimeShaders.subsurfaceScatteringDownsampleCS;
             m_SubsurfaceScatteringDownsampleKernel = m_SubsurfaceScatteringDownsampleCS.FindKernel("Downsample");
-            m_CombineLightingPass = CoreUtils.CreateEngineMaterial(defaultResources.shaders.combineLightingPS);
+            m_CombineLightingPass = CoreUtils.CreateEngineMaterial(runtimeShaders.combineLightingPS);
             m_CombineLightingPass.SetInt(HDShaderIDs._StencilRef, (int)StencilUsage.SubsurfaceScattering);
             m_CombineLightingPass.SetInt(HDShaderIDs._StencilMask, (int)StencilUsage.SubsurfaceScattering);
 
-            m_SSSCopyStencilForSplitLighting = CoreUtils.CreateEngineMaterial(defaultResources.shaders.copyStencilBufferPS);
+            m_SSSCopyStencilForSplitLighting = CoreUtils.CreateEngineMaterial(runtimeShaders.copyStencilBufferPS);
             m_SSSCopyStencilForSplitLighting.SetInt(HDShaderIDs._StencilRef, (int)StencilUsage.SubsurfaceScattering);
             m_SSSCopyStencilForSplitLighting.SetInt(HDShaderIDs._StencilMask, (int)StencilUsage.SubsurfaceScattering);
 
-            m_SSSDefaultDiffusionProfile = defaultResources.assets.defaultDiffusionProfile;
+            m_SSSDefaultDiffusionProfile = runtimeAssets.defaultDiffusionProfile;
 
             // fill the list with the max number of diffusion profile so we dont have
             // the error: exceeds previous array size (5 vs 3). Cap to previous size.
@@ -178,7 +176,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
             return renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
             {
-                colorFormat = GraphicsFormat.R8G8B8A8_SRGB,
+                format = GraphicsFormat.R8G8B8A8_SRGB,
                 enableRandomWrite = !msaa,
                 bindTextureMS = msaa,
                 msaaSamples = msaaSamples,
@@ -252,7 +250,7 @@ namespace UnityEngine.Rendering.HighDefinition
                     float scale = 1.0f / (1u << passData.downsampleSteps);
                     passData.downsampleBuffer = builder.CreateTransientTexture(
                         new TextureDesc(Vector2.one * scale, true, true)
-                        { colorFormat = GraphicsFormat.B10G11R11_UFloatPack32, enableRandomWrite = true, clearBuffer = true, clearColor = Color.clear, name = "SSSDownsampled" });
+                        { format = GraphicsFormat.B10G11R11_UFloatPack32, enableRandomWrite = true, clearBuffer = true, clearColor = Color.clear, name = "SSSDownsampled" });
                 }
 
 
@@ -260,7 +258,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 {
                     passData.cameraFilteringBuffer = builder.CreateTransientTexture(
                         new TextureDesc(Vector2.one, true, true)
-                        { colorFormat = GraphicsFormat.B10G11R11_UFloatPack32, enableRandomWrite = true, clearBuffer = true, clearColor = Color.clear, name = "SSSCameraFiltering" });
+                        { format = GraphicsFormat.B10G11R11_UFloatPack32, enableRandomWrite = true, clearBuffer = true, clearColor = Color.clear, name = "SSSCameraFiltering" });
                 }
                 else
                 {

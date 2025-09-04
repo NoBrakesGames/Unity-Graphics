@@ -2,7 +2,7 @@
 #define UNIVERSAL_PARTICLES_FORWARD_SIMPLE_LIT_PASS_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Particles.hlsl"
+#include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Particles.hlsl"
 
 void InitializeInputData(VaryingsParticle input, half3 normalTS, out InputData inputData)
 {
@@ -35,12 +35,14 @@ void InitializeInputData(VaryingsParticle input, half3 normalTS, out InputData i
 
     inputData.fogCoord = InitializeInputDataFog(float4(input.positionWS.xyz, 1.0), input.positionWS.w);
     inputData.vertexLighting = half3(0.0h, 0.0h, 0.0h);
-#if (defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2))
+#if !defined(LIGHTMAP_ON) && (defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2))
     inputData.bakedGI = SAMPLE_GI(input.vertexSH,
         GetAbsolutePositionWS(inputData.positionWS),
         inputData.normalWS,
         inputData.viewDirectionWS,
-        input.clipPos.xy);
+        input.clipPos.xy,
+        input.probeOcclusion,
+        inputData.shadowMask);
 #else
     inputData.bakedGI = SampleSHPixel(input.vertexSH, inputData.normalWS);
 #endif
@@ -50,6 +52,10 @@ void InitializeInputData(VaryingsParticle input, half3 normalTS, out InputData i
     #if defined(DEBUG_DISPLAY) && !defined(PARTICLES_EDITOR_META_PASS)
     inputData.vertexSH = input.vertexSH;
     #endif
+
+#if defined(DEBUG_DISPLAY) && defined(USE_APV_PROBE_OCCLUSION)
+    inputData.probeOcclusion = input.probeOcclusion;
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -77,7 +83,7 @@ VaryingsParticle ParticlesLitVertex(AttributesParticle input)
     output.viewDirWS = viewDirWS;
 #endif
 
-    OUTPUT_SH(vertexInput.positionWS, output.normalWS.xyz, GetWorldSpaceNormalizeViewDir(vertexInput.positionWS), output.vertexSH);
+    OUTPUT_SH4(vertexInput.positionWS, output.normalWS.xyz, GetWorldSpaceNormalizeViewDir(vertexInput.positionWS), output.vertexSH, output.probeOcclusion);
 
     half fogFactor = 0.0;
 #if !defined(_FOG_FRAGMENT)

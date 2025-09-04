@@ -9,13 +9,18 @@ using UnityEditor;
 namespace UnityEngine.Rendering
 {
     /// <summary>
-    /// A component that stores baked probe volume state and data references. Normally hidden from the user.
+    /// A component that stores baked probe volume state and data references. Normally hidden in the hierarchy.
     /// </summary>
     [ExecuteAlways]
     [AddComponentMenu("")] // Hide.
     public class ProbeVolumePerSceneData : MonoBehaviour
     {
-        [SerializeField] internal ProbeVolumeBakingSet bakingSet;
+        /// <summary>The baking set this scene is part of.</summary>
+        public ProbeVolumeBakingSet bakingSet => serializedBakingSet;
+
+        // Warning: this is the baking set this scene was part of during last bake
+        // It shouldn't be used while baking as the scene may have been moved since then
+        [SerializeField, FormerlySerializedAs("bakingSet")] internal ProbeVolumeBakingSet serializedBakingSet;
         [SerializeField] internal string sceneGUID = "";
 
         // All code bellow is only kept in order to be able to cleanup obsolete data.
@@ -30,8 +35,10 @@ namespace UnityEngine.Rendering
         [Serializable]
         struct ObsoleteSerializablePerScenarioDataItem
         {
+#pragma warning disable 649 // is never assigned to, and will always have its default value
             public string scenario;
             public ObsoletePerScenarioData data;
+#pragma warning restore 649
         }
 
         [FormerlySerializedAs("asset")]
@@ -57,7 +64,7 @@ namespace UnityEngine.Rendering
         internal void Clear()
         {
             QueueSceneRemoval();
-            bakingSet = null;
+            serializedBakingSet = null;
 
 #if UNITY_EDITOR
             EditorUtility.SetDirty(this);
@@ -66,31 +73,45 @@ namespace UnityEngine.Rendering
 
         internal void QueueSceneLoading()
         {
-            if (bakingSet == null)
+            if (serializedBakingSet == null)
                 return;
 
+            #if UNITY_EDITOR
+            // Check if we are trying to load APV data for a scene which has not enabled APV (or it was removed)
+            var bakedData = serializedBakingSet.GetSceneBakeData(sceneGUID, addIfMissing: false);
+            if (bakedData != null && bakedData.hasProbeVolume == false)
+                return;
+            #endif
+
             var refVol = ProbeReferenceVolume.instance;
-            refVol.AddPendingSceneLoading(sceneGUID);
+            refVol.AddPendingSceneLoading(sceneGUID, serializedBakingSet);
         }
 
         internal void QueueSceneRemoval()
         {
-            if (bakingSet != null)
+            if (serializedBakingSet != null)
                 ProbeReferenceVolume.instance.AddPendingSceneRemoval(sceneGUID);
         }
 
         void OnEnable()
         {
-            ProbeReferenceVolume.instance.RegisterPerSceneData(this);
+            #if UNITY_EDITOR
+            // In the editor, always refresh the GUID as it may become out of date is scene is duplicated or other weird things
+            // This field is serialized, so it will be available in standalones, where it can't change anymore.
+            // Only change the GUID if the new one is valid.
+            var newGUID = gameObject.scene.GetGUID();
+            if (newGUID != sceneGUID && new GUID(newGUID) != default)
+            {
+                sceneGUID = newGUID;
+                EditorUtility.SetDirty(this);
+            }
+            #endif
 
-            if (ProbeReferenceVolume.instance.sceneData != null)
-                Initialize();
+            ProbeReferenceVolume.instance.RegisterPerSceneData(this);
         }
 
         void OnDisable()
         {
-            ProbeReferenceVolume.instance.UnregisterPerSceneDataMigration(this);
-
             QueueSceneRemoval();
             ProbeReferenceVolume.instance.UnregisterPerSceneData(this);
         }
@@ -122,8 +143,6 @@ namespace UnityEngine.Rendering
 
         internal void Initialize()
         {
-            MigrateIfNeeded();
-
             ProbeReferenceVolume.instance.RegisterBakingSet(this);
 
             QueueSceneRemoval();
@@ -132,29 +151,10 @@ namespace UnityEngine.Rendering
 
         internal bool ResolveCellData()
         {
-            if (bakingSet != null)
-                return bakingSet.ResolveCellData(sceneGUID);
+            if (serializedBakingSet != null)
+                return serializedBakingSet.ResolveCellData(serializedBakingSet.GetSceneCellIndexList(sceneGUID));
 
             return false;
-        }
-
-        internal void MigrateIfNeeded()
-        {
-#if UNITY_EDITOR
-            if (ProbeReferenceVolume.instance.sceneData != null)
-            {
-                if (String.IsNullOrEmpty(sceneGUID))
-                {
-                    sceneGUID = ProbeVolumeSceneData.GetSceneGUID(gameObject.scene);
-                    bakingSet = ProbeReferenceVolume.instance.sceneData.GetBakingSetForScene(sceneGUID);
-                    EditorUtility.SetDirty(this);
-                }
-            }
-            else
-            {
-                ProbeReferenceVolume.instance.RegisterPerSceneDataMigration(this);
-            }
-#endif
         }
     }
 }

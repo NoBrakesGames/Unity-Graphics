@@ -51,8 +51,8 @@ Shader "HDRP/Unlit"
         [HideInInspector][ToggleUI] _ZWrite("__zw", Float) = 1.0
         [HideInInspector][ToggleUI] _TransparentZWrite("_TransparentZWrite", Float) = 0.0
         [HideInInspector] _CullMode("__cullmode", Float) = 2.0
-        [Enum(UnityEditor.Rendering.HighDefinition.TransparentCullMode)] _TransparentCullMode("_TransparentCullMode", Int) = 2 // Back culling by default
-        [Enum(UnityEditor.Rendering.HighDefinition.OpaqueCullMode)] _OpaqueCullMode("_OpaqueCullMode", Int) = 2 // Back culling by default
+        [Enum(UnityEngine.Rendering.HighDefinition.TransparentCullMode)] _TransparentCullMode("_TransparentCullMode", Int) = 2 // Back culling by default
+        [Enum(UnityEngine.Rendering.HighDefinition.OpaqueCullMode)] _OpaqueCullMode("_OpaqueCullMode", Int) = 2 // Back culling by default
         [HideInInspector] _ZTestModeDistortion("_ZTestModeDistortion", Int) = 8
         [Enum(UnityEngine.Rendering.CompareFunction)] _ZTestTransparent("Transparent ZTest", Int) = 4 // Less equal
         [HideInInspector] _ZTestDepthEqualForOpaque("_ZTestDepthEqualForOpaque", Int) = 4 // Less equal
@@ -91,10 +91,6 @@ Shader "HDRP/Unlit"
         [HideInInspector] _MainTex("Albedo", 2D) = "white" {}
         [HideInInspector] _Color("Color", Color) = (1,1,1,1)
         [HideInInspector] _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
-
-        // Debug constants must be exposed as properties so the shader is compatible
-        // with the SRP batcher
-        [HideInInspector] _UnlitColorMap_MipInfo("_UnlitColorMap_MipInfo", Vector) = (0, 0, 0, 0)
     }
 
     HLSLINCLUDE
@@ -111,10 +107,6 @@ Shader "HDRP/Unlit"
 
     #pragma shader_feature_local_fragment _EMISSIVE_COLOR_MAP
     #pragma shader_feature_local_raytracing _EMISSIVE_COLOR_MAP
-
-    // Keyword for transparent
-    #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
-    #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
     #pragma shader_feature_local _ADD_PRECOMPUTED_VELOCITY
 
@@ -303,6 +295,10 @@ Shader "HDRP/Unlit"
 
             #pragma multi_compile _ DEBUG_DISPLAY
 
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+
             #ifdef DEBUG_DISPLAY
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Debug/DebugDisplay.hlsl"
             #endif
@@ -343,6 +339,10 @@ Shader "HDRP/Unlit"
 
             #define SHADERPASS SHADERPASS_LIGHT_TRANSPORT
             #pragma shader_feature EDITOR_VISUALIZATION
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             // Use Unity's built-in matrices for meta pass rendering
             #define SCENEPICKINGPASS
@@ -419,6 +419,10 @@ Shader "HDRP/Unlit"
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
 
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+
             #define SHADERPASS SHADERPASS_DISTORTION
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
@@ -452,6 +456,10 @@ Shader "HDRP/Unlit"
             // enable dithering LOD crossfade
             #pragma multi_compile _ LOD_FADE_CROSSFADE
 
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+
             #define SHADERPASS SHADERPASS_FULL_SCREEN_DEBUG
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/Unlit.hlsl"
@@ -480,6 +488,10 @@ Shader "HDRP/Unlit"
             #pragma raytracing surface_shader
 
             #pragma multi_compile _ DEBUG_DISPLAY
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_INDIRECT
 
@@ -512,6 +524,10 @@ Shader "HDRP/Unlit"
 
             #pragma multi_compile _ DEBUG_DISPLAY
 
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+
             #define SHADERPASS SHADERPASS_RAYTRACING_FORWARD
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
@@ -539,6 +555,10 @@ Shader "HDRP/Unlit"
 
             #pragma only_renderers d3d11 xboxseries ps5
             #pragma raytracing surface_shader
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_GBUFFER
 
@@ -574,6 +594,10 @@ Shader "HDRP/Unlit"
             #define SHADOW_LOW
             #pragma multi_compile _ TRANSPARENT_COLOR_SHADOW
 
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+
             #define SHADERPASS SHADERPASS_RAYTRACING_VISIBILITY
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
@@ -603,6 +627,10 @@ Shader "HDRP/Unlit"
             #pragma only_renderers d3d11 xboxseries ps5
             #pragma raytracing surface_shader
 
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+
             #define SHADERPASS SHADERPASS_RAYTRACING_DEBUG
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
@@ -612,7 +640,7 @@ Shader "HDRP/Unlit"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingIntersection.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RayTracingCommon.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassRaytracingDebug.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassRayTracingDebug.hlsl"
 
             ENDHLSL
         }
@@ -628,6 +656,10 @@ Shader "HDRP/Unlit"
             #pragma raytracing surface_shader
 
             #pragma multi_compile _ SENSORSDK_OVERRIDE_REFLECTANCE
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #ifdef SENSORSDK_OVERRIDE_REFLECTANCE
                 #define SENSORSDK_ENABLE_LIDAR

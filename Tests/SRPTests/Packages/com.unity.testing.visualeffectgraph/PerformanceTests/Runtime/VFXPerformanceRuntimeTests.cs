@@ -12,8 +12,12 @@ using UnityEngine.TestTools.Graphics;
 using Object = UnityEngine.Object;
 using UnityEngine.Profiling;
 using UnityEngine.VFX.PerformanceTest;
-using static PerformanceTestUtils;
-using static PerformanceMetricNames;
+using Unity.Profiling;
+using Unity.Testing.VisualEffectGraph;
+using UnityEngine.TestTools.Graphics.Performance;
+
+using static UnityEngine.TestTools.Graphics.Performance.PerformanceTestUtils;
+using static UnityEngine.TestTools.Graphics.Performance.PerformanceMetricNames;
 
 namespace UnityEditor.VFX.PerformanceTest
 {
@@ -70,7 +74,10 @@ namespace UnityEditor.VFX.PerformanceTest
             get
             {
                 yield return "PlayerLoop";
+                yield return "EarlyUpdate.PresentBeforeUpdate";
+                yield return "Gfx.WaitForPresentOnGfxThread";
                 yield return "PostLateUpdate.PresentAfterDraw";
+                yield return "NintendoCore.WaitPresentEnd";
                 yield return "WaitForTargetFPS";
                 yield return "GPU Frame Time";
                 yield return "VFX.MeshSystem.Render";
@@ -86,6 +93,7 @@ namespace UnityEditor.VFX.PerformanceTest
                 yield return "VFX.ParticleSystem.BatchUpdate";
                 yield return "VFX.ParticleSystem.BatchUpdateStrip";
                 yield return "VFX.ParticleSystem.BatchUploadStepData";
+                yield return "VFX.ParticleSystem.BatchUploadVisibleIndirectionBuffer";
                 yield return "VFX.ParticleSystem.BatchCopyDeadListCount";
                 yield return "VFX.ParticleSystem.PerStripUpdate";
                 yield return "VFX.ParticleSystem.RenderPoint";
@@ -105,6 +113,7 @@ namespace UnityEditor.VFX.PerformanceTest
                 yield return "VFX.Update";
                 yield return "VFX.PrepareCamera";
                 yield return "VFX.ProcessCamera";
+                yield return "VFX.ProcessCommandList";
                 yield return "VFX.FillIndirectRenderArgs";
                 yield return "VFX.CopyBuffer";
                 yield return "VFX.InitializeDeadListBuffer";
@@ -112,7 +121,6 @@ namespace UnityEditor.VFX.PerformanceTest
                 yield return "VFX.SortBuffer";
                 yield return "VFX.NotifyModifiedAsset";
                 yield return "VFX.NotifyDeletedAsset";
-                yield return "VFX.DefaultCommandBuffer";
                 yield return "VFX.RegisterGizmos";
                 yield return "VFX.CullJob";
                 yield return "VFXEditor.VisualEffectImporter.GenerateAssetData";
@@ -129,6 +137,7 @@ namespace UnityEditor.VFX.PerformanceTest
 
         public static IEnumerator Load_And_Prepare(GraphicsTestCase testCase)
         {
+            Debug.Log($"Running test case '{testCase}' with scene '{testCase.ScenePath}' {testCase.ReferenceImagePathLog}.");
             UnityEngine.SceneManagement.SceneManager.LoadScene(testCase.ScenePath);
             yield return new WaitForEndOfFrame();
 
@@ -163,7 +172,10 @@ namespace UnityEditor.VFX.PerformanceTest
             yield return new WaitForEndOfFrame();
         }
 
-        [Timeout(600 * 1000), Version("1"), UnityTest, VFXPerformanceUseGraphicsTestCases, PrebuildSetup("SetupGraphicsTestCases"), Performance]
+        [Timeout(600 * 1000), Version("1"), UnityTest, VFXPerformanceUseGraphicsTestCases, Performance]
+#if UNITY_EDITOR
+        [PrebuildSetup("SetupGraphicsTestCases")]
+#endif
         public IEnumerator Counters(GraphicsTestCase testCase)
         {
             yield return Load_And_Prepare(testCase);
@@ -237,7 +249,10 @@ namespace UnityEditor.VFX.PerformanceTest
                 yield return new WaitForEndOfFrame();
         }
 
-        [Timeout(600 * 1000), Version("1"), UnityTest, VFXPerformanceUseGraphicsTestCases, PrebuildSetup("SetupGraphicsTestCases"), Performance]
+        [Timeout(600 * 1000), Version("1"), UnityTest, VFXPerformanceUseGraphicsTestCases, Performance, Order(0)]
+#if UNITY_EDITOR
+        [PrebuildSetup("SetupGraphicsTestCases")]
+#endif
         public IEnumerator Memory(GraphicsTestCase testCase)
         {
             yield return FreeMemory();
@@ -287,6 +302,40 @@ namespace UnityEditor.VFX.PerformanceTest
             Measure.Custom(new SampleGroup(FormatSampleGroupName(k_TotalMemory, "totalMemoryVfx"), SampleUnit.Byte, false), totalMemoryVfx);
             Measure.Custom(new SampleGroup(FormatSampleGroupName(k_TotalMemory, "totalMemoryAllocated"), SampleUnit.Byte, false), Profiler.GetTotalAllocatedMemoryLong());
             Measure.Custom(new SampleGroup(FormatSampleGroupName(k_TotalMemory, "totalMemoryAllocatedForGraphicsDriver"), SampleUnit.Byte, false), Profiler.GetAllocatedMemoryForGraphicsDriver());
+
+            yield return FreeMemory();
+        }
+
+        [Version("1"), UnityTest, Performance, Order(1000)]
+        public IEnumerator RemainingMemoryAfterAllRun()
+        {
+            yield return FreeMemory();
+
+            var assetBundle = AssetBundleHelper.Load("scene_in_assetbundle");
+            UnityEngine.SceneManagement.SceneManager.LoadScene("Packages/com.unity.testing.visualeffectgraph/Scenes/Empty.unity");
+            for (int i = 0; i < 4; ++i)
+                yield return new WaitForEndOfFrame();
+
+            var globalSampleToFetch = new[] { "System Used Memory", "Total Reserved Memory", "Gfx Used Memory", "Gfx Reserved Memory" };
+            var profilerRecorders = new ProfilerRecorder[globalSampleToFetch.Length];
+            for (int i = 0; i < globalSampleToFetch.Length; ++i)
+            {
+                profilerRecorders[i] = ProfilerRecorder.StartNew(ProfilerCategory.Memory, globalSampleToFetch[i]);
+            }
+
+            yield return new WaitForEndOfFrame();
+            for (int i = 0; i < globalSampleToFetch.Length; ++i)
+            {
+                var profilerRecorder = profilerRecorders[i];
+                Assert.AreNotEqual((long)0, profilerRecorder.LastValue);
+                var name = "Remaining_" + globalSampleToFetch[i].Replace(" ", "");
+                Measure.Custom(new SampleGroup(name, SampleUnit.Byte, false), profilerRecorder.LastValue);
+            }
+
+            foreach (var profilerRecorder in profilerRecorders)
+                profilerRecorder.Dispose();
+
+            AssetBundleHelper.Unload(assetBundle);
 
             yield return FreeMemory();
         }

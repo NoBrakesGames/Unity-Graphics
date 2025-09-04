@@ -11,15 +11,12 @@ namespace UnityEditor.Rendering.HighDefinition
         // General
         static public readonly GUIContent k_SurfaceType = EditorGUIUtility.TrTextContent("Surface Type", "Specifies the nature of the water body that the water system needs to simulate.");
         static public readonly GUIContent k_GeometryType = EditorGUIUtility.TrTextContent("Geometry Type", "Specifies the type of geometry used to render the water surface. Quad stretches a unique grid over the size of the water surface. Custom allows you to specify a set of mesh renderers used to render the water surface for better culling. Instanced Quads creates a finite water surface with multiple instanced grids to keep a higher vertex density. Infinite generates a surface that extends to the far plane (or closer if the number of LODs is reached).");
-        static public string[] k_GeometryTypeEnum = { WaterGeometryType.Quad.ToString(), WaterGeometryType.Custom.ToString(), WaterGeometryType.InstancedQuads.ToString() };
+        static public GUIContent[] k_GeometryTypeEnum = { new GUIContent(WaterGeometryType.Quad.ToString()), new GUIContent(WaterGeometryType.Custom.ToString()), new GUIContent(WaterGeometryType.InstancedQuads.ToString()) };
         static public readonly GUIContent k_MeshRenderers = EditorGUIUtility.TrTextContent("Mesh Renderers", "Sets the geometries to use when rendering in custom geometry type mode.");
-        public static readonly string k_FixTransform = "Infinite water surfaces do not support rotation or scale.";
-        public static readonly GUIContent k_ResetTransformPopup = EditorGUIUtility.TrTextContent("Reset Transform");
 
         // CPU Simulation
-        static public readonly GUIContent k_CPUSimulation = EditorGUIUtility.TrTextContent("Script Interactions", "When enabled, HDRP will evaluate the water simulation on the CPU for C# script height requests. Enabling this will significantly increase the CPU cost of the feature.");
-        static public readonly GUIContent k_CPUFullResolution = EditorGUIUtility.TrTextContent("Full Resolution", "Specifies if the CPU simulation should be evaluated at full or half resolution. When in full resolution, the visual fidelity will be higher but the cost of the simulation will increase.");
-        static public readonly GUIContent k_CPUEvaluateRipples = EditorGUIUtility.TrTextContent("Evaluate Ripples", "When enabled, HDRP replicates the ripples on the CPU side when evaluating the water simulation for script interaction. Including ripples will allow a higher visual fidelity but the cost of the simulation will increase.");
+        static public readonly GUIContent k_CPUFullResolution = EditorGUIUtility.TrTextContent("Full Resolution", "Specifies if the simulation is evaluated at full or half resolution in Low Latency mode. When in full resolution in Low Latency mode, the visual fidelity is higher but the cost of the simulation increases.");
+        static public readonly GUIContent k_CPUEvaluateRipples = EditorGUIUtility.TrTextContent("Evaluate Ripples", "When enabled, ripples are included when evaluating the water simulation for script interactions. Including ripples allows a higher visual fidelity but the CPU cost increases.");
 
         // Simulation
         static public readonly GUIContent k_TimeMultiplier = EditorGUIUtility.TrTextContent("Time Multiplier", "Sets the speed of the water simulation. This allows to slow down the wave's speed or to accelerate it.");
@@ -66,8 +63,8 @@ namespace UnityEditor.Rendering.HighDefinition
         static public readonly GUIContent k_SwellFadeDistance = EditorGUIUtility.TrTextContent("Distance", "Sets the length in meters during which HDRP fades out the contribution of this frequency band.");
 
         // Ripples
-        static public readonly GUIContent k_RipplesEnable = EditorGUIUtility.TrTextContent("Ripples", "When enabled, the Water System allows you to simulate and render ripples for finer details. The frequencies range is not affected by the swell/agitation parameters. When enabled, the Water System allows you to simulate and render water ripples.");
-        static public readonly GUIContent k_RipplesWindSpeed = EditorGUIUtility.TrTextContent("Local Wind Speed", "Controls the speed of the local wind in kilometers per hour that is blowing over the water surface.This indirectly controls the maximum amplitude and shape of the ripples in a non-linear way.");
+        static public readonly GUIContent k_RipplesEnable = EditorGUIUtility.TrTextContent("Ripples", "When enabled, the Water System allows you to simulate and render ripples.\nThe frequency range is not affected by the swell/agitation parameters.");
+        static public readonly GUIContent k_RipplesWindSpeed = EditorGUIUtility.TrTextContent("Local Wind Speed", "Controls the speed of the local wind in kilometers per hour that is blowing over the water surface. This indirectly controls the maximum amplitude and shape of the ripples in a non-linear way.");
         static public readonly GUIContent k_RipplesChaos = EditorGUIUtility.TrTextContent("Chaos", "Controls how directional the ripples are. The lower the value, the more the ripples are traveling in the Local Wind Orientation.");
         static public readonly GUIContent k_RipplesMotionInherit = EditorGUIUtility.TrTextContent("Motion", "Specifies if the Local Wind's Orientation and Current properties are inherited from the Swell/Agitation or set independently.");
         static public readonly GUIContent k_RipplesOrientation = EditorGUIUtility.TrTextContent("Orientation", "Sets the orientation of local wind in degrees in a counterclockwise fashion relative to the X world vector. This parameter only affects the ripples with a chaos value inferior to one.");
@@ -89,10 +86,8 @@ namespace UnityEditor.Rendering.HighDefinition
         static public readonly GUIContent k_SmoothnessFadeRange = EditorGUIUtility.TrTextContent("Fade Range", "Specifies the range over which the smoothness is interpolated from close to distant.");
         static public readonly GUIContent k_SmoothnessFadeStart = EditorGUIUtility.TrTextContent("Start", "Sets the distance in meters at which HDRP starts interpolating the smoothness value for the water surface. ");
         static public readonly GUIContent k_SmoothnessFadeDistance = EditorGUIUtility.TrTextContent("Distance", "Sets the length in meters during which HDRP interpolates the smoothness value for the water surface. ");
-        public static readonly GUIContent k_WaterNewLMaterialLabel = EditorGUIUtility.TrTextContent("New", "Create a new water material.");
 
         static public readonly GUIContent k_Amplitude = EditorGUIUtility.TrTextContent("Amplitude", "Sets the normalized (between 0.0 and 1.0) amplitude of each simulation band (from lower to higher frequencies).");
-        static public readonly GUIContent k_Choppiness = EditorGUIUtility.TrTextContent("Choppiness", "Sets the choppiness factor the waves. Higher values combined with high wind speed may introduce visual artifacts.");
 
         // Refraction
         static public readonly GUIContent k_RefractionColor = EditorGUIUtility.TrTextContent("Color", "Sets the color that is used to simulate the under-water refraction.");
@@ -115,25 +110,23 @@ namespace UnityEditor.Rendering.HighDefinition
         static public readonly GUIContent k_CausticsBandAgitation = EditorGUIUtility.TrTextContent("Simulation Band", "Controls which simulation band is used for the caustics evaluation. The first band (index 0) comes from the agitation simulation and the second one (index 1) from the ripples.");
         static public readonly GUIContent k_CausticsDirectionalShadow = EditorGUIUtility.TrTextContent("Directional Shadow", "When enabled, the water caustics will take into account the directional light's shadow.");
         static public readonly GUIContent k_CausticsDirectionalShadowDimmer = EditorGUIUtility.TrTextContent("Directional Shadow Dimmer", "Sets the water caustics dimmer value for the directional shadow.");
-        
+
         static public readonly GUIContent k_FoamSmoothness = EditorGUIUtility.TrTextContent("Smoothness", "Controls the simulation foam smoothness.");
-        static public readonly GUIContent k_FoamPersistenceMultiplier = EditorGUIUtility.TrTextContent("Persistence Multiplier", "Specifies the foam persistence multiplier. A higher value will lead to the foam remaining visible longer.");
-        static public readonly GUIContent k_FoamTexture = EditorGUIUtility.TrTextContent("Custom Texture", "Sets the texture used to define a visual appearance for the foam.");
+        static public readonly GUIContent k_FoamPersistenceMultiplier = EditorGUIUtility.TrTextContent("Persistence Multiplier", "Specifies the decal foam persistence multiplier. A higher value will lead to the foam remaining visible longer.\nThis option requires Foam to be enabled in the Water Decals section.");
+        static public readonly GUIContent k_FoamCurrentInfluence = EditorGUIUtility.TrTextContent("Current Influence", "Specifies the influence of the swell current on foam. A value of zero means foam stays still, a value of one makes the foam match with current direction and speed. Ripples motion have no impact on foam.");
         static public readonly GUIContent k_FoamTextureTiling = EditorGUIUtility.TrTextContent("Texture Tiling", "Sets the per meter tiling for the foam texture.");
+        static public readonly GUIContent k_FoamColor = EditorGUIUtility.TrTextContent("Color", "Sets the foam color.");
         static public readonly GUIContent k_SimulationFoam = EditorGUIUtility.TrTextContent("Simulation Foam", "When enabled, the water simulation will generate foam on the tip of the waves.");
         static public readonly GUIContent k_SimulationFoamAmount = EditorGUIUtility.TrTextContent("Amount", "Controls the simulation foam amount. Higher values generate larger foam patches. Foam presence is highly dependent on the Distant Wind Speed.");
         static public readonly GUIContent k_SimulationFoamMask = EditorGUIUtility.TrTextContent("Mask", "Sets the texture used to attenuate or suppress the simulation foam. The red channel of the texture is used for the masking.");
         static public readonly GUIContent k_WindFoamCurve = EditorGUIUtility.TrTextContent("Wind Speed Dimmer", "Controls the foam intensity depending on the normalized Distant Wind Speed. The X axis refers to the normalized Distant Wind Speed, the Y axis refers to the dimmer value.");
 
         // Underwater
-        public static readonly GUIContent k_UnderWater = EditorGUIUtility.TrTextContent("Underwater", "When enabled, HDRP will apply a fog and color shift to the final image when the camera is under the surface.This feature has a cost even when the camera is above the water surface.");
+        public static readonly GUIContent k_UnderWater = EditorGUIUtility.TrTextContent("Underwater", "When enabled, HDRP will apply a fog and color shift to the final image when the camera is under the surface. This feature has a cost even when the camera is above the water surface.");
         public static readonly string k_AddColliderMessage = "The water surface does not support an underwater scenario if the box collider is not set.";
         public static readonly GUIContent k_AddBoxColliderPopup = EditorGUIUtility.TrTextContent("Add a Box Collider");
         public static readonly GUIContent k_UseBoxColliderPopup = EditorGUIUtility.TrTextContent("Use an existing Box Collider");
-        public static readonly GUIContent k_ColorPyramidOffset = EditorGUIUtility.TrTextContent("Color Pyramid Mip Offset", "Sets the mip offset used to evaluated the underwater refraction. Higher values produce blurrier results but introduce aliasing artifacts.");
-        public static readonly GUIContent k_UnderWaterScatteringColorMode = EditorGUIUtility.TrTextContent("Scattering Color Mode", "Sets how the underwater scattering color is specified.");
-        public static readonly GUIContent k_UnderWaterScatteringColor = EditorGUIUtility.TrTextContent("Scattering Color", "Sets the color that is used to simulate the scattering when the camera is underwater.");
-        public static readonly GUIContent k_UnderWaterAmbientProbeContribution = EditorGUIUtility.TrTextContent("Ambient Probe Contribution", "Sets the contribution of the ambient probe to the underwater scattering color.");
+        public static readonly GUIContent k_UnderWaterRefraction = EditorGUIUtility.TrTextContent("Screen Space Refraction", "When enabled, the water surface will refract light when looking at objects from underwater. Distant and Local Wind will still have an effect on refraction.\nThis setting only affects screen space refraction when sampling the color pyramid from underwater.");
 
         // Foam
         static public readonly GUIContent k_FoamMaskExtent = EditorGUIUtility.TrTextContent("Extent", "Sets the extent of the foam mask in meters.");

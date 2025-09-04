@@ -1,9 +1,9 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Sampling")]
+    [VFXHelpURL("Operator-LoadTexture2D")]
+    [VFXInfo(name = "Load Texture2D", category = "Sampling")]
     class LoadTexture2D : VFXOperator
     {
         override public string name { get { return "Load Texture2D"; } }

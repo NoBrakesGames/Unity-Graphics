@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -398,12 +399,50 @@ namespace UnityEditor.Rendering
     }
 
     /// <summary>
+    /// Builtin Drawer for Maskfield Debug Items.
+    /// </summary>
+    [DebugUIDrawer(typeof(DebugUI.RenderingLayerField))]
+    public sealed class DebugUIDrawerRenderingLayerField : DebugUIFieldDrawer<RenderingLayerMask, DebugUI.RenderingLayerField, DebugStateRenderingLayer>
+    {
+        /// <summary>
+        /// Does the field of the given type
+        /// </summary>
+        /// <param name="rect">The rect to draw the field</param>
+        /// <param name="label">The label for the field</param>
+        /// <param name="field">The field</param>
+        /// <param name="state">The state</param>
+        /// <returns>The current value from the UI</returns>
+        protected override RenderingLayerMask DoGUI(Rect rect, GUIContent label, DebugUI.RenderingLayerField field, DebugStateRenderingLayer state)
+        {
+            uint value = field.GetValue();
+            var mask = EditorGUI.MaskField(rect, label, (int)value, field.renderingLayersNames);
+            return (uint)mask;
+        }
+    }
+
+    /// <summary>
     /// Builtin Drawer for Foldout Debug Items.
     /// </summary>
     [DebugUIDrawer(typeof(DebugUI.Foldout))]
     public sealed class DebugUIDrawerFoldout : DebugUIDrawer
     {
         const int k_HeaderVerticalMargin = 2;
+        static void DisplayColumns(Rect drawRect, List<GUIContent> rowContents)
+        {
+            drawRect.x += EditorGUIUtility.labelWidth;
+            drawRect.width = DebugWindow.Styles.foldoutColumnWidth;
+
+            int indent = EditorGUI.indentLevel;
+            EditorGUI.indentLevel = 0; //be at left of rects
+            for (int i = 0; i < rowContents.Count; i++)
+            {
+                EditorGUI.LabelField(drawRect, rowContents[i], EditorStyles.miniBoldLabel);
+
+                // Offset the rect to the next possible column
+                drawRect.x += DebugWindow.Styles.foldoutColumnWidth;
+            }
+            EditorGUI.indentLevel = indent;
+        }
 
         /// <summary>
         /// Implement this to execute processing before UI rendering.
@@ -415,57 +454,25 @@ namespace UnityEditor.Rendering
             var w = Cast<DebugUI.Foldout>(widget);
             var s = Cast<DebugStateBool>(state);
 
-            GUIStyle style = w.isHeader ? DebugWindow.Styles.foldoutHeaderStyle : EditorStyles.foldout;
-            Rect rect = PrepareControlRect(w.isHeader ? style.fixedHeight : -1, w.isHeader);
+            var title = EditorGUIUtility.TrTextContent(w.displayName, w.tooltip);
 
-            if (w.isHeader)
-                GUILayout.Space(k_HeaderVerticalMargin);
-
-            bool value = EditorGUI.Foldout(rect, (bool)w.GetValue(), EditorGUIUtility.TrTextContent(w.displayName, w.tooltip), true, style);
-
-            if (w.GetValue() != value)
-                Apply(w, s, value);
+            Action<GenericMenu> fillContextMenuAction = null;
 
             if (w.contextMenuItems != null)
             {
-                float contextMenuButtonSize = style.fixedHeight;
-                var labelRect = EditorGUI.IndentedRect(GUILayoutUtility.GetRect(0f, /*17f*/ 0f));
-                labelRect.xMax -= 20f + 16 + 5;
-                var contextMenuRect = new Rect(labelRect.xMax + 3f + 16, labelRect.y - contextMenuButtonSize, contextMenuButtonSize, contextMenuButtonSize);
-                if (GUI.Button(contextMenuRect, CoreEditorStyles.contextMenuIcon, CoreEditorStyles.contextMenuStyle))
+                fillContextMenuAction = menu =>
                 {
-                    var menu = new GenericMenu();
                     foreach (var item in w.contextMenuItems)
                     {
                         menu.AddItem(EditorGUIUtility.TrTextContent(item.displayName), false, () => item.action.Invoke());
                     }
-                    menu.DropDown(new Rect(new Vector2(contextMenuRect.x, contextMenuRect.yMax), Vector2.zero));
-                }
+                };
             }
 
-            Rect drawRect = GUILayoutUtility.GetLastRect();
-            if (w.columnLabels != null && value)
-            {
-                int indent = EditorGUI.indentLevel;
-                EditorGUI.indentLevel = 0; //be at left of rects
-
-                if (w.isHeader) // display column labels on a separate row for header-styled foldouts
-                {
-                    drawRect = GUILayoutUtility.GetRect(1f, 1f, EditorGUIUtility.singleLineHeight, EditorGUIUtility.singleLineHeight);
-                    drawRect.x -= EditorGUIUtility.labelWidth / 2;
-                }
-
-                for (int i = 0; i < w.columnLabels.Length; i++)
-                {
-                    var columnRect = drawRect;
-                    columnRect.x += EditorGUIUtility.labelWidth + i * DebugWindow.Styles.foldoutColumnWidth;
-                    columnRect.width = DebugWindow.Styles.foldoutColumnWidth;
-                    string label = w.columnLabels[i] ?? "";
-                    string tooltip = w.columnTooltips?.ElementAtOrDefault(i) ?? "";
-                    EditorGUI.LabelField(columnRect, EditorGUIUtility.TrTextContent(label, tooltip), EditorStyles.miniBoldLabel);
-                }
-                EditorGUI.indentLevel = indent;
-            }
+            bool previousValue = (bool)w.GetValue();
+            bool value = CoreEditorUtils.DrawHeaderFoldout(title, previousValue, isTitleHeader: w.isHeader, customMenuContextAction: fillContextMenuAction);
+            if (previousValue != value)
+                Apply(w, s, value);
 
             EditorGUI.indentLevel++;
         }
@@ -479,6 +486,12 @@ namespace UnityEditor.Rendering
         public override bool OnGUI(DebugUI.Widget widget, DebugState state)
         {
             var w = Cast<DebugUI.Foldout>(widget);
+            if (w.opened && w.columnLabels != null)
+            {
+                var drawRect = PrepareControlRect(EditorGUIUtility.singleLineHeight);
+                drawRect.x = 0;
+                DisplayColumns(drawRect, w.rowContents);
+            }
             return w.opened;
         }
 
@@ -667,7 +680,7 @@ namespace UnityEditor.Rendering
                 _ => MessageType.None
             };
 
-            EditorGUILayout.HelpBox(w.displayName, type);
+            EditorGUILayout.HelpBox(w.message, type);
 
             return true;
         }
@@ -811,7 +824,10 @@ namespace UnityEditor.Rendering
 
                     rowRect.xMin += 2;
                     rowRect.xMax -= 2;
-                    EditorGUI.LabelField(rowRect, GUIContent.none, EditorGUIUtility.TrTextContent(row.displayName), DebugWindow.Styles.centeredLeft);
+
+                    bool isAlternate = r % 2 == 0;
+
+                    EditorGUI.LabelField(rowRect, GUIContent.none, EditorGUIUtility.TrTextContent(row.displayName),isAlternate ? DebugWindow.Styles.centeredLeft : DebugWindow.Styles.centeredLeftAlternate);
                     rowRect.xMin -= 2;
                     rowRect.xMax += 2;
 
@@ -822,7 +838,7 @@ namespace UnityEditor.Rendering
                             rowRect.x += rowRect.width;
                             rowRect.width = columns[visible[c]].width;
                             if (!row.isHidden)
-                                DisplayChild(rowRect, row.children[visible[c] - 1]);
+                                DisplayChild(rowRect, row.children[visible[c] - 1], isAlternate);
                         }
                         rowRect.y += rowRect.height;
                     }
@@ -865,7 +881,7 @@ namespace UnityEditor.Rendering
             return new Rect(rect.x + size, rect.y + size, rect.width - 2 * size, rect.height - 2 * size);
         }
 
-        internal void DisplayChild(Rect rect, DebugUI.Widget child)
+        internal void DisplayChild(Rect rect, DebugUI.Widget child, bool isAlternate)
         {
             rect.xMin += 2;
             rect.xMax -= 2;
@@ -879,7 +895,7 @@ namespace UnityEditor.Rendering
                 if (child.GetType() == typeof(DebugUI.Value))
                 {
                     var widget = Cast<DebugUI.Value>(child);
-                    EditorGUI.LabelField(rect, GUIContent.none, EditorGUIUtility.TrTextContent(widget.GetValue().ToString()));
+                    EditorGUI.LabelField(rect, GUIContent.none, EditorGUIUtility.TrTextContent(widget.GetValue().ToString()), isAlternate ? DebugWindow.Styles.centeredLeft : DebugWindow.Styles.centeredLeftAlternate);
                 }
                 else if (child.GetType() == typeof(DebugUI.ColorField))
                 {

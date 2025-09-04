@@ -48,6 +48,8 @@ namespace UnityEngine.Rendering.HighDefinition
         roughReflections = 1 << 17,
         /// <summary>cube resolution.</summary>
         cubeResolution = 1 << 18,
+        /// <summary>importance</summary>
+        importance = 1 << 19,
     }
 
     /// <summary>
@@ -123,13 +125,17 @@ namespace UnityEngine.Rendering.HighDefinition
             /// <returns>The default value.</returns>
             public static Lighting NewDefault() => new Lighting
             {
+                importance = 1,
                 multiplier = 1.0f,
                 weight = 1.0f,
-                lightLayer = RenderingLayerMask.LightLayerDefault,
+                lightLayer = (RenderingLayerMask) (uint) UnityEngine.RenderingLayerMask.defaultRenderingLayerMask,
                 fadeDistance = 10000f,
                 rangeCompressionFactor = 1.0f
             };
 
+            /// <summary>A value used to better filter probes than only by size. Probe with higher importance are displayed over the lower ones,
+            /// and smaller (volume) probes of same importance are displayed on top of bigger ones.</summary>
+            public int importance;
             /// <summary>A multiplier applied to the radiance of the Probe.</summary>
             public float multiplier;
             /// <summary>A weight applied to the influence of the Probe.</summary>
@@ -287,8 +293,9 @@ namespace UnityEngine.Rendering.HighDefinition
         public PlanarReflectionAtlasResolutionScalableSettingValue resolutionScalable;
         [SerializeField]
         internal PlanarReflectionAtlasResolution resolution;
+        /// <summary>The resolution of the cube probe.</summary>
         [SerializeField]
-        internal CubeReflectionResolutionScalableSettingValue cubeResolution;
+        public CubeReflectionResolutionScalableSettingValue cubeResolution;
         /// <summary>Probe camera settings.</summary>
         [Serialization.FormerlySerializedAs("camera")]
         public CameraSettings cameraSettings;

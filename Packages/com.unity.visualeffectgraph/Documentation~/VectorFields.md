@@ -1,13 +1,12 @@
-<div style="border: solid 1px #999; border-radius:12px; background-color:#EEE; padding: 8px; padding-left:14px; color: #555; font-size:14px;"><b>Experimental:</b> This feature is currently experimental and is subject to change in later major versions. To use this feature, enable <b>Experimental Operators/Blocks</b> in the <b>Visual Effects</b> tab of your Project's Preferences.</div>
 # Vector Fields / Signed Distance Fields
+
+**Note:** This feature is currently experimental and is subject to change in later major versions. To use this feature, enable **Experimental Operators/Blocks** in the **Visual Effects** tab of your Project's Preferences.
 
 Vector Fields and Signed Distance Fields are 3D Fields containing values stored in voxels. These are available as 3D Textures in Visual Effect Graph and can be imported using the Volume File (`.vf`) file format.
 
 Volume File is an [Open Source specification](https://github.com/peeweek/VectorFieldFile/blob/master/README.md) that contains basic structure for storing floating point data. Unity automatically imports  Volume File files are automatically imported in unity as 3D Textures and can be used in Visual Effect Graph Blocks and Operators that input 3D Textures, such as Vector Field or Signed Distance Field Blocks.
 
 ## Vector Field Importer
-
-![](Images/VectorFieldInspector.png)
 
 Unity provides the following settings in the Inspector to import Volume File files:
 

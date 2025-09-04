@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.PackageManager;
+using UnityEditor.ShaderGraph.Internal;
 using UnityEngine.Rendering;
 
 namespace UnityEditor.VFX
@@ -150,26 +151,6 @@ namespace UnityEditor.VFX
                     return defaultMesh;
                 }
             }
-
-            public string userTemplateDirectory
-            {
-                get
-                {
-                    LoadUserResourcesIfNeeded();
-                    if (s_Instance != null)
-                        return s_Instance.userTemplateDirectory;
-
-                    return "";
-                }
-
-                set
-                {
-                    if (s_Instance == null)
-                        s_Instance = FindFirstObjectByType<VFXResources>();
-                    if (s_Instance != null)
-                        s_Instance.userTemplateDirectory = value;
-                }
-            }
         }
 
         private static string defaultPath { get { return VisualEffectGraphPackageInfo.assetPackagePath + "/"; } }
@@ -189,14 +170,9 @@ namespace UnityEditor.VFX
         {
             s_Values = new Values();
 
-            defaultShader = Shader.Find("Shader Graphs/DefaultVFXSG");
+            defaultShader = Shader.Find("Shader Graphs/VFXDefault");
 
-            defaultAnimationCurve = new AnimationCurve(new Keyframe[]
-            {
-                new Keyframe(0.0f, 0.0f, 0.0f, 0.0f),
-                new Keyframe(0.25f, 0.25f, 0.0f, 0.0f),
-                new Keyframe(1.0f, 0.0f, 0.0f, 0.0f),
-            });
+            defaultAnimationCurve = AnimationCurve.Linear(0.0f, 0.0f, 1.0f, 1.0f);
 
             defaultGradient = new Gradient();
             defaultGradient.colorKeys = new GradientColorKey[]
@@ -235,7 +211,7 @@ namespace UnityEditor.VFX
             get
             {
                 if (m_DefaultParticleTexture == null)
-                    m_DefaultParticleTexture = SafeLoadAssetAtPath<Texture2D>(defaultPath + "Textures/DefaultParticle.tga");
+                    m_DefaultParticleTexture = SafeLoadAssetAtPath<Texture2D>(defaultPath + "Textures/DefaultDot.tga");
                 return m_DefaultParticleTexture;
             }
         }
@@ -290,7 +266,7 @@ namespace UnityEditor.VFX
             get
             {
                 if (m_DefaultMesh == null)
-                    m_DefaultMesh = Resources.GetBuiltinResource<Mesh>("New-Capsule.fbx");
+                    m_DefaultMesh = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
                 return m_DefaultMesh;
             }
         }
@@ -328,6 +304,17 @@ namespace UnityEditor.VFX
             }
         }
 
+        private static ShaderGraphVfxAsset m_ErrorFallbackShaderGraph;
+        public static ShaderGraphVfxAsset errorFallbackShaderGraph
+        {
+            get
+            {
+                if (m_ErrorFallbackShaderGraph == null)
+                    m_ErrorFallbackShaderGraph = SafeLoadAssetAtPath<ShaderGraphVfxAsset>(defaultPath + "ShaderGraph/VFXErrorFallback.shadergraph");
+                return m_ErrorFallbackShaderGraph;
+            }
+        }
+
         [SerializeField]
         AnimationCurve animationCurve = null;
 
@@ -355,13 +342,11 @@ namespace UnityEditor.VFX
         [SerializeField]
         Mesh mesh = null;
 
-        [SerializeField]
-        string userTemplateDirectory = "";
-
         static AnimationCurve defaultAnimationCurve;
         static Gradient defaultGradient;
         static Gradient defaultGradientMapRamp;
         static Shader defaultShader;
+        static ShaderGraphVfxAsset errorShaderFallback;
 
         public void SetDefaults()
         {

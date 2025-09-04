@@ -16,7 +16,6 @@ namespace UnityEditor.VFX
             kInput,
             kOutput,
         }
-
         public Direction direction { get { return m_Direction; } }
         public VFXProperty property { get { return m_Property; } }
         public override string name { get { return m_Property.name; } }
@@ -37,6 +36,8 @@ namespace UnityEditor.VFX
                     else
                     {
                         object parentValue = GetParent().value;
+                        if (parentValue == null)
+                            return null;
 
                         if (m_FieldInfoCache == null)
                         {
@@ -47,7 +48,7 @@ namespace UnityEditor.VFX
                         slotValue = m_FieldInfoCache.GetValue(parentValue);
                     }
 
-                    if (slotValue == null && !typeof(UnityEngine.Object).IsAssignableFrom(property.type) && property.type != typeof(GraphicsBuffer))
+                    if (slotValue == null && !typeof(UnityEngine.Object).IsAssignableFrom(property.type) && property.type != typeof(GraphicsBuffer) && property.type != null)
                     {
                         Debug.Log("null value in slot of type " + property.type.UserFriendlyName());
                     }
@@ -405,7 +406,7 @@ namespace UnityEditor.VFX
             }
         }
 
-        public static void CopyLinksAndValue(VFXSlot dst, VFXSlot src, bool notify)
+        public static void CopyLinksAndValue(VFXSlot dst, VFXSlot src, bool notify = true)
         {
             CopyValue(dst, src, notify);
             CopyLinks(dst, src, notify);
@@ -533,6 +534,11 @@ namespace UnityEditor.VFX
 
             if (!IsMasterSlot())
                 m_MasterData = null; // Non master slot will always have a null master data
+
+            if (m_MasterData != null && (int)m_MasterData.m_Space == int.MaxValue)
+            {
+                m_MasterData.m_Space = VFXSpace.None;
+            }
         }
 
         public override void Sanitize(int version)
@@ -738,10 +744,12 @@ namespace UnityEditor.VFX
         {
             if (notify)
             {
+                bool wasInitialized = m_Property.attributes.IsInitialized;
                 if (!m_Property.attributes.IsEqual(attributes))
                 {
                     m_Property.attributes = attributes;
-                    Invalidate(InvalidationCause.kUIChangedTransient); // TODO This will trigger a setDirty while it shouldn't as property attributes are not serialized
+                    if (wasInitialized) // No invalidate at init 
+                        Invalidate(InvalidationCause.kUIChangedTransient); // TODO This will trigger a setDirty while it shouldn't as property attributes are not serialized
                 }
             }
             else // fast path without comparison
@@ -915,6 +923,7 @@ namespace UnityEditor.VFX
         {
             // Start from the top most parent
             var masterSlot = GetMasterSlot();
+            bool wasUpToDate = masterSlot.m_ExpressionTreeUpToDate;
 
             // When deserializing, default expression wont be initialized
             if (!m_DefaultExpressionInitialized)
@@ -941,7 +950,7 @@ namespace UnityEditor.VFX
             {
                 if (owner != null)
                 {
-                    owner.UpdateOutputExpressions();
+                    owner.UpdateOutputExpressionsIfNeeded();
                     // Update outputs can trigger an invalidate, it can be reentrant. Just check if we're up to date after that and early out
                     if (m_ExpressionTreeUpToDate)
                         return;
@@ -991,8 +1000,9 @@ namespace UnityEditor.VFX
                     s[i].SetOutExpression(exp != null ? exp[i] : s[i].m_InExpression, toInvalidate, masterSlot.owner != null ? masterSlot.owner.GetOutputSpaceFromSlot(s) : VFXSpace.None);
             });
 
-            foreach (var slot in toInvalidate)
-                slot.InvalidateExpressionTree();
+            if (wasUpToDate)
+                foreach (var slot in toInvalidate)
+                    slot.InvalidateExpressionTree();
         }
 
         private static VFXExpression ApplySpaceConversion(VFXExpression exp, VFXSlot destSlot, VFXSlot sourceSlot)
@@ -1062,6 +1072,9 @@ namespace UnityEditor.VFX
 
         public void InvalidateExpressionTree()
         {
+            if (!m_ExpressionTreeUpToDate)
+                return;
+
             var masterSlot = GetMasterSlot();
 
             masterSlot.PropagateToChildren(s =>

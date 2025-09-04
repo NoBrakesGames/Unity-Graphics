@@ -1,10 +1,9 @@
-using System;
-using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-Transform(Vector)")]
+    [VFXInfo(name = "Transform (Vector)", category = "Math/Geometry")]
     class TransformVector : VFXOperator
     {
         public class InputProperties

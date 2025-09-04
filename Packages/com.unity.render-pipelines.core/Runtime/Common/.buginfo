@@ -1,1 +1,10 @@
-area: RP Foundation
+rule1:
+  area: SRP Foundation
+
+rule2:
+  when:
+    path:
+      - ^.*CoreAttributes.*$
+      - ^.*IAdditionalData.*$
+      - ^.*Reload.*$
+  area: SRP Settings

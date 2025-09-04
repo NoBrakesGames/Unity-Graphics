@@ -4,11 +4,9 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
-using UnityEditor.Experimental.GraphView;
 
 using UnityEngine;
 using UnityEngine.VFX;
-using UnityEngine.UIElements;
 
 
 namespace UnityEditor.VFX.UI
@@ -28,7 +26,6 @@ namespace UnityEditor.VFX.UI
 
         static List<VFXViewWindow> s_VFXWindows = new();
 
-        ShortcutHandler m_ShortcutHandler;
         VisualEffect m_pendingAttachment;
 
         static VFXViewWindow()
@@ -40,44 +37,21 @@ namespace UnityEditor.VFX.UI
         {
             VFXAnalytics.GetInstance().OnQuitApplication();
 
-#if USE_EXIT_WORKAROUND_FOGBUGZ_1062258
-            foreach (var window in GetAllWindows().ToList())
-            {
-                if (window.graphView != null)
-                {
-                    window.graphView.controller = null;
-                }
-            }
-#endif
-
             return true;
         }
 
         void OnEnable()
         {
-            s_VFXWindows.Add(this);
-        }
-
-        protected void SetupFramingShortcutHandler(VFXView view)
-        {
-            m_ShortcutHandler = new ShortcutHandler(
-                new Dictionary<Event, ShortcutDelegate>
-                {
-                    { Event.KeyboardEvent("a"), view.FrameAll },
-                    { Event.KeyboardEvent("f"), view.FrameSelection },
-                    { Event.KeyboardEvent("o"), view.FrameOrigin },
-                    { Event.KeyboardEvent("^#>"), view.FramePrev },
-                    { Event.KeyboardEvent("^>"), view.FrameNext },
-                    { Event.KeyboardEvent("F7"), view.OnCompile },
-                    { Event.KeyboardEvent("#d"), view.OutputToDot },
-                    { Event.KeyboardEvent("^&d"), view.DuplicateSelectionWithEdges },
-                    { Event.KeyboardEvent("^#d"), view.OutputToDotReduced },
-                    { Event.KeyboardEvent("#c"), view.OutputToDotConstantFolding },
-                    { Event.KeyboardEvent("^r"), view.ReinitComponents },
-                    { Event.KeyboardEvent("F5"), view.ReinitComponents },
-                    { Event.KeyboardEvent("#^r"), view.ReinitAndPlayComponents },
-                    { Event.KeyboardEvent("#F5"), view.ReinitAndPlayComponents },
-                });
+            if (this.m_DisplayedResource == null && TryGetNoAssetWindow(out _))
+            {
+                this.Close();
+            }
+            else
+            {
+                UnityEditor.UIElements.AssetMonitoringUtilities.SetResetPanelRenderingOnAssetChange(this, false);
+                s_VFXWindows.Add(this);
+                DisableViewDataPersistence();
+            }
         }
 
         [MenuItem("Window/Visual Effects/Visual Effect Graph", false, 3011)]
@@ -96,7 +70,7 @@ namespace UnityEditor.VFX.UI
         public static VFXViewWindow GetWindow(VFXGraph vfxGraph, bool createIfNeeded = false, bool show = true)
         {
             return GetWindowLambda(
-                x => x.displayedResource == vfxGraph?.visualEffectResource,
+                x => x.displayedResource == (vfxGraph != null ? vfxGraph.visualEffectResource : null),
                 createIfNeeded,
                 show);
         }
@@ -114,26 +88,13 @@ namespace UnityEditor.VFX.UI
                 true);
         }
 
-        public static void RefreshErrors(VFXModel model)
-        {
-            if (model != null &&
-                model.GetGraph() is { } graph &&
-                GetWindow(graph, false, false) is { } window &&
-                window.graphView != null &&
-                window.graphView.controller != null)
-            {
-                window.graphView.RefreshErrors(model);
-            }
-        }
-
         static VFXViewWindow GetWindowLambda(Func<VFXViewWindow, bool> func, bool createIfNeeded, bool show)
         {
-            var windows = GetAllWindows();
-            var window = windows.SingleOrDefault(func);
+            var window = s_VFXWindows.SingleOrDefault(func);
             if (window == null)
             {
                 // Get the empty VFX window if it's opened
-                window = windows.SingleOrDefault(x => x.m_DisplayedResource == null);
+                TryGetNoAssetWindow(out window);
             }
 
             if (window == null && createIfNeeded)
@@ -304,21 +265,11 @@ namespace UnityEditor.VFX.UI
             VFXManagerEditor.CheckVFXManager();
 
             graphView = new VFXView();
-            graphView.StretchToParentSize();
-            SetupFramingShortcutHandler(graphView);
 
             rootVisualElement.Add(graphView);
 
             autoCompile = true;
             autoReinit = true;
-
-            graphView.RegisterCallback<AttachToPanelEvent>(OnEnterPanel);
-            graphView.RegisterCallback<DetachFromPanelEvent>(OnLeavePanel);
-
-            if (rootVisualElement.panel != null)
-            {
-                rootVisualElement.AddManipulator(m_ShortcutHandler);
-            }
 
             if (graphView?.controller == null && m_DisplayedResource != null)
             {
@@ -331,6 +282,7 @@ namespace UnityEditor.VFX.UI
                     + (EditorGUIUtility.isProSkin ? "vfx_graph_icon_gray_dark.png" : "vfx_graph_icon_gray_light.png"));
                 titleContent.image = icon;
             }
+            graphView?.OnFocus();
         }
 
         protected void OnDestroy()
@@ -341,8 +293,6 @@ namespace UnityEditor.VFX.UI
             {
                 if (graphView.controller != null)
                     VFXAnalytics.GetInstance().OnGraphClosed(graphView);
-                graphView.UnregisterCallback<AttachToPanelEvent>(OnEnterPanel);
-                graphView.UnregisterCallback<DetachFromPanelEvent>(OnLeavePanel);
                 graphView.Dispose();
                 graphView = null;
             }
@@ -350,7 +300,7 @@ namespace UnityEditor.VFX.UI
 
         static VFXViewWindow CreateWindow()
         {
-            var lastVFXWindow = GetAllWindows().LastOrDefault();
+            var lastVFXWindow = s_VFXWindows.LastOrDefault();
 
             var window = CreateInstance<VFXViewWindow>();
 
@@ -362,9 +312,17 @@ namespace UnityEditor.VFX.UI
             return window;
         }
 
+        static bool TryGetNoAssetWindow(out VFXViewWindow noAssetWindow)
+        {
+            var noAssetWindows = s_VFXWindows.Where(x => x.m_DisplayedResource == null);
+            noAssetWindow = noAssetWindows.FirstOrDefault();
+
+            return noAssetWindow != null;
+        }
+
         static bool TryToTabNextTo(EditorWindow nextToWindow, EditorWindow window)
         {
-            if (nextToWindow?.m_Parent is DockArea dockArea)
+            if (nextToWindow != null && nextToWindow.m_Parent is DockArea dockArea)
             {
                 var index = dockArea.m_Panes.IndexOf(nextToWindow);
                 dockArea.AddTab(index + 1, window);
@@ -373,16 +331,6 @@ namespace UnityEditor.VFX.UI
             }
 
             return false;
-        }
-
-        void OnEnterPanel(AttachToPanelEvent e)
-        {
-            rootVisualElement.AddManipulator(m_ShortcutHandler);
-        }
-
-        void OnLeavePanel(DetachFromPanelEvent e)
-        {
-            rootVisualElement.RemoveManipulator(m_ShortcutHandler);
         }
 
         void OnFocus()
@@ -406,7 +354,7 @@ namespace UnityEditor.VFX.UI
             if (graphView == null && m_DisplayedResource == null)
                 return;
 
-            VFXViewController controller = graphView.controller;
+            VFXViewController controller = graphView?.controller;
             var filename = "No Asset";
             if (controller != null)
             {
@@ -425,21 +373,21 @@ namespace UnityEditor.VFX.UI
 
                         if (autoCompile && graph.IsExpressionGraphDirty() && !graph.GetResource().isSubgraph)
                         {
+                            graph.errorManager.RefreshCompilationReport();
                             VFXGraph.explicitCompile = true;
-                            graphView.errorManager.ClearAllErrors(null, VFXErrorOrigin.Compilation);
-                            using (var reporter = new VFXCompileErrorReporter(graphView.errorManager))
-                            {
-                                VFXGraph.compileReporter = reporter;
-                                AssetDatabase.ImportAsset(AssetDatabase.GetAssetPath(graphView.controller.model));
-                                graph.SetExpressionGraphDirty(
-                                    false); // As are implemented subgraph now, compiling dependents chain can reset dirty flag on used subgraphs, which will make an infinite loop, this is bad!
-                                VFXGraph.compileReporter = null;
-                            }
-
+                            AssetDatabase.ImportAsset(AssetDatabase.GetAssetPath(graphView.controller.model));
+                            // As are implemented subgraph now, compiling dependents chain can reset dirty flag on used subgraphs, which will make an infinite loop, this is bad!
+                            graph.SetExpressionGraphDirty(false);
                             VFXGraph.explicitCompile = false;
                         }
                         else
                             graph.RecompileIfNeeded(true, true);
+
+                        if (graph.IsCustomAttributeDirty())
+                        {
+                            graphView.blackboard.Update(true);
+                            graph.SetCustomAttributeDirty(false);
+                        }
 
                         bool wasDirty = graph.IsExpressionGraphDirty();
 
@@ -452,6 +400,9 @@ namespace UnityEditor.VFX.UI
                                 "Expression graph was marked as dirty after compiling context for UI. Discard to avoid infinite compilation loop.");
                             graph.SetExpressionGraphDirty(false);
                         }
+
+                        graphView.UpdateBadges(graph.errorManager.errorReporter);
+                        graphView.UpdateBadges(graph.errorManager.compileReporter);
                     }
                 }
                 else

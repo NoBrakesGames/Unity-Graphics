@@ -143,6 +143,8 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
 
         public override void GetActiveBlocks(ref TargetActiveBlockContext context)
         {
+            context.AddBlock(UniversalBlockFields.VertexDescription.MotionVector, target.additionalMotionVectorMode == AdditionalMotionVectorMode.Custom);
+
             context.AddBlock(BlockFields.SurfaceDescription.Smoothness);
             context.AddBlock(BlockFields.SurfaceDescription.NormalOS, normalDropOffSpace == NormalDropOffSpace.Object);
             context.AddBlock(BlockFields.SurfaceDescription.NormalTS, normalDropOffSpace == NormalDropOffSpace.Tangent);
@@ -331,7 +333,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 SubShaderDescriptor result = new SubShaderDescriptor()
                 {
                     pipelineTag = UniversalTarget.kPipelineTag,
-                    customTags = UniversalTarget.kLitMaterialTypeTag,
+                    customTags = complexLit ? UniversalTarget.kComplexLitMaterialTypeTag : UniversalTarget.kLitMaterialTypeTag,
                     renderType = renderType,
                     renderQueue = renderQueue,
                     disableBatchingTag = disableBatchingTag,
@@ -344,12 +346,16 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 else
                     result.passes.Add(LitPasses.Forward(target, workflowMode, blendModePreserveSpecular, CorePragmas.Forward, LitKeywords.Forward));
 
-                if (!complexLit)
-                    result.passes.Add(LitPasses.GBuffer(target, workflowMode, blendModePreserveSpecular));
+                // ForwardOnly ComplexLit fills GBuffer too for potential custom usage of the GBuffer.
+                result.passes.Add(LitPasses.GBuffer(target, workflowMode, blendModePreserveSpecular));
 
                 // cull the shadowcaster pass if we know it will never be used
                 if (target.castShadows || target.allowMaterialOverride)
                     result.passes.Add(PassVariant(CorePasses.ShadowCaster(target), CorePragmas.Instanced));
+
+                if (target.alwaysRenderMotionVectors)
+                    result.customTags = string.Concat(result.customTags, " ", UniversalTarget.kAlwaysRenderMotionVectorsTag);
+                result.passes.Add(PassVariant(CorePasses.MotionVectors(target), CorePragmas.MotionVectors));
 
                 if (target.mayWriteDepth)
                     result.passes.Add(PassVariant(CorePasses.DepthOnly(target), CorePragmas.Instanced));
@@ -579,6 +585,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 var result = new PassDescriptor()
                 {
                     // Definition
+                    displayName = "Universal 2D",
                     referenceName = "SHADERPASS_2D",
                     lightMode = "Universal2D",
 
@@ -618,7 +625,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                     displayName = "DepthNormals",
                     referenceName = "SHADERPASS_DEPTHNORMALS",
                     lightMode = "DepthNormals",
-                    useInPreview = false,
+                    useInPreview = true,
 
                     // Template
                     passTemplatePath = UniversalTarget.kUberTemplatePath,
@@ -658,7 +665,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                     displayName = "DepthNormalsOnly",
                     referenceName = "SHADERPASS_DEPTHNORMALSONLY",
                     lightMode = "DepthNormalsOnly",
-                    useInPreview = false,
+                    useInPreview = true,
 
                     // Template
                     passTemplatePath = UniversalTarget.kUberTemplatePath,
@@ -750,6 +757,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 UniversalStructFields.Varyings.staticLightmapUV,
                 UniversalStructFields.Varyings.dynamicLightmapUV,
                 UniversalStructFields.Varyings.sh,
+                UniversalStructFields.Varyings.probeOcclusion,
                 UniversalStructFields.Varyings.fogFactorAndVertexLight, // fog and vertex lighting, vert input is dependency
                 UniversalStructFields.Varyings.shadowCoord,             // shadow coord, vert input is dependency
             };
@@ -764,6 +772,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 UniversalStructFields.Varyings.staticLightmapUV,
                 UniversalStructFields.Varyings.dynamicLightmapUV,
                 UniversalStructFields.Varyings.sh,
+                UniversalStructFields.Varyings.probeOcclusion,
                 UniversalStructFields.Varyings.fogFactorAndVertexLight, // fog and vertex lighting, vert input is dependency
                 UniversalStructFields.Varyings.shadowCoord,             // shadow coord, vert input is dependency
             };
@@ -827,6 +836,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreKeywordDescriptors.StaticLightmap },
                 { CoreKeywordDescriptors.DynamicLightmap },
                 { CoreKeywordDescriptors.DirectionalLightmapCombined },
+                { CoreKeywordDescriptors.UseLegacyLightmaps },
                 { CoreKeywordDescriptors.MainLightShadows },
                 { CoreKeywordDescriptors.AdditionalLights },
                 { CoreKeywordDescriptors.AdditionalLightShadows },
@@ -840,6 +850,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreKeywordDescriptors.DebugDisplay },
                 { CoreKeywordDescriptors.LightCookies },
                 { CoreKeywordDescriptors.ForwardPlus },
+                { CoreKeywordDescriptors.EvaluateSh },
             };
 
             public static readonly KeywordCollection GBuffer = new KeywordCollection
@@ -847,6 +858,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreKeywordDescriptors.StaticLightmap },
                 { CoreKeywordDescriptors.DynamicLightmap },
                 { CoreKeywordDescriptors.DirectionalLightmapCombined },
+                { CoreKeywordDescriptors.UseLegacyLightmaps },
                 { CoreKeywordDescriptors.MainLightShadows },
                 { CoreKeywordDescriptors.ReflectionProbeBlending },
                 { CoreKeywordDescriptors.ReflectionProbeBoxProjection },

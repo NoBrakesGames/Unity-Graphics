@@ -1,14 +1,15 @@
 using System;
 using System.Diagnostics;
-using UnityEngine.Rendering;
+using System.Runtime.CompilerServices;
 
-namespace UnityEngine.Experimental.Rendering.RenderGraphModule
+namespace UnityEngine.Rendering.RenderGraphModule
 {
     // RendererList is a different case so not represented here.
     internal enum RenderGraphResourceType
     {
         Texture = 0,
         Buffer,
+        AccelerationStructure,
         Count
     }
 
@@ -25,14 +26,28 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         uint m_Value;
         int m_Version; // A freshly created resource always starts at version 0 the first write should bring it to v1
-
+        
         static uint s_CurrentValidBit = 1 << 16;
         static uint s_SharedResourceValidBit = 0x7FFF << 16;
 
-        public int index { get { return (int)(m_Value & kIndexMask); } }
+        public int index
+        { 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get { return (int)(m_Value & kIndexMask); }
+        }
+        public int iType
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get { return (int)type; }
+        }
+        public int version
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get { return m_Version; }
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            set { m_Version = value; } 
+        }
         public RenderGraphResourceType type { get; private set; }
-        public int iType { get { return (int)type; } }
-        public int version { get { return m_Version; } }
 
         internal ResourceHandle(int value, RenderGraphResourceType type, bool shared)
         {
@@ -42,18 +57,31 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             this.m_Version = -1;
         }
 
-        internal ResourceHandle(ResourceHandle h, int version)
+        internal ResourceHandle(in ResourceHandle h, int version)
         {
             this.m_Value = h.m_Value;
             this.type = h.type;
             this.m_Version = version;
         }
 
-        public static implicit operator int(ResourceHandle handle) => handle.index;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsValid()
         {
             var validity = m_Value & kValidityMask;
             return validity != 0 && (validity == s_CurrentValidBit || validity == s_SharedResourceValidBit);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool IsNull()
+        {
+            if (index == 0)
+            {
+                // Make sure everything is zero
+                Debug.Assert(m_Value == 0);
+                Debug.Assert(m_Version == 0);
+                return true;
+            }
+            return false;
         }
 
         static public void NewFrame(int executionIndex)
@@ -78,15 +106,17 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         public bool IsVersioned
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
                 return m_Version >= 0;
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ResourceHandle hdl)
         {
-            return hdl.m_Value == this.m_Value && hdl.m_Version == this.m_Version;
+            return hdl.m_Value == this.m_Value && hdl.m_Version == this.m_Version && hdl.type == this.type;
         }
     }
 
@@ -98,14 +128,14 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         public bool requestFallBack;
         public bool forceRelease;
         public uint writeCount;
+        public uint readCount;
         public int cachedHash;
         public int transientPassIndex;
         public int sharedResourceLastFrameUsed;
         public int version;
 
-        protected IRenderGraphResourcePool m_Pool;
-
-        public virtual void Reset(IRenderGraphResourcePool pool)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public virtual void Reset(IRenderGraphResourcePool _ = null)
         {
             imported = false;
             shared = false;
@@ -116,44 +146,57 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             requestFallBack = false;
             forceRelease = false;
             writeCount = 0;
+            readCount = 0;
             version = 0;
-
-            m_Pool = pool;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public virtual string GetName()
         {
             return "";
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public virtual bool IsCreated()
         {
             return false;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public virtual void IncrementWriteCount()
         {
             writeCount++;
         }
 
+        // readCount is currently not used in the HDRP Compiler.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public virtual void IncrementReadCount()
+        {
+            readCount++;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public virtual int NewVersion()
         {
             version++;
             return version;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public virtual bool NeedsFallBack()
         {
             return requestFallBack && writeCount == 0;
         }
 
         public virtual void CreatePooledGraphicsResource() { }
-        public virtual void CreateGraphicsResource(string name = "") { }
+        public virtual void CreateGraphicsResource() { }
+        public virtual void UpdateGraphicsResource() { }
         public virtual void ReleasePooledGraphicsResource(int frameIndex) { }
         public virtual void ReleaseGraphicsResource() { }
         public virtual void LogCreation(RenderGraphLogger logger) { }
         public virtual void LogRelease(RenderGraphLogger logger) { }
         public virtual int GetSortIndex() { return 0; }
+        public virtual int GetDescHashCode() { return 0; }
     }
 
     [DebuggerDisplay("Resource ({GetType().Name}:{GetName()})")]
@@ -163,26 +206,73 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         where ResType : class
     {
         public DescType desc;
+        public bool validDesc; // Does the descriptor contain valid data (this is not always the case for imported resources)
         public ResType graphicsResource;
+
+        protected RenderGraphResourcePool<ResType> m_Pool;
 
         protected RenderGraphResource()
         {
         }
 
-        public override void Reset(IRenderGraphResourcePool pool)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override void Reset(IRenderGraphResourcePool pool = null)
         {
-            base.Reset(pool);
+            base.Reset();
+            m_Pool = pool as RenderGraphResourcePool<ResType>;
             graphicsResource = null;
+            validDesc = false;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override bool IsCreated()
         {
             return graphicsResource != null;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override void ReleaseGraphicsResource()
         {
             graphicsResource = null;
+        }
+
+        public override void CreatePooledGraphicsResource()
+        {
+            Debug.Assert(m_Pool != null, "RenderGraphResource: CreatePooledGraphicsResource should only be called for regular pooled resources");
+
+            int hashCode = GetDescHashCode();
+
+            if (graphicsResource != null)
+                throw new InvalidOperationException($"RenderGraphResource: Trying to create an already created resource ({GetName()}). Resource was probably declared for writing more than once in the same pass.");
+
+            // If the pool doesn't have any available resource that we can use, we will create one
+            // In any case, we will update the graphicsResource name based on the RenderGraph resource name
+            if (!m_Pool.TryGetResource(hashCode, out graphicsResource))
+            {
+                CreateGraphicsResource();
+            }
+            else
+            {
+                UpdateGraphicsResource();
+            }
+
+            cachedHash = hashCode;
+            m_Pool.RegisterFrameAllocation(cachedHash, graphicsResource);
+        }
+
+        public override void ReleasePooledGraphicsResource(int frameIndex)
+        {
+            if (graphicsResource == null)
+                throw new InvalidOperationException($"RenderGraphResource: Tried to release a resource ({GetName()}) that was never created. Check that there is at least one pass writing to it first.");
+
+            // Shared resources don't use the pool
+            if (m_Pool != null)
+            {
+                m_Pool.ReleaseResource(cachedHash, graphicsResource, frameIndex);
+                m_Pool.UnregisterFrameAllocation(cachedHash, graphicsResource);
+            }
+
+            Reset();
         }
     }
 }

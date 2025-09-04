@@ -7,7 +7,7 @@ namespace UnityEngine.Rendering.HighDefinition
     /// <summary>
     /// Class controlling which sky is used for static and baked lighting.
     /// </summary>
-    [HDRPHelpURLAttribute("Static-Lighting-Sky")]
+    [HDRPHelpURLAttribute("Environment-Lighting")]
     [ExecuteAlways]
     [AddComponentMenu("")] // Hide this object from the Add Component menu
     public class StaticLightingSky : MonoBehaviour
@@ -36,6 +36,10 @@ namespace UnityEngine.Rendering.HighDefinition
         int m_LastComputedVolumetricCloudHash;
         VolumetricClouds m_VolumetricClouds;
         VolumetricClouds m_VolumetricCloudSettingsFromProfile;
+
+        // Reflection Probes
+        [SerializeField, Range(1, 5), Tooltip("Controls how many times a reflection includes other reflections. A value of 1 results in the Scene being rendered once so mirrored reflections will be black.")]
+        internal int bounces = 1;
 
         internal SkySettings skySettings
         {
@@ -211,10 +215,8 @@ namespace UnityEngine.Rendering.HighDefinition
             var newParameters = component.parameters;
             var profileParameters = componentFromProfile.parameters;
 
-            var defaultVolume = HDRenderPipelineGlobalSettings.instance.GetOrCreateDefaultVolume();
-            T defaultComponent = null;
-            if (defaultVolume.sharedProfile != null)     // This can happen with old projects.
-                defaultVolume.sharedProfile.TryGet(type, out defaultComponent);
+            // Get component in default state (= default-constructed component + global profile + SRP asset profile)
+            var defaultComponent = VolumeManager.instance.GetVolumeComponentDefaultState(type);
             var defaultParameters = defaultComponent != null ? defaultComponent.parameters : null;     // Can be null if the profile does not contain the component.
 
             // Seems to inexplicably happen sometimes on domain reload.
@@ -318,9 +320,17 @@ namespace UnityEngine.Rendering.HighDefinition
 
         void OnEnable()
         {
-            UpdateCurrentStaticLightingSky();
-            UpdateCurrentStaticLightingClouds();
-            UpdateCurrentStaticLightingVolumetricClouds();
+            if (VolumeManager.instance.isInitialized)
+            {
+                UpdateCurrentStaticLightingSky();
+                UpdateCurrentStaticLightingClouds();
+                UpdateCurrentStaticLightingVolumetricClouds();
+            }
+            else
+            {
+                m_NeedUpdateStaticLightingSky = true;
+            }
+
             if (m_Profile != null)
                 SkyManager.RegisterStaticLightingSky(this);
         }
@@ -337,7 +347,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         void Update()
         {
-            if (m_NeedUpdateStaticLightingSky)
+            if (m_NeedUpdateStaticLightingSky && VolumeManager.instance.isInitialized)
             {
                 UpdateCurrentStaticLightingSky();
                 UpdateCurrentStaticLightingClouds();

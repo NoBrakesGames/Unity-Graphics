@@ -8,12 +8,7 @@ namespace UnityEditor.Rendering.HighDefinition
 {
     internal class SerializedHDLight : ISerializedLight
     {
-        // Common properties
-        public SerializedProperty intensity { get; }
-
         // HDRP specific properties
-        public SerializedProperty enableSpotReflector;
-        public SerializedProperty luxAtDistance;
         public SerializedProperty spotInnerPercent;
         public SerializedProperty spotIESCutoffPercent;
         public SerializedProperty lightDimmer;
@@ -31,7 +26,6 @@ namespace UnityEditor.Rendering.HighDefinition
         public SerializedProperty applyRangeAttenuation;
         public SerializedProperty volumetricDimmer;
         public SerializedProperty volumetricFadeDistance;
-        public SerializedProperty lightUnit;
         public SerializedProperty displayAreaLightEmissiveMesh;
         public SerializedProperty areaLightEmissiveMeshCastShadow;
         public SerializedProperty deportedAreaLightEmissiveMeshCastShadow;
@@ -49,18 +43,13 @@ namespace UnityEditor.Rendering.HighDefinition
         public SerializedProperty iesPoint;
         public SerializedProperty iesSpot;
         public SerializedProperty includeForRayTracing;
+        public SerializedProperty includeForPathTracing;
         public SerializedProperty areaLightShadowCone;
         public SerializedProperty useCustomSpotLightShadowCone;
         public SerializedProperty customSpotLightShadowCone;
         public SerializedProperty useScreenSpaceShadows;
         public SerializedProperty interactsWithSky;
         public SerializedProperty angularDiameter;
-        public SerializedProperty flareSize;
-        public SerializedProperty flareTint;
-        public SerializedProperty flareFalloff;
-        public SerializedProperty surfaceTexture;
-        public SerializedProperty surfaceTint;
-        public SerializedProperty distance;
         public SerializedProperty useRayTracedShadows;
         public SerializedProperty numRayTracingSamples;
         public SerializedProperty filterTracedShadow;
@@ -74,6 +63,33 @@ namespace UnityEditor.Rendering.HighDefinition
         public SerializedProperty evsmLightLeakBias;
         public SerializedProperty evsmVarianceBias;
         public SerializedProperty evsmBlurPasses;
+        public SerializedProperty dirLightPCSSMaxPenumbraSize;
+        public SerializedProperty dirLightPCSSMaxSamplingDistance;
+        public SerializedProperty dirLightPCSSMinFilterSizeTexels;
+        public SerializedProperty dirLightPCSSMinFilterMaxAngularDiameter;
+        public SerializedProperty dirLightPCSSBlockerSearchAngularDiameter;
+        public SerializedProperty dirLightPCSSBlockerSamplingClumpExponent;
+        public SerializedProperty dirLightPCSSBlockerSampleCount;
+        public SerializedProperty dirLightPCSSFilterSampleCount;
+
+        // Celestial Body
+        public SerializedProperty diameterOverride;
+        public SerializedProperty diameterMultiplier;
+        public SerializedProperty diameterMultiplerMode;
+        public SerializedProperty distance;
+        public SerializedProperty surfaceTexture;
+        public SerializedProperty surfaceTint;
+        public SerializedProperty shadingSource;
+        public SerializedProperty sunLightOverride;
+        public SerializedProperty sunColor;
+        public SerializedProperty sunIntensity;
+        public SerializedProperty phase;
+        public SerializedProperty phaseRotation;
+        public SerializedProperty earthshine;
+        public SerializedProperty flareSize;
+        public SerializedProperty flareFalloff;
+        public SerializedProperty flareTint;
+        public SerializedProperty flareMultiplier;
 
         // Improved moment shadows data
         public SerializedProperty lightAngle;
@@ -105,6 +121,9 @@ namespace UnityEditor.Rendering.HighDefinition
         // Bias control
         public SerializedProperty slopeBias;
         public SerializedProperty normalBias;
+
+        [Obsolete("This property has been deprecated. Use SerializedHDLight.settings.intensity instead.")]
+        public SerializedProperty intensity => settings.intensity;
 
         private GameObject[] emissiveMeshes;
 
@@ -234,15 +253,11 @@ namespace UnityEditor.Rendering.HighDefinition
 
             using (var o = new PropertyFetcher<HDAdditionalLightData>(serializedObject))
             {
-                intensity = o.Find("m_Intensity");
-                enableSpotReflector = o.Find("m_EnableSpotReflector");
-                luxAtDistance = o.Find("m_LuxAtDistance");
                 spotInnerPercent = o.Find("m_InnerSpotPercent");
                 spotIESCutoffPercent = o.Find("m_SpotIESCutoffPercent");
                 lightDimmer = o.Find("m_LightDimmer");
                 volumetricDimmer = o.Find("m_VolumetricDimmer");
                 volumetricFadeDistance = o.Find("m_VolumetricFadeDistance");
-                lightUnit = o.Find("m_LightUnit");
                 displayAreaLightEmissiveMesh = o.Find("m_DisplayAreaLightEmissiveMesh");
                 fadeDistance = o.Find("m_FadeDistance");
                 affectDiffuse = o.Find("m_AffectDiffuse");
@@ -265,18 +280,13 @@ namespace UnityEditor.Rendering.HighDefinition
                 iesPoint = o.Find("m_IESPoint");
                 iesSpot = o.Find("m_IESSpot");
                 includeForRayTracing = o.Find("m_IncludeForRayTracing");
+                includeForPathTracing = o.Find("m_IncludeForPathTracing");
                 areaLightShadowCone = o.Find("m_AreaLightShadowCone");
                 useCustomSpotLightShadowCone = o.Find("m_UseCustomSpotLightShadowCone");
                 customSpotLightShadowCone = o.Find("m_CustomSpotLightShadowCone");
                 useScreenSpaceShadows = o.Find("m_UseScreenSpaceShadows");
                 interactsWithSky = o.Find("m_InteractsWithSky");
                 angularDiameter = o.Find("m_AngularDiameter");
-                flareSize = o.Find("m_FlareSize");
-                flareFalloff = o.Find("m_FlareFalloff");
-                flareTint = o.Find("m_FlareTint");
-                surfaceTexture = o.Find("m_SurfaceTexture");
-                surfaceTint = o.Find("m_SurfaceTint");
-                distance = o.Find("m_Distance");
                 useRayTracedShadows = o.Find("m_UseRayTracedShadows");
                 numRayTracingSamples = o.Find("m_NumRayTracingSamples");
                 filterTracedShadow = o.Find("m_FilterTracedShadow");
@@ -290,6 +300,38 @@ namespace UnityEditor.Rendering.HighDefinition
                 evsmVarianceBias = o.Find("m_EvsmVarianceBias");
                 evsmLightLeakBias = o.Find("m_EvsmLightLeakBias");
                 evsmBlurPasses = o.Find("m_EvsmBlurPasses");
+                dirLightPCSSMaxPenumbraSize = o.Find("m_DirLightPCSSMaxPenumbraSize");
+                dirLightPCSSMaxSamplingDistance = o.Find("m_DirLightPCSSMaxSamplingDistance");
+                dirLightPCSSMinFilterSizeTexels = o.Find("m_DirLightPCSSMinFilterSizeTexels");
+                dirLightPCSSMinFilterMaxAngularDiameter = o.Find("m_DirLightPCSSMinFilterMaxAngularDiameter");
+                dirLightPCSSBlockerSearchAngularDiameter = o.Find("m_DirLightPCSSBlockerSearchAngularDiameter");
+                dirLightPCSSBlockerSamplingClumpExponent = o.Find("m_DirLightPCSSBlockerSamplingClumpExponent");
+                dirLightPCSSBlockerSampleCount = o.Find("m_DirLightPCSSBlockerSampleCount");
+                dirLightPCSSFilterSampleCount = o.Find("m_DirLightPCSSFilterSampleCount");
+
+                // Celestial Body
+                diameterOverride = o.Find(x => x.diameterOverride);
+                diameterMultiplier = o.Find(x => x.diameterMultiplier);
+                diameterMultiplerMode = o.Find(x => x.diameterMultiplerMode);
+
+                distance = o.Find("m_Distance");
+
+                surfaceTexture = o.Find(x => x.surfaceTexture);
+                surfaceTint = o.Find(x => x.surfaceTint);
+
+                shadingSource = o.Find(x => x.celestialBodyShadingSource);
+                sunLightOverride = o.Find(x => x.sunLightOverride);
+
+                sunColor = o.Find(x => x.sunColor);
+                sunIntensity = o.Find(x => x.sunIntensity);
+                phase = o.Find(x => x.moonPhase);
+                phaseRotation = o.Find(x => x.moonPhaseRotation);
+                earthshine = o.Find(x => x.earthshine);
+
+                flareSize = o.Find(x => x.flareSize);
+                flareFalloff = o.Find(x => x.flareFalloff);
+                flareTint = o.Find(x => x.flareTint);
+                flareMultiplier = o.Find(x => x.flareMultiplier);
 
                 // Moment light
                 lightAngle = o.Find("m_LightAngle");

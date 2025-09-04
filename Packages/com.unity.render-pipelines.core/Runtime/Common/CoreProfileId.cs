@@ -5,6 +5,9 @@ namespace UnityEngine.Rendering
         BlitTextureInPotAtlas,
         APVCellStreamingUpdate,
         APVScenarioBlendingUpdate,
-        APVIndexDefragUpdate
+        APVIndexDefragUpdate,
+        APVDiskStreamingUpdate,
+        APVDiskStreamingUpdatePool,
+        APVSamplingDebug,
     }
 }

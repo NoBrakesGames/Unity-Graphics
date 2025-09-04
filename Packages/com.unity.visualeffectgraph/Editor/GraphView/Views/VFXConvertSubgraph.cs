@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.VFX;
 using UnityEditor.VFX;
 using UnityEditor.Experimental.GraphView;
-
+using UnityEditor.VFX.Block;
 using NodeID = System.UInt32;
 
 namespace UnityEditor.VFX.UI
@@ -248,6 +248,8 @@ namespace UnityEditor.VFX.UI
                 TransferEdges();
                 //TransferContextsFlowEdges();
                 UninitSmart();
+
+                m_TargetSubgraph.GetResource()?.WriteAssetWithSubAssets();
             }
 
             public void ConvertToSubgraphOperator(VFXView sourceView, IEnumerable<Controller> controllers, Rect rect, string path)
@@ -266,7 +268,9 @@ namespace UnityEditor.VFX.UI
                     m_TargetController.useCount++;
                     m_TargetControllers = new List<VFXNodeController>();
                 }
+                CopyCustomAttributes<VFXOperatorController>(sourceView, controllers);
                 CopyPasteNodes();
+
                 m_SourceNode = ScriptableObject.CreateInstance<VFXSubgraphOperator>();
                 PostSetupNode();
                 m_SourceControllersWithBlocks = m_SourceControllers.Concat(m_SourceControllers.OfType<VFXContextController>().SelectMany(t => t.blockControllers));
@@ -280,6 +284,8 @@ namespace UnityEditor.VFX.UI
                 var subGraphOperator = m_SourceNode as VFXSubgraphOperator;
                 subGraphOperator.RecreateCopy();
                 subGraphOperator.ResyncSlots(true);
+
+                m_TargetSubgraph.GetResource()?.WriteAssetWithSubAssets();
             }
 
             List<VFXBlockController> m_SourceBlockControllers;
@@ -322,6 +328,7 @@ namespace UnityEditor.VFX.UI
                 targetContext.SetSettingValue("m_SuitableContexts", (VFXBlockSubgraphContext.ContextType)m_SourceBlockControllers.Select(t => t.model.compatibleContexts).Aggregate((t, s) => t & s));
                 m_TargetBlocks = new List<VFXBlockController>();
 
+                CopyCustomAttributes<VFXBlockController>(sourceView, controllers);
                 VFXPaste.PasteBlocks(m_TargetController, copyData, targetContext, 0, m_TargetBlocks);
                 VFXPaste.PasteStickyNotes(m_TargetController, copyData);
 
@@ -371,6 +378,8 @@ namespace UnityEditor.VFX.UI
                 TransferEdges();
                 m_SourceControllers = m_SourceControllersWithBlocks.ToList();
                 UninitSmart();
+
+                m_TargetSubgraph.GetResource()?.WriteAssetWithSubAssets();
             }
 
             bool CreateUniqueSubgraph(string typeName, string extension, Func<string, VisualEffectObject> createFunc)
@@ -492,7 +501,7 @@ namespace UnityEditor.VFX.UI
 
                 for (int i = 0; i < newSourceInputs.Length; ++i)
                 {
-                    VFXParameter newTargetParameter = m_TargetController.AddVFXParameter(Vector2.zero, VFXLibrary.GetParameters().First(t => t.model.type == newSourceInputs[i].portType));
+                    VFXParameter newTargetParameter = m_TargetController.AddVFXParameter(Vector2.zero, VFXLibrary.GetParameters().First(t => t.modelType == newSourceInputs[i].portType).variant);
 
                     m_TargetController.LightApplyChanges();
 
@@ -501,12 +510,13 @@ namespace UnityEditor.VFX.UI
 
                     var outputs = traversingInEdges[newSourceInputs[i]];
 
-                    var linkedParameter = outputs.FirstOrDefault(t => t.sourceNode is VFXParameterNodeController);
-                    if (linkedParameter != null)
+                    var linkedParameter = outputs.Select(t => t.sourceNode).OfType<VFXParameterNodeController>().FirstOrDefault();
+                    if (linkedParameter != null &&
+                        newTargetParameter.type == linkedParameter.parentController.model.type)
                     {
-                        newTargetParamController.exposedName = (linkedParameter.sourceNode as VFXParameterNodeController).parentController.exposedName;
+                        newTargetParamController.exposedName = ReplaceReservedName(linkedParameter.parentController.exposedName);
                         {
-                            VFXParameter originalParameter = (linkedParameter.sourceNode as VFXParameterNodeController).parentController.model;
+                            VFXParameter originalParameter = linkedParameter.parentController.model;
 
                             newTargetParameter.valueFilter = originalParameter.valueFilter;
                             if (originalParameter.valueFilter == VFXValueFilter.Range)
@@ -521,7 +531,7 @@ namespace UnityEditor.VFX.UI
                         }
                     }
                     else
-                        newTargetParamController.exposedName = newSourceInputs[i].name;
+                        newTargetParamController.exposedName = ReplaceReservedName(newSourceInputs[i].name);
 
                     //first the equivalent of sourceInput in the target
 
@@ -584,6 +594,13 @@ namespace UnityEditor.VFX.UI
                 }
             }
 
+            static string ReplaceReservedName(string name)
+            {
+                if (name == VFXBlock.activationSlotName)
+                    return "enabled";
+                return name;
+            }
+
             void TransfertOperatorOutputEdges()
             {
                 var traversingOutEdges = new Dictionary<VFXDataAnchorController, List<VFXDataAnchorController>>();
@@ -614,7 +631,7 @@ namespace UnityEditor.VFX.UI
 
                 for (int i = 0; i < newSourceOutputs.Length; ++i)
                 {
-                    VFXParameter newTargetParameter = m_TargetController.AddVFXParameter(Vector2.zero, VFXLibrary.GetParameters().First(t => t.model.type == newSourceOutputs[i].portType));
+                    VFXParameter newTargetParameter = m_TargetController.AddVFXParameter(Vector2.zero, VFXLibrary.GetParameters().First(t => t.variant.modelType == newSourceOutputs[i].portType).variant);
 
                     m_TargetController.LightApplyChanges();
 
@@ -625,9 +642,9 @@ namespace UnityEditor.VFX.UI
 
                     var linkedParameter = inputs.FirstOrDefault(t => t.sourceNode is VFXParameterNodeController);
                     if (linkedParameter != null)
-                        newTargetParamController.exposedName = (linkedParameter.sourceNode as VFXParameterNodeController).parentController.exposedName;
+                        newTargetParamController.exposedName = ReplaceReservedName((linkedParameter.sourceNode as VFXParameterNodeController).parentController.exposedName);
                     else
-                        newTargetParamController.exposedName = newSourceOutputs[i].name;
+                        newTargetParamController.exposedName = ReplaceReservedName(newSourceOutputs[i].name);
 
                     //first the equivalent of sourceInput in the target
 
@@ -732,6 +749,31 @@ namespace UnityEditor.VFX.UI
                     {
                         CreateAndLinkEvent(m_SourceControllers, m_TargetController, m_TargetControllers, kv.Value, kv.Key);
                     }
+                }
+            }
+
+            private void CopyCustomAttributes<T>(VFXView sourceView, IEnumerable<Controller> controllers) where T : VFXNodeController
+            {
+                // Only copy custom attributes which are used by nodes to convert
+                var attributeManager = sourceView.controller.graph.attributesManager;
+                var usedCustomAttributes = new HashSet<VFXAttribute>();
+                foreach (var controller in controllers.OfType<T>())
+                {
+                    if (controller.model is IVFXAttributeUsage attributeUsage)
+                    {
+                        foreach (var attribute in attributeUsage.usedAttributes)
+                        {
+                            if (attributeManager.IsCustom(attribute.name))
+                            {
+                                usedCustomAttributes.Add(attribute);
+                            }
+                        }
+                    }
+                }
+
+                foreach (var customAttribute in usedCustomAttributes)
+                {
+                    m_TargetController.graph.TryAddCustomAttribute(customAttribute.name, customAttribute.type, customAttribute.description, false, out _);
                 }
             }
         }

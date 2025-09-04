@@ -1,12 +1,14 @@
 # Velocity from Direction & Speed (Change Speed)
 
+> [!IMPORTANT]
+> This feature is experimental. To use this feature, open the **Preferences** window, go to the **Visual Effects** tab, and enable **Experimental Operators/Blocks**.
 Menu Path : **Velocity > [Set/Add] Velocity from Direction & Speed (Change Speed)**
 
 The **Velocity from Direction And Speed : Change Speed** Block calculates a velocity for the particle based on the direction attribute.
 
 To do this, it scales the direction vector by a speed, and composes it with the velocity attribute.
 
-![](Images/Block-VelocityFromDirectionAndSpeed(ChangeSpeed)Example.gif)
+<video title="A burst of particles transitions quickly from a small slow ring of particles to a large cloud of fast-moving particles." src="Images/Block-VelocityFromDirectionAndSpeed(ChangeSpeed)Example.mp4" width="auto" height="auto" autoplay="true" loop="true" controls></video>
 
 ## Block compatibility
 

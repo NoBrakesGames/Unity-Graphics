@@ -4,6 +4,83 @@ All notable changes to this project template will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [16.0.10] - 2024-07-03
+
+### Fixed
+
+- Frame Settings invalid enum in Screenshot Camera 6
+
+## [16.0.9] - 2024-05-15
+
+### Changed
+
+- Fixed tutorial typos
+- Updated tutorial documentation links
+
+## [16.0.8] - 2024-04-05
+
+### Changed
+
+- Upgrade input system version to 1.8.1
+- Set InputHandler to both
+- Create InputActions.asset
+
+## [16.0.7] - 2024-02-13
+
+### Changed
+
+- Downgraded input system version to 1.7.0
+
+## [16.0.6] - 2024-01-31
+
+### Changed
+
+- Updated input system version
+- Changed active input handler to Input System
+
+## [16.0.5] - 2023-11-15
+
+### Changed
+- Changing the default quality from Low to Medium.
+
+## [16.0.4] - 2023-09-01
+
+### Changed
+
+- Updated Environment Volume to fix an issue where no sky was attached
+- Updated Tutorial start section
+
+### Added
+
+- Added subtle SSLF effect by default
+
+## [16.0.3] - 2023-06-22
+
+### Changed
+- Removed Global Volume from scene (Default Volume Profile is now configured only through HDRP Global Settings)
+- Updated Tutorial for Probe Volumes
+
+## [16.0.2] - 2023-06-12
+
+### Changed
+Changes a few objects to no longer use lightmaps (bamboo floor, bamboo cage, long table 3rd room, column 3rd room)
+
+### Added
+- Added Adaptative probe volume support and tutorials
+- Removes previous probe system and tutorials
+
+## [16.0.1] - 2023-05-15
+
+### Changed
+- Enable occlusion for all lens flares
+
+## [16.0.0] - 2023-05-10
+
+### Changed
+
+- Removed deprecated TextMeshPro package dependency
+- Upgraded UGUI package to version 2.0.0
+
 ## [15.1.3] - 2023-03-10
 
 ### Added

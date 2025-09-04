@@ -1,20 +1,67 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+
+using UnityEditor.VFX.Block;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    class NoiseVariantProvider : VariantProvider
+    class NoiseSubVariantProvider : VariantProvider
     {
-        protected sealed override Dictionary<string, object[]> variants { get; } = new Dictionary<string, object[]>
+        private readonly NoiseBase.NoiseType m_MainVariantNoiseType;
+        private readonly Noise.DimensionCount m_MainVariantDimensionCount;
+
+        public NoiseSubVariantProvider(NoiseBase.NoiseType mainVariantNoiseType, Noise.DimensionCount mainVariantDimensionCount)
         {
-            {"type", Enum.GetValues(typeof(NoiseBase.NoiseType)).Cast<object>().ToArray()},
-            {"dimensions", Enum.GetValues(typeof(Noise.DimensionCount)).Cast<object>().ToArray()}
-        };
+            m_MainVariantNoiseType = mainVariantNoiseType;
+            m_MainVariantDimensionCount = mainVariantDimensionCount;
+        }
+
+        public override IEnumerable<Variant> GetVariants()
+        {
+            foreach (NoiseBase.NoiseType type in Enum.GetValues(typeof(NoiseBase.NoiseType)))
+            {
+                var category = VFXLibraryStringHelper.Separator(type.ToString(), 0);
+                foreach (Noise.DimensionCount dimension in Enum.GetValues(typeof(Noise.DimensionCount)))
+                {
+                    if (type == m_MainVariantNoiseType && dimension == m_MainVariantDimensionCount)
+                        continue;
+                    yield return new Variant(
+                        type.ToString().Label().AppendLiteral("Noise").AppendLabel(VFXBlockUtility.GetNameString(dimension)),
+                        category,
+                        typeof(Noise),
+                        new[]
+                        {
+                            new KeyValuePair<string, object>("type", type),
+                            new KeyValuePair<string, object>("dimensions", dimension)
+                        });
+                }
+            }
+        }
     }
 
-    [VFXInfo(category = "Noise", variantProvider = typeof(NoiseVariantProvider))]
+    class NoiseVariantProvider : VariantProvider
+    {
+        public override IEnumerable<Variant> GetVariants()
+        {
+            var mainNoiseType = Noise.NoiseType.Perlin;
+            var mainNoiseDimension = Noise.DimensionCount.Three;
+            yield return new Variant(
+                mainNoiseType.ToString().Label().AppendLiteral("Noise").AppendLabel(VFXBlockUtility.GetNameString(mainNoiseDimension), false),
+                $"Noise",
+                typeof(Noise),
+                new[]
+                {
+                    new KeyValuePair<string, object>("type", mainNoiseType),
+                    new KeyValuePair<string, object>("dimensions", mainNoiseDimension)
+                },
+    () => new NoiseSubVariantProvider(mainNoiseType, mainNoiseDimension));
+        }
+    }
+
+    [VFXHelpURL("Operator-CellularNoise")]
+    [VFXInfo(variantProvider = typeof(NoiseVariantProvider))]
     class Noise : NoiseBase
     {
         public class InputPropertiesRange
@@ -57,13 +104,7 @@ namespace UnityEditor.VFX.Operator
         [VFXSetting, Tooltip("Specifies whether the noise is output in one, two, or three dimensions.")]
         public DimensionCount dimensions = DimensionCount.Two;
 
-        override public string name
-        {
-            get
-            {
-                return type.ToString() + " Noise " + (((int)dimensions) + 1) + "D";
-            }
-        }
+        public override string name => type.ToString().Label(false).AppendLiteral("Noise").AppendLabel( VFXBlockUtility.GetNameString(dimensions));
 
         protected override IEnumerable<VFXPropertyWithValue> inputProperties
         {

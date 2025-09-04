@@ -63,6 +63,7 @@ namespace UnityEngine.Rendering
         /// <typeparam name="TEnum">Type of the enumeration.</typeparam>
         /// <param name="marker">Enumeration value.</param>
         /// <returns>The profiling sampler for the given enumeration value.</returns>
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
         public static ProfilingSampler Get<TEnum>(TEnum marker)
             where TEnum : Enum
         {
@@ -73,6 +74,13 @@ namespace UnityEngine.Rendering
             return sampler;
 #endif
         }
+#else
+        public static ProfilingSampler Get<TEnum>(TEnum marker)
+            where TEnum : Enum
+        {
+            return null;
+        }
+#endif
 
         /// <summary>
         /// Constructor.
@@ -267,7 +275,7 @@ namespace UnityEngine.Rendering
         /// </summary>
         /// <param name="cmd">Command buffer used to add markers and compute execution timings.</param>
         /// <param name="sampler">Profiling Sampler to be used for this scope.</param>
-        public ProfilingScope(UnityEngine.Experimental.Rendering.BaseCommandBuffer cmd, ProfilingSampler sampler)
+        public ProfilingScope(BaseCommandBuffer cmd, ProfilingSampler sampler)
         {
             // NOTE: Do not mix with named CommandBuffers.
             // Currently there's an issue which results in mismatched markers.
@@ -335,7 +343,7 @@ namespace UnityEngine.Rendering
         /// </summary>
         /// <param name="cmd">Command buffer used to add markers and compute execution timings.</param>
         /// <param name="sampler">Profiling Sampler to be used for this scope.</param>
-        public ProfilingScope(UnityEngine.Experimental.Rendering.BaseCommandBuffer cmd, ProfilingSampler sampler)
+        public ProfilingScope(BaseCommandBuffer cmd, ProfilingSampler sampler)
         {
         }
 

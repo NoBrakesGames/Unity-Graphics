@@ -6,6 +6,8 @@ using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
 using UnityEngine.Rendering;
 
+using ShadingSource = UnityEngine.Rendering.HighDefinition.HDAdditionalLightData.CelestialBodyShadingSource;
+
 namespace UnityEditor.Rendering.HighDefinition
 {
     using CED = CoreEditorDrawer<SerializedHDLight>;
@@ -115,7 +117,6 @@ namespace UnityEditor.Rendering.HighDefinition
         readonly static ExpandedState<Expandable, Light> k_ExpandedState = new ExpandedState<Expandable, Light>(0, "HDRP");
         readonly static AdditionalPropertiesState<AdditionalProperties, Light> k_AdditionalPropertiesState = new AdditionalPropertiesState<AdditionalProperties, Light>(0, "HDRP");
 
-        readonly static HDLightUnitSliderUIDrawer k_LightUnitSliderUIDrawer = new HDLightUnitSliderUIDrawer();
 
         public static readonly CED.IDrawer Inspector;
 
@@ -129,19 +130,12 @@ namespace UnityEditor.Rendering.HighDefinition
             k_AdditionalPropertiesState.UnregisterEditor(editor);
         }
 
-        [SetAdditionalPropertiesVisibility]
-        internal static void SetAdditionalPropertiesVisibility(bool value)
-        {
-            if (value)
-                k_AdditionalPropertiesState.ShowAll();
-            else
-                k_AdditionalPropertiesState.HideAll();
-        }
-
         static Func<LightingSettings> GetLightingSettingsOrDefaultsFallback;
 
         static HDLightUI()
         {
+            Func<SerializedHDLight, bool> isArea = (serialized) => serialized.settings.lightType.GetEnumValue<LightType>().IsArea();
+
             Inspector = CED.Group(
                 CED.AdditionalPropertiesFoldoutGroup(LightUI.Styles.generalHeader, Expandable.General, k_ExpandedState, AdditionalProperties.General, k_AdditionalPropertiesState,
                 CED.Group((serialized, owner) => DrawGeneralContent(serialized, owner)), DrawGeneralAdditionalContent),
@@ -151,10 +145,10 @@ namespace UnityEditor.Rendering.HighDefinition
                 CED.AdditionalPropertiesFoldoutGroup(LightUI.Styles.emissionHeader, Expandable.Emission, k_ExpandedState, AdditionalProperties.Emission, k_AdditionalPropertiesState,
                     CED.Group(
                         LightUI.DrawColor,
-                        DrawLightIntensityGUILayout,
+                        LightUI.DrawIntensity,
                         DrawEmissionContent),
                     DrawEmissionAdditionalContent),
-                CED.Conditional((serialized, owner) => !serialized.settings.lightType.GetEnumValue<LightType>().IsArea() && !serialized.settings.isCompletelyBaked,
+                CED.Conditional((serialized, owner) => !serialized.settings.isCompletelyBaked,
                     CED.FoldoutGroup(s_Styles.volumetricHeader, Expandable.Volumetric, k_ExpandedState, DrawVolumetric)),
                 CED.Conditional((serialized, owner) =>
                 {
@@ -165,22 +159,31 @@ namespace UnityEditor.Rendering.HighDefinition
                         CED.AdditionalPropertiesFoldoutGroup(LightUI.Styles.shadowHeader, Expandable.Shadows, k_ExpandedState, AdditionalProperties.Shadow, k_AdditionalPropertiesState,
                             CED.Group(
                                 CED.Group(
-                                    CED.AdditionalPropertiesFoldoutGroup(s_Styles.shadowMapSubHeader, Expandable.ShadowMap, k_ExpandedState, AdditionalProperties.Shadow, k_AdditionalPropertiesState,
-                                        DrawShadowMapContent, DrawShadowMapAdditionalContent, FoldoutOption.SubFoldout | FoldoutOption.Indent | FoldoutOption.NoSpaceAtEnd)),
-                                CED.space,
-                                CED.Conditional((serialized, owner) => !serialized.settings.lightType.GetEnumValue<LightType>().IsArea() && k_AdditionalPropertiesState[AdditionalProperties.Shadow] && HasShadowQualitySettingsUI(HDShadowFilteringQuality.High, serialized, owner),
+
+                                CED.AdditionalPropertiesFoldoutGroup(s_Styles.shadowMapSubHeader, Expandable.ShadowMap, k_ExpandedState, AdditionalProperties.Shadow, k_AdditionalPropertiesState,
+                                    DrawShadowMapContent, DrawShadowMapAdditionalContent, FoldoutOption.SubFoldout | FoldoutOption.Indent | FoldoutOption.NoSpaceAtEnd)),
+
+                                CED.Conditional((serialized, owner) => !isArea(serialized) && k_AdditionalPropertiesState[AdditionalProperties.Shadow] && HasPunctualShadowQualitySettingsUI(HDShadowFilteringQuality.High, serialized, owner),
                                     CED.FoldoutGroup(s_Styles.highShadowQualitySubHeader, Expandable.ShadowQuality, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent, DrawHighShadowSettingsContent)),
-                                CED.Conditional((serialized, owner) => !serialized.settings.lightType.GetEnumValue<LightType>().IsArea() && HasShadowQualitySettingsUI(HDShadowFilteringQuality.Medium, serialized, owner),
+                                CED.Conditional((serialized, owner) => !isArea(serialized) && HasPunctualShadowQualitySettingsUI(HDShadowFilteringQuality.Medium, serialized, owner),
                                     CED.FoldoutGroup(s_Styles.mediumShadowQualitySubHeader, Expandable.ShadowQuality, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent, DrawMediumShadowSettingsContent)),
-                                CED.Conditional((serialized, owner) => !serialized.settings.lightType.GetEnumValue<LightType>().IsArea() && HasShadowQualitySettingsUI(HDShadowFilteringQuality.Low, serialized, owner),
+                                CED.Conditional((serialized, owner) => !isArea(serialized) && HasPunctualShadowQualitySettingsUI(HDShadowFilteringQuality.Low, serialized, owner),
                                     CED.FoldoutGroup(s_Styles.lowShadowQualitySubHeader, Expandable.ShadowQuality, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent, DrawLowShadowSettingsContent)),
-                                CED.Conditional((serialized, owner) => serialized.settings.lightType.GetEnumValue<LightType>().IsArea() && k_AdditionalPropertiesState[AdditionalProperties.Shadow] && HasAreaShadowQualitySettingsUI(HDAreaShadowFilteringQuality.High, serialized, owner),
+
+                                CED.Conditional((serialized, owner) => !isArea(serialized) && k_AdditionalPropertiesState[AdditionalProperties.Shadow] && HasDirectionalShadowQualitySettingsUI(HDShadowFilteringQuality.High, serialized, owner),
                                     CED.FoldoutGroup(s_Styles.highShadowQualitySubHeader, Expandable.ShadowQuality, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent, DrawHighShadowSettingsContent)),
-                                CED.Conditional((serialized, owner) => serialized.settings.lightType.GetEnumValue<LightType>().IsArea() && HasAreaShadowQualitySettingsUI(HDAreaShadowFilteringQuality.Medium, serialized, owner),
+                                CED.Conditional((serialized, owner) => !isArea(serialized) && HasDirectionalShadowQualitySettingsUI(HDShadowFilteringQuality.Medium, serialized, owner),
                                     CED.FoldoutGroup(s_Styles.mediumShadowQualitySubHeader, Expandable.ShadowQuality, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent, DrawMediumShadowSettingsContent)),
-                                CED.Conditional((serialized, owner) => !serialized.settings.lightType.GetEnumValue<LightType>().IsArea(),
-                                    CED.FoldoutGroup(s_Styles.contactShadowsSubHeader, Expandable.ContactShadow, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent | FoldoutOption.NoSpaceAtEnd, DrawContactShadowsContent)
-                                )
+                                CED.Conditional((serialized, owner) => !isArea(serialized) && HasDirectionalShadowQualitySettingsUI(HDShadowFilteringQuality.Low, serialized, owner),
+                                    CED.FoldoutGroup(s_Styles.lowShadowQualitySubHeader, Expandable.ShadowQuality, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent, DrawLowShadowSettingsContent)),
+
+                                CED.Conditional((serialized, owner) => isArea(serialized) && k_AdditionalPropertiesState[AdditionalProperties.Shadow] && HasAreaShadowQualitySettingsUI(HDAreaShadowFilteringQuality.High, serialized, owner),
+                                    CED.FoldoutGroup(s_Styles.highShadowQualitySubHeader, Expandable.ShadowQuality, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent, DrawHighShadowSettingsContent)),
+                                CED.Conditional((serialized, owner) => isArea(serialized) && HasAreaShadowQualitySettingsUI(HDAreaShadowFilteringQuality.Medium, serialized, owner),
+                                    CED.FoldoutGroup(s_Styles.mediumShadowQualitySubHeader, Expandable.ShadowQuality, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent, DrawMediumShadowSettingsContent)),
+
+                                CED.Conditional((serialized, owner) => !isArea(serialized),
+                                    CED.FoldoutGroup(s_Styles.contactShadowsSubHeader, Expandable.ContactShadow, k_ExpandedState, FoldoutOption.SubFoldout | FoldoutOption.Indent | FoldoutOption.NoSpaceAtEnd, DrawContactShadowsContent))
                                 ),
                             CED.noop //will only add parameter in first sub header
                             ),
@@ -428,13 +431,76 @@ namespace UnityEditor.Rendering.HighDefinition
                     else if (lightType == LightType.Spot)
                     {
                         // Cone spot projector
+                        float oldSpotAngle = serialized.settings.spotAngle.floatValue;
+                        // If light unit is currently displayed in lumen and 'reflector' is on, recalculate candela so lumen value remains constant
+                        bool isReflectorRelevant = serialized.settings.enableSpotReflector.boolValue &&
+                                                   serialized.settings.lightUnit.GetEnumValue<LightUnit>() == LightUnit.Lumen;
+                        bool needsReflectedIntensityRecalc = false;
+
+                        int indent = EditorGUI.indentLevel;
+
+                        float textFieldWidth = EditorGUIUtility.pixelsPerPoint * 25f;
+                        float spacing = EditorGUIUtility.pixelsPerPoint * 2f;
+
+                        float max = oldSpotAngle;
+                        float min = (serialized.spotInnerPercent.floatValue / 100f) * max;
+
+                        Rect position = EditorGUILayout.GetControlRect();
+
+                        EditorGUI.indentLevel--;
+                        Rect rect = EditorGUI.PrefixLabel(position, s_Styles.innerOuterSpotAngle);
+                        EditorGUI.indentLevel = 0;
+
+                        Rect sliderRect = rect;
+                        sliderRect.x += textFieldWidth + spacing;
+                        sliderRect.width -= (textFieldWidth + spacing) * 2f;
+
+                        Rect minRect = rect;
+                        minRect.width = textFieldWidth;
+
+                        Rect maxRect = position;
+                        maxRect.x += maxRect.width - textFieldWidth;
+                        maxRect.width = textFieldWidth;
+
                         EditorGUI.BeginChangeCheck();
-                        EditorGUILayout.Slider(serialized.settings.spotAngle, HDAdditionalLightData.k_MinSpotAngle, HDAdditionalLightData.k_MaxSpotAngle, s_Styles.outerAngle);
+                        min = EditorGUI.DelayedFloatField(minRect, min);
                         if (EditorGUI.EndChangeCheck())
                         {
                             serialized.customSpotLightShadowCone.floatValue = Math.Min(serialized.customSpotLightShadowCone.floatValue, serialized.settings.spotAngle.floatValue);
+                            min = Mathf.Clamp(min, HDAdditionalLightData.k_MinSpotAngle, max);
+                            serialized.spotInnerPercent.floatValue = min / max * 100f;
                         }
-                        EditorGUILayout.PropertyField(serialized.spotInnerPercent, s_Styles.spotInnerPercent);
+
+                        EditorGUI.BeginChangeCheck();
+                        EditorGUI.MinMaxSlider(sliderRect, ref min, ref max, HDAdditionalLightData.k_MinSpotAngle,HDAdditionalLightData.k_MaxSpotAngle );
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            min = Mathf.Clamp(min, HDAdditionalLightData.k_MinSpotAngle, max);
+                            serialized.spotInnerPercent.floatValue = min / max * 100f;
+                            serialized.settings.spotAngle.floatValue = max;
+                            serialized.settings.bakedShadowRadiusProp.floatValue = serialized.shapeRadius.floatValue;
+                            needsReflectedIntensityRecalc = (max != oldSpotAngle);
+                        }
+
+                        EditorGUI.BeginChangeCheck();
+                        EditorGUI.DelayedFloatField(maxRect, serialized.settings.spotAngle, GUIContent.none);
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            needsReflectedIntensityRecalc = true;
+                        }
+
+                        if (isReflectorRelevant && needsReflectedIntensityRecalc)
+                        {
+                            // If light unit is currently displayed in lumen and 'reflector' is on and the spot angle has changed,
+                            // recalculate candela so lumen value remains constant
+                            float oldSolidAngle = LightUnitUtils.GetSolidAngleFromSpotLight(oldSpotAngle);
+                            float oldLumen = LightUnitUtils.CandelaToLumen(serialized.settings.intensity.floatValue, oldSolidAngle);
+                            float newSolidAngle = LightUnitUtils.GetSolidAngleFromSpotLight(serialized.settings.spotAngle.floatValue);
+                            float newCandela = LightUnitUtils.LumenToCandela(oldLumen, newSolidAngle);
+                            serialized.settings.intensity.floatValue = newCandela;
+                        }
+
+                        EditorGUI.indentLevel = indent - 1;
                         EditorGUI.BeginChangeCheck();
                         EditorGUILayout.PropertyField(serialized.shapeRadius, s_Styles.lightRadius);
                         if (EditorGUI.EndChangeCheck())
@@ -442,17 +508,41 @@ namespace UnityEditor.Rendering.HighDefinition
                             //Also affect baked shadows
                             serialized.settings.bakedShadowRadiusProp.floatValue = serialized.shapeRadius.floatValue;
                         }
+
+                        EditorGUI.indentLevel = indent;
                     }
                     else if (lightType == LightType.Pyramid)
                     {
                         // pyramid spot projector
+                        bool isReflectorRelevant = serialized.settings.enableSpotReflector.boolValue && serialized.settings.lightUnit.GetEnumValue<LightUnit>() == LightUnit.Lumen;
+                        bool needsReflectedIntensityRecalc = false;
+                        float oldSpotAngle = serialized.settings.spotAngle.floatValue;
+                        float oldAspectRatio = serialized.aspectRatio.floatValue;
                         EditorGUI.BeginChangeCheck();
                         serialized.settings.DrawSpotAngle();
                         if (EditorGUI.EndChangeCheck())
                         {
                             serialized.customSpotLightShadowCone.floatValue = Math.Min(serialized.customSpotLightShadowCone.floatValue, serialized.settings.spotAngle.floatValue);
+                            needsReflectedIntensityRecalc = true;
                         }
+                        EditorGUI.BeginChangeCheck();
                         EditorGUILayout.Slider(serialized.aspectRatio, HDAdditionalLightData.k_MinAspectRatio, HDAdditionalLightData.k_MaxAspectRatio, s_Styles.aspectRatioPyramid);
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            serialized.settings.areaSizeX.floatValue = serialized.aspectRatio.floatValue;
+                            needsReflectedIntensityRecalc = true;
+                        }
+
+                        if (isReflectorRelevant && needsReflectedIntensityRecalc)
+                        {
+                            // If light unit is currently displayed in lumen and 'reflector' is on and the spot angle / aspect ratio has changed,
+                            // recalculate candela so lumen value remains constant
+                            float oldSolidAngle = LightUnitUtils.GetSolidAngleFromPyramidLight(oldSpotAngle, oldAspectRatio);
+                            float oldLumen = LightUnitUtils.CandelaToLumen(serialized.settings.intensity.floatValue, oldSolidAngle);
+                            float newSolidAngle = LightUnitUtils.GetSolidAngleFromPyramidLight(serialized.settings.spotAngle.floatValue, serialized.aspectRatio.floatValue);
+                            float newCandela = LightUnitUtils.LumenToCandela(oldLumen, newSolidAngle);
+                            serialized.settings.intensity.floatValue = newCandela;
+                        }
                         EditorGUI.BeginChangeCheck();
                         EditorGUILayout.PropertyField(serialized.shapeRadius, s_Styles.lightRadius);
                         if (EditorGUI.EndChangeCheck())
@@ -515,16 +605,33 @@ namespace UnityEditor.Rendering.HighDefinition
                         EditorGUI.BeginChangeCheck();
                         EditorGUILayout.PropertyField(serialized.shapeWidth, s_Styles.shapeWidthRect);
                         EditorGUILayout.PropertyField(serialized.shapeHeight, s_Styles.shapeHeightRect);
-                        if (ShaderConfig.s_BarnDoor == 1)
-                        {
-                            EditorGUILayout.PropertyField(serialized.barnDoorAngle, s_Styles.barnDoorAngle);
-                            EditorGUILayout.PropertyField(serialized.barnDoorLength, s_Styles.barnDoorLength);
-                        }
                         if (EditorGUI.EndChangeCheck())
                         {
+                            serialized.shapeWidth.floatValue = Mathf.Max(HDAdditionalLightData.k_MinAreaWidth, serialized.shapeWidth.floatValue);
+                            serialized.shapeHeight.floatValue = Mathf.Max(HDAdditionalLightData.k_MinAreaWidth, serialized.shapeHeight.floatValue);
+                            // If light intensity is currently displayed as Lumen,
+                            // recalculate native (Nits) intensity so displayed Lumen value remains constant
+                            if (serialized.settings.lightUnit.GetEnumValue<LightUnit>() == LightUnit.Lumen)
+                            {
+                                Vector2 oldSize = new Vector2(serialized.settings.areaSizeX.floatValue, serialized.settings.areaSizeY.floatValue);
+                                float oldArea = LightUnitUtils.GetAreaFromRectangleLight(oldSize);
+                                float oldLumen = LightUnitUtils.NitsToLumen(serialized.settings.intensity.floatValue, oldArea);
+
+                                Vector2 newSize = new Vector2(serialized.shapeWidth.floatValue, serialized.shapeHeight.floatValue);
+                                float newArea = LightUnitUtils.GetAreaFromRectangleLight(newSize);
+                                float newNits = LightUnitUtils.LumenToNits(oldLumen, newArea);
+
+                                serialized.settings.intensity.floatValue = newNits;
+                            }
                             serialized.settings.areaSizeX.floatValue = serialized.shapeWidth.floatValue;
                             serialized.settings.areaSizeY.floatValue = serialized.shapeHeight.floatValue;
-                            if (ShaderConfig.s_BarnDoor == 1)
+                        }
+                        if (ShaderConfig.s_BarnDoor == 1)
+                        {
+                            EditorGUI.BeginChangeCheck();
+                            EditorGUILayout.PropertyField(serialized.barnDoorAngle, s_Styles.barnDoorAngle);
+                            EditorGUILayout.PropertyField(serialized.barnDoorLength, s_Styles.barnDoorLength);
+                            if (EditorGUI.EndChangeCheck())
                             {
                                 serialized.barnDoorAngle.floatValue = Mathf.Clamp(serialized.barnDoorAngle.floatValue, 0.0f, 90.0f);
                                 serialized.barnDoorLength.floatValue = Mathf.Clamp(serialized.barnDoorLength.floatValue, 0.0f, float.MaxValue);
@@ -534,7 +641,26 @@ namespace UnityEditor.Rendering.HighDefinition
                     else if (lightType == LightType.Disc)
                     {
                         //draw the built-in area light control at the moment as everything is handled by built-in
+                        EditorGUI.BeginChangeCheck();
+                        float oldRadius = Mathf.Max(HDAdditionalLightData.k_MinLightSize, serialized.settings.areaSizeX.floatValue);
                         serialized.settings.DrawArea();
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            serialized.settings.areaSizeX.floatValue = Mathf.Max(HDAdditionalLightData.k_MinLightSize, serialized.settings.areaSizeX.floatValue);
+                            // If light intensity is currently displayed as Lumen,
+                            // recalculate native (Nits) intensity so displayed Lumen value remains constant
+                            if (serialized.settings.lightUnit.GetEnumValue<LightUnit>() == LightUnit.Lumen)
+                            {
+                                float oldArea = LightUnitUtils.GetAreaFromDiscLight(oldRadius);
+                                float oldLumen = LightUnitUtils.NitsToLumen(serialized.settings.intensity.floatValue, oldArea);
+
+                                float newRadius = serialized.settings.areaSizeX.floatValue;
+                                float newArea = LightUnitUtils.GetAreaFromDiscLight(newRadius);
+                                float newNits = LightUnitUtils.LumenToNits(oldLumen, newArea);
+
+                                serialized.settings.intensity.floatValue = newNits;
+                            }
+                        }
                         serialized.displayAreaLightEmissiveMesh.boolValue = false; //force deactivate emissive mesh for Disc (not supported)
                     }
                     else if (lightType == LightType.Tube)
@@ -543,6 +669,21 @@ namespace UnityEditor.Rendering.HighDefinition
                         EditorGUILayout.PropertyField(serialized.shapeWidth, s_Styles.shapeWidthTube);
                         if (EditorGUI.EndChangeCheck())
                         {
+                            serialized.shapeWidth.floatValue = Mathf.Max(HDAdditionalLightData.k_MinLightSize, serialized.shapeWidth.floatValue);
+                            // If light intensity is currently displayed as Lumen,
+                            // recalculate native (Nits) intensity so displayed Lumen value remains constant
+                            if (serialized.settings.lightUnit.GetEnumValue<LightUnit>() == LightUnit.Lumen)
+                            {
+                                float oldLineWidth = serialized.settings.areaSizeX.floatValue;
+                                float oldArea = LightUnitUtils.GetAreaFromTubeLight(oldLineWidth);
+                                float oldLumen = LightUnitUtils.NitsToLumen(serialized.settings.intensity.floatValue, oldArea);
+
+                                float newLineWidth = serialized.shapeWidth.floatValue;
+                                float newArea = LightUnitUtils.GetAreaFromTubeLight(newLineWidth);
+                                float newNits = LightUnitUtils.LumenToNits(oldLumen, newArea);
+
+                                serialized.settings.intensity.floatValue = newNits;
+                            }
                             // Fake line with a small rectangle in vanilla unity for GI
                             serialized.settings.areaSizeX.floatValue = serialized.shapeWidth.floatValue;
                             serialized.settings.areaSizeY.floatValue = HDAdditionalLightData.k_MinLightSize;
@@ -567,261 +708,138 @@ namespace UnityEditor.Rendering.HighDefinition
             if (EditorGUI.EndChangeCheck())
             {
                 serialized.needUpdateAreaLightEmissiveMeshComponents = true;
+                serialized.Apply();
                 SetLightsDirty(owner); // Should be apply only to parameter that's affect GI, but make the code cleaner
             }
         }
 
+        static readonly int k_DiameterPopupWidth = 70;
+        static readonly string[] k_DiameterModeNames = new string[] { "Multiply", "Override" };
+        static void AngularDiameterField(SerializedHDLight serialized)
+        {
+            var rect = EditorGUILayout.GetControlRect();
+            rect.xMax -= k_DiameterPopupWidth + 2;
+
+            var popupRect = rect;
+            popupRect.x = rect.xMax + 2 - EditorGUI.indentLevel * 15;
+            popupRect.width = k_DiameterPopupWidth + EditorGUI.indentLevel * 15;
+
+            int mode = serialized.diameterMultiplerMode.boolValue ? 0 : 1;
+            mode = EditorGUI.Popup(popupRect, mode, k_DiameterModeNames);
+            serialized.diameterMultiplerMode.boolValue = mode == 0 ? true : false;
+
+            EditorGUI.BeginProperty(rect, GUIContent.none, serialized.diameterMultiplerMode);
+            if (mode == 0)
+            {
+                EditorGUI.PropertyField(rect, serialized.diameterMultiplier, s_Styles.diameterMultiplier);
+            }
+            else if (mode == 1)
+            {
+                EditorGUI.PropertyField(rect, serialized.diameterOverride, s_Styles.diameterOverride);
+            }
+            EditorGUI.EndProperty();
+        }
+
+        static void TexturePropertySingleLine(GUIContent label, SerializedProperty textureProp, SerializedProperty colorProp)
+        {
+            // texture prop
+
+            var type = Type.GetType("UnityEditor.Rendering.TextureParameterHelper,Unity.RenderPipelines.Core.Editor");
+            var MiniThumbnail = type.GetMethod("MiniThumbnail", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+
+            Rect r = EditorGUILayout.GetControlRect();
+            MiniThumbnail.Invoke(null, new object[] { r, textureProp, label, typeof(Texture2D) });
+
+            // color prop
+
+            int oldIndentLevel = EditorGUI.indentLevel;
+            EditorGUI.indentLevel = 0;
+
+            Rect rect = new Rect(r.x + EditorGUIUtility.labelWidth + 2, r.y, r.width - EditorGUIUtility.labelWidth - 2, r.height);
+            EditorGUI.BeginProperty(rect, label, colorProp);
+
+            EditorGUI.BeginChangeCheck();
+            var color = EditorGUI.ColorField(rect, colorProp.colorValue);
+            if (EditorGUI.EndChangeCheck())
+                colorProp.colorValue = color;
+
+            EditorGUI.EndProperty();
+            EditorGUI.indentLevel = oldIndentLevel;
+        }
+
         static void DrawCelestialBodyContent(SerializedHDLight serialized, Editor owner)
         {
-            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(serialized.interactsWithSky, s_Styles.interactsWithSky);
+
+            using (new EditorGUI.DisabledScope(!serialized.interactsWithSky.boolValue))
             {
-                EditorGUILayout.PropertyField(serialized.interactsWithSky, s_Styles.interactsWithSky);
+                EditorGUI.indentLevel++;
+                AngularDiameterField(serialized);
 
-                using (new EditorGUI.DisabledScope(!serialized.interactsWithSky.boolValue))
+                EditorGUILayout.PropertyField(serialized.distance, s_Styles.distance);
+
+                TexturePropertySingleLine(s_Styles.surfaceColor, serialized.surfaceTexture, serialized.surfaceTint);
+
+                EditorGUILayout.PropertyField(serialized.shadingSource, s_Styles.shadingSource);
+
+                EditorGUI.indentLevel++;
+                switch ((ShadingSource)serialized.shadingSource.intValue)
                 {
-                    EditorGUI.indentLevel++;
-                    EditorGUILayout.PropertyField(serialized.flareSize, s_Styles.flareSize);
-                    EditorGUILayout.PropertyField(serialized.flareFalloff, s_Styles.flareFalloff);
-                    EditorGUILayout.PropertyField(serialized.flareTint, s_Styles.flareTint);
-                    EditorGUILayout.PropertyField(serialized.surfaceTexture, s_Styles.surfaceTexture);
-                    EditorGUILayout.PropertyField(serialized.surfaceTint, s_Styles.surfaceTint);
-                    EditorGUILayout.PropertyField(serialized.distance, s_Styles.distance);
-                    EditorGUI.indentLevel--;
-                }
-            }
+                    case ShadingSource.ReflectSunLight:
+                        EditorGUILayout.PropertyField(serialized.sunLightOverride, s_Styles.sunLightOverride);
 
-            if (EditorGUI.EndChangeCheck())
-            {
-                // Clamp the value and also affect baked shadows.
-                serialized.flareSize.floatValue = Mathf.Clamp(serialized.flareSize.floatValue, 0, 90);
-                serialized.flareFalloff.floatValue = Mathf.Max(serialized.flareFalloff.floatValue, 0);
-                serialized.distance.floatValue = Mathf.Max(serialized.distance.floatValue, 0);
+                        if (serialized.sunLightOverride.objectReferenceValue != null)
+                        {
+                            var referenced = serialized.sunLightOverride.objectReferenceValue as Light;
+                            Light light = (Light)owner.target;
+                            if (referenced == light)
+                                EditorGUILayout.HelpBox("The Celestial Body cannot receive lighting from itself.", MessageType.Warning);
+                            else if (referenced.type != LightType.Directional)
+                                EditorGUILayout.HelpBox("The Sun Light needs to be a directional light.", MessageType.Error);
+                        }
 
-                if (serialized.surfaceTexture.objectReferenceValue is Texture surfaceTexture && surfaceTexture != null)
-                {
-                    if (surfaceTexture.dimension != TextureDimension.Tex2D)
-                    {
-                        Debug.LogError($"The texture '{surfaceTexture.name}' isn't compatible with the Celestial Body Surface Texture property. Only 2D textures are supported.");
-                        serialized.surfaceTexture.objectReferenceValue = null;
-                    }
+                        EditorGUILayout.PropertyField(serialized.earthshine, s_Styles.earthshine);
+                        break;
+
+                    case ShadingSource.Manual:
+                        EditorGUILayout.PropertyField(serialized.sunColor, s_Styles.sunColor);
+                        EditorGUILayout.PropertyField(serialized.sunIntensity, s_Styles.sunIntensity);
+                        EditorGUILayout.PropertyField(serialized.phase, s_Styles.phase);
+                        EditorGUILayout.PropertyField(serialized.phaseRotation, s_Styles.phaseRotation);
+                        EditorGUILayout.PropertyField(serialized.earthshine, s_Styles.earthshine);
+                        break;
                 }
+                EditorGUI.indentLevel--;
+
+                // Flare
+                EditorGUILayout.PropertyField(serialized.flareSize, s_Styles.flareSize);
+                EditorGUILayout.PropertyField(serialized.flareFalloff, s_Styles.flareFalloff);
+                EditorGUILayout.PropertyField(serialized.flareTint, s_Styles.flareTint);
+                EditorGUILayout.PropertyField(serialized.flareMultiplier, s_Styles.flareMultiplier);
+                EditorGUI.indentLevel--;
             }
         }
 
         static void UpdateLightIntensityUnit(SerializedHDLight serialized, Editor owner)
         {
+            // Verify that the light unit is supported by the new light type or revert it to it's native type
             LightType lightType = serialized.settings.lightType.GetEnumValue<LightType>();
-            // Box are local directional light
-            if (lightType == LightType.Directional || lightType == LightType.Box)
+            if (!LightUnitUtils.IsLightUnitSupported(lightType, serialized.settings.lightUnit.GetEnumValue<LightUnit>()))
             {
-                serialized.lightUnit.SetEnumValue((LightUnit)DirectionalLightUnit.Lux);
-                // We need to reset luxAtDistance to neutral when changing to (local) directional light, otherwise first display value ins't correct
-                serialized.luxAtDistance.floatValue = 1.0f;
-            }
-        }
-
-        internal static LightUnit DrawLightIntensityUnitPopup(Rect rect, LightUnit value, LightType type)
-        {
-            switch (type)
-            {
-                case LightType.Directional:
-                    return (LightUnit)EditorGUI.EnumPopup(rect, (DirectionalLightUnit)value);
-                case LightType.Point:
-                    return (LightUnit)EditorGUI.EnumPopup(rect, (PunctualLightUnit)value);
-                case LightType.Spot:
-                case LightType.Pyramid:
-                        return (LightUnit)EditorGUI.EnumPopup(rect, (PunctualLightUnit)value);
-                case LightType.Box:
-                        return (LightUnit)EditorGUI.EnumPopup(rect, (DirectionalLightUnit)value);
-                default:
-                    return (LightUnit)EditorGUI.EnumPopup(rect, (AreaLightUnit)value);
-            }
-        }
-
-        static void DrawLightIntensityUnitPopup(Rect rect, SerializedHDLight serialized, Editor owner)
-        {
-            LightUnit oldLigthUnit = serialized.lightUnit.GetEnumValue<LightUnit>();
-
-            EditorGUI.BeginChangeCheck();
-
-            EditorGUI.BeginProperty(rect, GUIContent.none, serialized.lightUnit);
-            EditorGUI.showMixedValue = serialized.lightUnit.hasMultipleDifferentValues;
-            var selectedLightUnit = DrawLightIntensityUnitPopup(rect, serialized.lightUnit.GetEnumValue<LightUnit>(), serialized.settings.lightType.GetEnumValue<LightType>());
-            EditorGUI.showMixedValue = false;
-            EditorGUI.EndProperty();
-
-            if (EditorGUI.EndChangeCheck())
-            {
-                ConvertLightIntensity(oldLigthUnit, selectedLightUnit, serialized, owner);
-                serialized.lightUnit.SetEnumValue(selectedLightUnit);
-            }
-        }
-
-        internal static void ConvertLightIntensity(LightUnit oldLightUnit, LightUnit newLightUnit, SerializedHDLight serialized, Editor owner)
-        {
-            serialized.intensity.floatValue = ConvertLightIntensity(oldLightUnit, newLightUnit, serialized, owner, serialized.intensity.floatValue);
-        }
-
-        internal static float ConvertLightIntensity(LightUnit oldLightUnit, LightUnit newLightUnit, SerializedHDLight serialized, Editor owner, float intensity)
-        {
-            if (serialized.HasMultipleLightTypes(owner))
-                return intensity;
-
-            Light light = (Light)owner.target;
-
-            // For punctual lights
-            LightType lightType = serialized.settings.lightType.GetEnumValue<LightType>();
-            switch (lightType)
-            {
-                case LightType.Directional:
-                case LightType.Point:
-                case LightType.Spot:
-                case LightType.Pyramid:
-                case LightType.Box:
-                    // Lumen ->
-                    if (oldLightUnit == LightUnit.Lumen && newLightUnit == LightUnit.Candela)
-                        intensity = LightUtils.ConvertPunctualLightLumenToCandela(lightType, intensity, light.intensity, serialized.enableSpotReflector.boolValue);
-                    else if (oldLightUnit == LightUnit.Lumen && newLightUnit == LightUnit.Lux)
-                        intensity = LightUtils.ConvertPunctualLightLumenToLux(lightType, intensity, light.intensity, serialized.enableSpotReflector.boolValue,
-                            serialized.luxAtDistance.floatValue);
-                    else if (oldLightUnit == LightUnit.Lumen && newLightUnit == LightUnit.Ev100)
-                        intensity = LightUtils.ConvertPunctualLightLumenToEv(lightType, intensity, light.intensity, serialized.enableSpotReflector.boolValue);
-                    // Candela ->
-                    else if (oldLightUnit == LightUnit.Candela && newLightUnit == LightUnit.Lumen)
-                        intensity = LightUtils.ConvertPunctualLightCandelaToLumen(lightType, intensity, serialized.enableSpotReflector.boolValue,
-                            light.spotAngle, serialized.aspectRatio.floatValue);
-                    else if (oldLightUnit == LightUnit.Candela && newLightUnit == LightUnit.Lux)
-                        intensity = LightUtils.ConvertCandelaToLux(intensity, serialized.luxAtDistance.floatValue);
-                    else if (oldLightUnit == LightUnit.Candela && newLightUnit == LightUnit.Ev100)
-                        intensity = LightUtils.ConvertCandelaToEv(intensity);
-                    // Lux ->
-                    else if (oldLightUnit == LightUnit.Lux && newLightUnit == LightUnit.Lumen)
-                        intensity = LightUtils.ConvertPunctualLightLuxToLumen(lightType, intensity, serialized.enableSpotReflector.boolValue,
-                            light.spotAngle, serialized.aspectRatio.floatValue, serialized.luxAtDistance.floatValue);
-                    else if (oldLightUnit == LightUnit.Lux && newLightUnit == LightUnit.Candela)
-                        intensity = LightUtils.ConvertLuxToCandela(intensity, serialized.luxAtDistance.floatValue);
-                    else if (oldLightUnit == LightUnit.Lux && newLightUnit == LightUnit.Ev100)
-                        intensity = LightUtils.ConvertLuxToEv(intensity, serialized.luxAtDistance.floatValue);
-                    // EV100 ->
-                    else if (oldLightUnit == LightUnit.Ev100 && newLightUnit == LightUnit.Lumen)
-                        intensity = LightUtils.ConvertPunctualLightEvToLumen(lightType, intensity, serialized.enableSpotReflector.boolValue,
-                            light.spotAngle, serialized.aspectRatio.floatValue);
-                    else if (oldLightUnit == LightUnit.Ev100 && newLightUnit == LightUnit.Candela)
-                        intensity = LightUtils.ConvertEvToCandela(intensity);
-                    else if (oldLightUnit == LightUnit.Ev100 && newLightUnit == LightUnit.Lux)
-                        intensity = LightUtils.ConvertEvToLux(intensity, serialized.luxAtDistance.floatValue);
-                    break;
-
-                case LightType.Rectangle:
-                case LightType.Tube:
-                case LightType.Disc:
-                    if (oldLightUnit == LightUnit.Lumen && newLightUnit == LightUnit.Nits)
-                        intensity = LightUtils.ConvertAreaLightLumenToLuminance(lightType, intensity, serialized.shapeWidth.floatValue, serialized.shapeHeight.floatValue);
-                    if (oldLightUnit == LightUnit.Nits && newLightUnit == LightUnit.Lumen)
-                        intensity = LightUtils.ConvertAreaLightLuminanceToLumen(lightType, intensity, serialized.shapeWidth.floatValue, serialized.shapeHeight.floatValue);
-                    if (oldLightUnit == LightUnit.Nits && newLightUnit == LightUnit.Ev100)
-                        intensity = LightUtils.ConvertLuminanceToEv(intensity);
-                    if (oldLightUnit == LightUnit.Ev100 && newLightUnit == LightUnit.Nits)
-                        intensity = LightUtils.ConvertEvToLuminance(intensity);
-                    if (oldLightUnit == LightUnit.Ev100 && newLightUnit == LightUnit.Lumen)
-                        intensity = LightUtils.ConvertAreaLightEvToLumen(lightType, intensity, serialized.shapeWidth.floatValue, serialized.shapeHeight.floatValue);
-                    if (oldLightUnit == LightUnit.Lumen && newLightUnit == LightUnit.Ev100)
-                        intensity = LightUtils.ConvertAreaLightLumenToEv(lightType, intensity, serialized.shapeWidth.floatValue, serialized.shapeHeight.floatValue);
-                    break;
-            }
-
-            return intensity;
-        }
-
-        static void DrawLightIntensityGUILayout(SerializedHDLight serialized, Editor owner)
-        {
-            // Match const defined in EditorGUI.cs
-            const int k_IndentPerLevel = 15;
-
-            const int k_ValueUnitSeparator = 2;
-            const int k_UnitWidth = 100;
-
-            float indent = k_IndentPerLevel * EditorGUI.indentLevel;
-
-            Rect lineRect = EditorGUILayout.GetControlRect();
-            Rect labelRect = lineRect;
-            labelRect.width = EditorGUIUtility.labelWidth;
-
-            // Expand to reach both lines of the intensity field.
-            var interlineOffset = EditorGUIUtility.singleLineHeight + 2f;
-            labelRect.height += interlineOffset;
-
-            //handling of prefab overrides in a parent label
-            GUIContent parentLabel = s_Styles.lightIntensity;
-            parentLabel = EditorGUI.BeginProperty(labelRect, parentLabel, serialized.lightUnit);
-            parentLabel = EditorGUI.BeginProperty(labelRect, parentLabel, serialized.intensity);
-            {
-                // Restore the original rect for actually drawing the label.
-                labelRect.height -= interlineOffset;
-
-                EditorGUI.LabelField(labelRect, parentLabel);
-            }
-            EditorGUI.EndProperty();
-            EditorGUI.EndProperty();
-
-            // Draw the light unit slider + icon + tooltip
-            Rect lightUnitSliderRect = lineRect; // TODO: Move the value and unit rects to new line
-            lightUnitSliderRect.x += EditorGUIUtility.labelWidth + k_ValueUnitSeparator;
-            lightUnitSliderRect.width -= EditorGUIUtility.labelWidth + k_ValueUnitSeparator;
-
-            var lightType = serialized.settings.lightType.GetEnumValue<LightType>();
-            var lightUnit = serialized.lightUnit.GetEnumValue<LightUnit>();
-            k_LightUnitSliderUIDrawer.SetSerializedObject(serialized.serializedObject);
-            k_LightUnitSliderUIDrawer.Draw(lightType, lightUnit, serialized.intensity, lightUnitSliderRect, serialized, owner);
-
-            // We use PropertyField to draw the value to keep the handle at left of the field
-            // This will apply the indent again thus we need to remove it time for alignment
-            Rect valueRect = EditorGUILayout.GetControlRect();
-            labelRect.width = EditorGUIUtility.labelWidth;
-            valueRect.width += indent - k_ValueUnitSeparator - k_UnitWidth;
-            Rect unitRect = valueRect;
-            unitRect.x += valueRect.width - indent + k_ValueUnitSeparator;
-            unitRect.width = k_UnitWidth + .5f;
-
-            // Draw the unit textfield
-            EditorGUI.BeginChangeCheck();
-            EditorGUI.PropertyField(valueRect, serialized.intensity, CoreEditorStyles.empty);
-            DrawLightIntensityUnitPopup(unitRect, serialized, owner);
-
-            if (EditorGUI.EndChangeCheck())
-            {
-                serialized.intensity.floatValue = Mathf.Max(serialized.intensity.floatValue, 0.0f);
+                serialized.settings.lightUnit.SetEnumValue(LightUnitUtils.GetNativeLightUnit(lightType));
+                if (lightType == LightType.Directional || lightType == LightType.Box)
+                {
+                    // We need to reset luxAtDistance to neutral when changing to (local) directional light, otherwise first display value isn't correct
+                    serialized.settings.luxAtDistance.floatValue = 1.0f;
+                }
             }
         }
 
         static void DrawEmissionContent(SerializedHDLight serialized, Editor owner)
         {
+            LightUI.DrawIntensityModifiers(serialized, !k_AdditionalPropertiesState[AdditionalProperties.Emission]);
+
             LightType lightType = serialized.settings.lightType.GetEnumValue<LightType>();
-            LightUnit lightUnit = serialized.lightUnit.GetEnumValue<LightUnit>();
-
-            if (lightType != LightType.Directional
-                // Box are local directional light and shouldn't display the Lux At widget. It use only lux
-                && lightType != LightType.Box
-                && lightUnit == (LightUnit)PunctualLightUnit.Lux)
-            {
-                EditorGUI.indentLevel++;
-                EditorGUI.BeginChangeCheck();
-                EditorGUILayout.PropertyField(serialized.luxAtDistance, s_Styles.luxAtDistance);
-                if (EditorGUI.EndChangeCheck())
-                {
-                    serialized.luxAtDistance.floatValue = Mathf.Max(serialized.luxAtDistance.floatValue, 0.01f);
-                }
-                EditorGUI.indentLevel--;
-            }
-
-            if ((lightType == LightType.Spot || lightType == LightType.Pyramid)
-                // Display reflector only when showing additional properties.
-                && (lightUnit == (int)PunctualLightUnit.Lumen && k_AdditionalPropertiesState[AdditionalProperties.Emission]))
-            {
-                EditorGUI.indentLevel++;
-                EditorGUILayout.PropertyField(serialized.enableSpotReflector, s_Styles.enableSpotReflector);
-                EditorGUI.indentLevel--;
-            }
 
             if (lightType != LightType.Directional)
             {
@@ -831,11 +849,11 @@ namespace UnityEditor.Rendering.HighDefinition
 #else
                 serialized.settings.DrawRange(false);
 #endif
-                // Make sure the range is not 0.0
-                serialized.settings.range.floatValue = Mathf.Max(0.001f, serialized.settings.range.floatValue);
-
                 if (EditorGUI.EndChangeCheck())
                 {
+                    // Make sure the range is not 0.0
+                    serialized.settings.range.floatValue = Mathf.Max(0.001f, serialized.settings.range.floatValue);
+                    
                     // For GI we need to detect any change on additional data and call SetLightDirty + For intensity we need to detect light shape change
                     serialized.needUpdateAreaLightEmissiveMeshComponents = true;
                     SetLightsDirty(owner); // Should be apply only to parameter that's affect GI, but make the code cleaner
@@ -967,8 +985,6 @@ namespace UnityEditor.Rendering.HighDefinition
                 }
             }
 
-            if (useBaking && !UnityEditor.EditorSettings.enableCookiesInLightmapper)
-                EditorGUILayout.HelpBox(s_Styles.cookieBaking, MessageType.Warning);
             if (cookie.width != cookie.height)
                 EditorGUILayout.HelpBox(s_Styles.cookieNonPOT, MessageType.Warning);
             if (cookie.width < LightCookieManager.k_MinCookieSize || cookie.height < LightCookieManager.k_MinCookieSize)
@@ -1094,7 +1110,11 @@ namespace UnityEditor.Rendering.HighDefinition
                 --EditorGUI.indentLevel;
             }
 
-            EditorGUILayout.PropertyField(serialized.includeForRayTracing, s_Styles.includeLightForRayTracing);
+            if (lightType != LightType.Disc)
+            {
+                EditorGUILayout.PropertyField(serialized.includeForRayTracing, s_Styles.includeLightForRayTracing);
+            }
+            EditorGUILayout.PropertyField(serialized.includeForPathTracing, s_Styles.includeLightForPathTracing);
 
             if (EditorGUI.EndChangeCheck())
             {
@@ -1106,16 +1126,26 @@ namespace UnityEditor.Rendering.HighDefinition
 
         static void DrawVolumetric(SerializedHDLight serialized, Editor owner)
         {
-            EditorGUILayout.PropertyField(serialized.useVolumetric, s_Styles.volumetricEnable);
-            using (new EditorGUI.DisabledScope(!serialized.useVolumetric.boolValue))
-            using (new EditorGUI.IndentLevelScope())
+            LightType lightType = serialized.settings.lightType.GetEnumValue<LightType>();
+
+            // Right now the only supported area light type in path tracing is rectangle lights.
+            // Modify this if this changes to add new area light shapees.
+            if (lightType == LightType.Rectangle)
             {
-                EditorGUILayout.PropertyField(serialized.volumetricDimmer, s_Styles.volumetricDimmer);
-                EditorGUILayout.Slider(serialized.volumetricShadowDimmer, 0.0f, 1.0f, s_Styles.volumetricShadowDimmer);
-                LightType lightType = serialized.settings.lightType.GetEnumValue<LightType>();
-                if (lightType != LightType.Directional)
+                EditorGUILayout.HelpBox(s_Styles.areaLightVolumetricsWarning.text, MessageType.Warning);
+            }
+
+            EditorGUILayout.PropertyField(serialized.useVolumetric, s_Styles.volumetricEnable);
+            {
+                using (new EditorGUI.DisabledScope(!serialized.useVolumetric.boolValue))
+                using (new EditorGUI.IndentLevelScope())
                 {
-                    EditorGUILayout.PropertyField(serialized.volumetricFadeDistance, s_Styles.volumetricFadeDistance);
+                    EditorGUILayout.PropertyField(serialized.volumetricDimmer, s_Styles.volumetricDimmer);
+                    EditorGUILayout.Slider(serialized.volumetricShadowDimmer, 0.0f, 1.0f, s_Styles.volumetricShadowDimmer);
+                    if (lightType != LightType.Directional)
+                    {
+                        EditorGUILayout.PropertyField(serialized.volumetricFadeDistance, s_Styles.volumetricFadeDistance);
+                    }
                 }
             }
         }
@@ -1144,6 +1174,9 @@ namespace UnityEditor.Rendering.HighDefinition
         {
             DrawEnableShadowMap(serialized, owner);
         }
+
+        static IntScalableSetting ShadowResolutionUnknown3Levels = new IntScalableSetting(new[] { -1, -1, -1,}, ScalableSettingSchemaId.With3Levels);
+        static IntScalableSetting ShadowResolutionUnknown4Levels = new IntScalableSetting(new[] { -1, -1, -1, -1 }, ScalableSettingSchemaId.With4Levels);
 
         static void DrawShadowMapContent(SerializedHDLight serialized, Editor owner)
         {
@@ -1246,8 +1279,13 @@ namespace UnityEditor.Rendering.HighDefinition
                 {
                     if (serialized.HasMultipleLightTypes(owner))
                     {
+                        // Get the schema for the first light type selected
+                        var scalableSetting = ScalableSettings.ShadowResolution(lightType, hdrp);
+
                         serialized.shadowResolution.LevelAndIntGUILayout(
-                            s_Styles.shadowResolution, null, null
+                            s_Styles.shadowResolution,
+                            scalableSetting.schemaId.Equals(ScalableSettingSchemaId.With3Levels) ? ShadowResolutionUnknown3Levels : ShadowResolutionUnknown4Levels,
+                            hdrp.name
                         );
                     }
                     else
@@ -1260,7 +1298,9 @@ namespace UnityEditor.Rendering.HighDefinition
                     }
 
                     if (change.changed)
-                        serialized.shadowResolution.@override.intValue = Mathf.Max(HDShadowManager.k_MinShadowMapResolution, serialized.shadowResolution.@override.intValue);
+                        serialized.shadowResolution.@override.intValue =  serialized.shadowResolution.@override.intValue is >= 1 and <= HDShadowManager.k_MinShadowMapResolution - 1 ? HDShadowManager.k_MinShadowMapResolution
+                            : Mathf.Max(0, serialized.shadowResolution.@override.intValue >= HDShadowManager.k_MaxShadowMapResolution ? HDShadowManager.k_MaxShadowMapResolution : serialized.shadowResolution.@override.intValue);
+
                 }
 
                 if (lightType != LightType.Directional)
@@ -1495,27 +1535,41 @@ namespace UnityEditor.Rendering.HighDefinition
                 EditorGUILayout.Slider(serialized.shadowNearPlane, 0, HDShadowUtils.k_MaxShadowNearPlane, s_Styles.shadowNearPlane);
         }
 
-        static bool HasShadowQualitySettingsUI(HDShadowFilteringQuality quality, SerializedHDLight serialized, Editor owner)
+        static bool HasPunctualShadowQualitySettingsUI(HDShadowFilteringQuality quality, SerializedHDLight serialized, Editor owner)
         {
-            // Handle quality where there is nothing to draw directly here
-            // No PCSS for now with directional light
+            var lightType = serialized.settings.lightType.GetEnumValue<LightType>();
+            if (lightType != LightType.Point && lightType != LightType.Spot && lightType != LightType.Pyramid && lightType != LightType.Box)
+                return false;
+
+            // Need to test quality here to not display an empty foldout
             if (quality == HDShadowFilteringQuality.Medium || quality == HDShadowFilteringQuality.Low)
                 return false;
 
-            // Draw shadow settings using the current shadow algorithm
+            HDShadowInitParameters hdShadowInitParameters = HDRenderPipeline.currentAsset.currentPlatformRenderPipelineSettings.hdShadowInitParams;
+            return hdShadowInitParameters.punctualShadowFilteringQuality == quality;
+        }
+
+        static bool HasDirectionalShadowQualitySettingsUI(HDShadowFilteringQuality quality, SerializedHDLight serialized, Editor owner)
+        {
+            if (serialized.settings.lightType.GetEnumValue<LightType>() != LightType.Directional)
+                return false;
+
+            // Need to test quality here to not display an empty foldout
+            if (quality == HDShadowFilteringQuality.Medium || quality == HDShadowFilteringQuality.Low)
+                return false;
 
             HDShadowInitParameters hdShadowInitParameters = HDRenderPipeline.currentAsset.currentPlatformRenderPipelineSettings.hdShadowInitParams;
-            return hdShadowInitParameters.shadowFilteringQuality == quality;
+            return hdShadowInitParameters.directionalShadowFilteringQuality == quality;
         }
 
         static bool HasAreaShadowQualitySettingsUI(HDAreaShadowFilteringQuality quality, SerializedHDLight serialized, Editor owner)
         {
-            // Handle quality where there is nothing to draw directly here
-            // No PCSS for now with directional light
-            if (quality == HDAreaShadowFilteringQuality.Medium)
+            if (!serialized.settings.lightType.GetEnumValue<LightType>().IsArea())
                 return false;
 
-            // Draw shadow settings using the current shadow algorithm
+            // Need to test quality here to not display an empty foldout
+            if (quality == HDAreaShadowFilteringQuality.Medium)
+                return false;
 
             HDShadowInitParameters hdShadowInitParameters = HDRenderPipeline.currentAsset.currentPlatformRenderPipelineSettings.hdShadowInitParams;
             return hdShadowInitParameters.areaShadowFilteringQuality == quality;
@@ -1524,27 +1578,36 @@ namespace UnityEditor.Rendering.HighDefinition
         static void DrawLowShadowSettingsContent(SerializedHDLight serialized, Editor owner)
         {
             // Currently there is nothing to display here
-            // when adding something, update IsShadowSettings
+            // when adding something, update HasDirectionalShadowQualitySettingsUI, HasPunctualShadowQualitySettingsUI and HasAreaShadowQualitySettingsUI
         }
 
         static void DrawMediumShadowSettingsContent(SerializedHDLight serialized, Editor owner)
         {
             // Currently there is nothing to display here
-            // when adding something, update IsShadowSettings
+            // when adding something, update HasDirectionalShadowQualitySettingsUI, HasPunctualShadowQualitySettingsUI and HasAreaShadowQualitySettingsUI
         }
 
         static void DrawHighShadowSettingsContent(SerializedHDLight serialized, Editor owner)
         {
-            EditorGUILayout.PropertyField(serialized.blockerSampleCount, s_Styles.blockerSampleCount);
-            EditorGUILayout.PropertyField(serialized.filterSampleCount, s_Styles.filterSampleCount);
-            EditorGUILayout.PropertyField(serialized.minFilterSize, s_Styles.minFilterSize);
-            GUIContent styleForScale = s_Styles.radiusScaleForSoftness;
             if (serialized.settings.lightType.GetEnumValue<LightType>() == LightType.Directional)
             {
-                styleForScale = s_Styles.diameterScaleForSoftness;
+                EditorGUILayout.PropertyField(serialized.dirLightPCSSMaxPenumbraSize, s_Styles.dirLightPCSSMaxPenumbraSize);
+                EditorGUILayout.PropertyField(serialized.dirLightPCSSMaxSamplingDistance, s_Styles.dirLightPCSSMaxSamplingDistance);
+                EditorGUILayout.PropertyField(serialized.dirLightPCSSMinFilterSizeTexels, s_Styles.dirLightPCSSMinFilterSizeTexels);
+                EditorGUILayout.PropertyField(serialized.dirLightPCSSMinFilterMaxAngularDiameter, s_Styles.dirLightPCSSMinFilterMaxAngularDiameter);
+                EditorGUILayout.PropertyField(serialized.dirLightPCSSBlockerSearchAngularDiameter, s_Styles.dirLightPCSSBlockerSearchAngularDiameter);
+                EditorGUILayout.PropertyField(serialized.dirLightPCSSBlockerSamplingClumpExponent, s_Styles.dirLightPCSSBlockerSamplingClumpExponent);
+                EditorGUILayout.PropertyField(serialized.dirLightPCSSBlockerSampleCount, s_Styles.dirLightPCSSBlockerSampleCount);
+                EditorGUILayout.PropertyField(serialized.dirLightPCSSFilterSampleCount, s_Styles.dirLightPCSSFilterSampleCount);
+            }
+            else
+            {
+                EditorGUILayout.PropertyField(serialized.blockerSampleCount, s_Styles.blockerSampleCount);
+                EditorGUILayout.PropertyField(serialized.filterSampleCount, s_Styles.filterSampleCount);
+                EditorGUILayout.PropertyField(serialized.minFilterSize, s_Styles.minFilterSize);
             }
             EditorGUI.BeginChangeCheck();
-            EditorGUILayout.PropertyField(serialized.scaleForSoftness, styleForScale);
+            EditorGUILayout.PropertyField(serialized.scaleForSoftness, s_Styles.radiusScaleForSoftness);
             if (EditorGUI.EndChangeCheck())
             {
                 //Clamp the value and also affect baked shadows

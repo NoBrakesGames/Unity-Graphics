@@ -28,6 +28,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public float angularDiameter;
         public float volumetricFadeDistance;
         public bool includeForRayTracing;
+        public bool includeForPathTracing;
         public bool useScreenSpaceShadows;
         public bool useRayTracedShadows;
         public bool colorShadow;
@@ -44,17 +45,13 @@ namespace UnityEngine.Rendering.HighDefinition
         public float shapeRadius;
         public float barnDoorLength;
         public float barnDoorAngle;
-        public float flareSize;
-        public float flareFalloff;
         public bool affectVolumetric;
         public bool affectDiffuse;
         public bool affectSpecular;
         public bool applyRangeAttenuation;
         public bool penumbraTint;
         public bool interactsWithSky;
-        public Color surfaceTint;
         public Color shadowTint;
-        public Color flareTint;
     }
 
     internal struct HDAdditionalLightDataUpdateInfo
@@ -84,7 +81,15 @@ namespace UnityEngine.Rendering.HighDefinition
         public float customSpotLightShadowCone;
         public float cachedShadowTranslationUpdateThreshold;
         public float cachedShadowAngleUpdateThreshold;
+        public float dirLightPCSSMaxPenumbraSize;
+        public float dirLightPCSSMaxSamplingDistance;
+        public float dirLightPCSSMinFilterSizeTexels;
+        public float dirLightPCSSMinFilterMaxAngularDiameter;
+        public float dirLightPCSSBlockerSearchAngularDiameter;
+        public float dirLightPCSSBlockerSamplingClumpExponent;
         public int lightIdxForCachedShadows;
+        public byte dirLightPCSSBlockerSampleCount;
+        public byte dirLightPCSSFilterSampleCount;
         public byte filterSampleCount;
         public byte blockerSampleCount;
         public byte kernelSize;
@@ -128,6 +133,8 @@ namespace UnityEngine.Rendering.HighDefinition
             set => flags[UpdateUponLightMovementFlagsIndex] = value;
         }
 
+        public bool hasCachedComponent => shadowUpdateMode != ShadowUpdateMode.EveryFrame;
+
         public void Set(HDAdditionalLightData additionalLightData)
         {
             shadowNearPlane = additionalLightData.shadowNearPlane;
@@ -149,6 +156,14 @@ namespace UnityEngine.Rendering.HighDefinition
             customSpotLightShadowCone = additionalLightData.customSpotLightShadowCone;
             cachedShadowTranslationUpdateThreshold = additionalLightData.cachedShadowTranslationUpdateThreshold;
             cachedShadowAngleUpdateThreshold = additionalLightData.cachedShadowAngleUpdateThreshold;
+            dirLightPCSSMaxPenumbraSize = additionalLightData.dirLightPCSSMaxPenumbraSize;
+            dirLightPCSSMaxSamplingDistance = additionalLightData.dirLightPCSSMaxSamplingDistance;
+            dirLightPCSSMinFilterSizeTexels = additionalLightData.dirLightPCSSMinFilterSizeTexels;
+            dirLightPCSSMinFilterMaxAngularDiameter = additionalLightData.dirLightPCSSMinFilterMaxAngularDiameter;
+            dirLightPCSSBlockerSearchAngularDiameter = additionalLightData.dirLightPCSSBlockerSearchAngularDiameter;
+            dirLightPCSSBlockerSamplingClumpExponent = additionalLightData.dirLightPCSSBlockerSamplingClumpExponent;
+            dirLightPCSSBlockerSampleCount = (byte)additionalLightData.dirLightPCSSBlockerSampleCount;
+            dirLightPCSSFilterSampleCount = (byte)additionalLightData.dirLightPCSSFilterSampleCount;
             blockerSampleCount = (byte)additionalLightData.blockerSampleCount;
             filterSampleCount = (byte)additionalLightData.filterSampleCount;
             kernelSize = (byte)additionalLightData.kernelSize;
@@ -189,6 +204,10 @@ namespace UnityEngine.Rendering.HighDefinition
         public DynamicArray<SpotLightCallbackData> customViewCallbackEvents => m_CustomViewCallbackEvents;
 
         public HDShadowRequestDatabase shadowRequests => HDShadowRequestDatabase.instance;
+
+        // This array tracks directional lights for the PBR sky
+        // We need this as VisibleLight result from culling ignores lights with intensity == 0
+        public List<HDAdditionalLightData> directionalLights = new();
 
         //Access of main instance
         static public HDLightRenderDatabase instance
@@ -376,6 +395,13 @@ namespace UnityEngine.Rendering.HighDefinition
             if (additionalLightData.CustomViewCallbackEvent != null)
                 ++m_ValidCustomViewCallbackEvents;
             ++m_AttachedGameObjects;
+
+            if (additionalLightData.legacyLight.type == LightType.Directional
+#if UNITY_EDITOR
+                 && !UnityEditor.SceneManagement.EditorSceneManager.IsPreviewScene(additionalLightData.gameObject.scene)
+#endif
+                )
+                directionalLights.Add(additionalLightData);
         }
 
         // Destroys a light render entity.
@@ -388,8 +414,14 @@ namespace UnityEngine.Rendering.HighDefinition
             LightEntityInfo entityData = m_LightEntities[lightEntity.entityIndex];
             m_LightsToEntityItem.Remove(entityData.lightInstanceID);
 
-            if (m_HDAdditionalLightData[entityData.dataIndex] != null)
+            var lightData = m_HDAdditionalLightData[entityData.dataIndex];
+            if (lightData != null)
+            {
+                int idx = directionalLights.FindIndex((x) => ReferenceEquals(x, lightData));
+                if (idx != -1) directionalLights.RemoveAt(idx);
+
                 --m_AttachedGameObjects;
+            }
 
             FreeHDShadowRequests(lightEntity);
 
@@ -581,13 +613,13 @@ namespace UnityEngine.Rendering.HighDefinition
         private int m_AttachedGameObjects = 0;
         private HDLightRenderEntity m_DefaultLightEntity = HDLightRenderEntity.Invalid;
 
-        private NativeList<LightEntityInfo> m_LightEntities = new NativeList<LightEntityInfo>(Allocator.Persistent);
+        private NativeList<LightEntityInfo> m_LightEntities;
 
         // Technically only used for spot lights. Not good for perf, would like to deprecate this whenever possible.
         private DynamicArray<SpotLightCallbackData> m_CustomViewCallbackEvents = new DynamicArray<SpotLightCallbackData>();
         private int m_ValidCustomViewCallbackEvents;
-        private NativeList<HDShadowRequestSetHandle> m_ShadowRequestSetHandles = new NativeList<HDShadowRequestSetHandle>(Allocator.Persistent);
-        private NativeList<HDShadowRequestSetHandle> m_ShadowRequestSetPackedHandles = new NativeList<HDShadowRequestSetHandle>(Allocator.Persistent);
+        private NativeList<HDShadowRequestSetHandle> m_ShadowRequestSetHandles;
+        private NativeList<HDShadowRequestSetHandle> m_ShadowRequestSetPackedHandles;
 
         private Queue<int> m_FreeIndices = new Queue<int>();
         private Dictionary<int, LightEntityInfo> m_LightsToEntityItem = new Dictionary<int, LightEntityInfo>();

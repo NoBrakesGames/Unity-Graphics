@@ -1,15 +1,54 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Attribute/{0}/Direction & Speed/{1}", experimental = true, variantProvider = typeof(VelocityBaseProvider))]
+    class VelocityRandomVariantProvider : VariantProvider
+    {
+        public override IEnumerable<Variant> GetVariants()
+        {
+            foreach (var mode in Enum.GetValues(typeof(AttributeCompositionMode)).Cast<AttributeCompositionMode>())
+            {
+                // Skip the composition mode from main provider
+                if (mode == AttributeCompositionMode.Overwrite)
+                    continue;
+
+                var composition = VFXBlockUtility.GetNameString(mode);
+
+                yield return new Variant(
+                    composition.Label().AppendLiteral("Random Velocity from Direction & Speed"),
+                    null,
+                    typeof(VelocityRandomize),
+                    new[]
+                    {
+                        new KeyValuePair<string, object>("composition", mode),
+                    });
+            }
+        }
+    }
+
+    class VelocityRandomProvider : VariantProvider
+    {
+        public override IEnumerable<Variant> GetVariants()
+        {
+            yield return new Variant(
+                "Set".Label().AppendLiteral("Velocity from Direction & Speed").AppendLabel("Random Direction"),
+                VelocityBase.Category,
+                typeof(VelocityRandomize),
+                new[]
+                {
+                    new KeyValuePair<string, object>("composition", AttributeCompositionMode.Overwrite),
+                },
+                () => new VelocityRandomVariantProvider());
+        }
+    }
+
+    [VFXInfo(experimental = true, variantProvider = typeof(VelocityRandomProvider))]
     class VelocityRandomize : VelocityBase
     {
-        public override string name { get { return string.Format(base.name, "Random Direction"); } }
-        protected override bool altersDirection { get { return true; } }
+        public override string name => base.name.AppendLabel("Random Direction");
+        protected override bool altersDirection => true;
 
         public override IEnumerable<VFXAttributeInfo> attributes
         {

@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using System.Collections.Generic;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -85,6 +85,7 @@ namespace UnityEngine.Rendering.HighDefinition
             public int raySteps;
             public float nearClipPlane;
             public float farClipPlane;
+            public bool transparent;
 
             // Camera data
             public int width;
@@ -128,14 +129,17 @@ namespace UnityEngine.Rendering.HighDefinition
             public TextureHandle gbuffer1;
             public TextureHandle gbuffer2;
             public TextureHandle gbuffer3;
-            public TextureHandle distanceBuffer;
+            public TextureHandle tmpDistanceBuffer;
 
             // Output textures
             public TextureHandle litBuffer;
+            public TextureHandle distanceBuffer;
             public TextureHandle rayCountTexture;
 
             // Data textures
             public Texture skyTexture;
+
+            public bool enableDecals;
         }
 
         static void BinRays(CommandBuffer cmd, in DeferredLightingRTParameters config, RTHandle directionBuffer, int texWidth, int texHeight)
@@ -174,10 +178,21 @@ namespace UnityEngine.Rendering.HighDefinition
             int numTilesRayBinY = (texHeight + (8 - 1)) / 8;
 
             // Prepass textures
+            if (data.parameters.transparent)
+            {
+                // Use the transparent pre-pass depth for ray start position, and do not filter using stencil
+                cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._InputDepthTexture, data.depthStencilBuffer, 0, RenderTextureSubElement.Depth);
+                cmd.SetComputeIntParam(data.parameters.rayMarchingCS, HDShaderIDs._DeferredStencilBit, 0);
+            }
+            else
+            {
+                // Use the depth pyramid for ray start position (since it is already bound for hit testing), filter pixels using stencil
+                cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._InputDepthTexture, data.depthPyramid);
+                cmd.SetComputeIntParam(data.parameters.rayMarchingCS, HDShaderIDs._DeferredStencilBit, (int)StencilUsage.RequiresDeferredLighting);
+            }
             cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._DepthTexture, data.depthPyramid);
             cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._NormalBufferTexture, data.normalBuffer);
             cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._StencilTexture, data.depthStencilBuffer, 0, RenderTextureSubElement.Stencil);
-            cmd.SetComputeIntParam(data.parameters.rayMarchingCS, HDShaderIDs._DeferredStencilBit, (int)StencilUsage.RequiresDeferredLighting);
             cmd.SetComputeBufferParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._DepthPyramidMipLevelOffsets, data.parameters.mipChainBuffer);
 
             // Bind the input parameters
@@ -200,18 +215,27 @@ namespace UnityEngine.Rendering.HighDefinition
             cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._GBufferTextureRW[1], data.gbuffer1);
             cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._GBufferTextureRW[2], data.gbuffer2);
             cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._GBufferTextureRW[3], data.gbuffer3);
-            cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._RaytracingDistanceBuffer, data.distanceBuffer);
+            cmd.SetComputeTextureParam(data.parameters.rayMarchingCS, marchingKernel, HDShaderIDs._RaytracingDistanceBuffer, data.tmpDistanceBuffer);
 
             // Run the ray marching
             cmd.DispatchCompute(data.parameters.rayMarchingCS, marchingKernel, numTilesRayBinX, numTilesRayBinY, data.parameters.viewCount);
         }
 
-        TextureHandle DeferredLightingRT(RenderGraph renderGraph, in DeferredLightingRTParameters parameters,
+        struct RayTracingDefferedLightLoopOutput
+        {
+            public TextureHandle lightingBuffer;
+            public TextureHandle distanceBuffer;
+        }
+
+        RayTracingDefferedLightLoopOutput DeferredLightingRT(RenderGraph renderGraph,
+            HDCamera hdCamera,
+            in DeferredLightingRTParameters parameters,
             TextureHandle directionBuffer,
             in PrepassOutput prepassOutput,
             Texture skyTexture,
             TextureHandle rayCountTexture)
         {
+            RayTracingDefferedLightLoopOutput output = new RayTracingDefferedLightLoopOutput();
             using (var builder = renderGraph.AddRenderPass<DeferredLightingRTRPassData>("Deferred Lighting Ray Tracing", out var passData, ProfilingSampler.Get(HDProfileId.RaytracingDeferredLighting)))
             {
                 builder.EnableAsyncCompute(false);
@@ -242,20 +266,24 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 // Temporary buffers
                 passData.gbuffer0 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R8G8B8A8_SRGB, enableRandomWrite = true, name = "GBuffer0" });
+                { format = GraphicsFormat.R8G8B8A8_SRGB, enableRandomWrite = true, name = "GBuffer0" });
                 passData.gbuffer1 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R8G8B8A8_UNorm, enableRandomWrite = true, name = "GBuffer1" });
+                { format = GraphicsFormat.R8G8B8A8_UNorm, enableRandomWrite = true, name = "GBuffer1" });
                 passData.gbuffer2 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R8G8B8A8_UNorm, enableRandomWrite = true, name = "GBuffer2" });
+                { format = GraphicsFormat.R8G8B8A8_UNorm, enableRandomWrite = true, name = "GBuffer2" });
                 passData.gbuffer3 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = Builtin.GetLightingBufferFormat(), enableRandomWrite = true, name = "GBuffer3" });
-                passData.distanceBuffer = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R32_SFloat, enableRandomWrite = true, name = "Distance Buffer" });
+                { format = Builtin.GetLightingBufferFormat(), enableRandomWrite = true, name = "GBuffer3" });
+                passData.tmpDistanceBuffer = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
+                { format = GraphicsFormat.R32_SFloat, enableRandomWrite = true, name = "TMP Distance Buffer" });
 
                 // Output buffers
                 passData.rayCountTexture = builder.ReadWriteTexture(rayCountTexture);
                 passData.litBuffer = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Deferred Lighting Result" }));
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Deferred Lighting Result" }));
+                passData.distanceBuffer = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
+                { format = GraphicsFormat.R32_SFloat, enableRandomWrite = true, name = "Distance Buffer" }));
+
+                passData.enableDecals = hdCamera.frameSettings.IsEnabled(FrameSettingsField.Decals);
 
                 builder.SetRenderFunc(
                     (DeferredLightingRTRPassData data, RenderGraphContext ctx) =>
@@ -309,18 +337,18 @@ namespace UnityEngine.Rendering.HighDefinition
                         ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._RayCountTexture, data.rayCountTexture);
 
                         // Bind all input parameter
-                        ctx.cmd.SetRayTracingIntParams(data.parameters.gBufferRaytracingRT, HDShaderIDs._RayTracingLayerMask, data.parameters.layerMask);
+                        ctx.cmd.SetRayTracingIntParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._RayTracingLayerMask, data.parameters.layerMask);
                         ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._DepthTexture, data.depthStencilBuffer);
                         ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._NormalBufferTexture, data.normalBuffer);
                         ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._RaytracingDirectionBuffer, data.directionBuffer);
-                        ctx.cmd.SetRayTracingIntParams(data.parameters.gBufferRaytracingRT, HDShaderIDs._RaytracingHalfResolution, data.parameters.halfResolution ? 1 : 0);
+                        ctx.cmd.SetRayTracingIntParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._RaytracingHalfResolution, data.parameters.halfResolution ? 1 : 0);
 
                         // Bind the output textures
                         ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._GBufferTextureRW[0], data.gbuffer0);
                         ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._GBufferTextureRW[1], data.gbuffer1);
                         ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._GBufferTextureRW[2], data.gbuffer2);
                         ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._GBufferTextureRW[3], data.gbuffer3);
-                        ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._RaytracingDistanceBuffer, data.distanceBuffer);
+                        ctx.cmd.SetRayTracingTextureParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._RaytracingDistanceBuffer, data.tmpDistanceBuffer);
 
                         // Compute the actual resolution that is needed base on the resolution
                         uint widthResolution = (uint)data.parameters.width;
@@ -332,6 +360,12 @@ namespace UnityEngine.Rendering.HighDefinition
                         // Only compute diffuse lighting if required
                         CoreUtils.SetKeyword(ctx.cmd, "MINIMAL_GBUFFER", data.parameters.diffuseLightingOnly);
 
+                        if (data.enableDecals)
+                        {
+                            DecalSystem.instance.SetAtlas(ctx.cmd);
+                            data.parameters.lightCluster.BindLightClusterData(ctx.cmd);
+                        }
+
                         if (data.parameters.rayBinning)
                         {
                             // Evaluate the dispatch data.parameters
@@ -342,8 +376,8 @@ namespace UnityEngine.Rendering.HighDefinition
                             ctx.cmd.SetRayTracingIntParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._BufferSizeX, bufferSizeX);
 
                             // Inject the data for the additional views
-                            ctx.cmd.SetRayTracingIntParams(data.parameters.gBufferRaytracingRT, HDShaderIDs._RayBinViewOffset, bufferSizeX * bufferSizeY);
-                            ctx.cmd.SetRayTracingIntParams(data.parameters.gBufferRaytracingRT, HDShaderIDs._RayBinTileViewOffset, numTilesRayBinX * numTilesRayBinY);
+                            ctx.cmd.SetRayTracingIntParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._RayBinViewOffset, bufferSizeX * bufferSizeY);
+                            ctx.cmd.SetRayTracingIntParam(data.parameters.gBufferRaytracingRT, HDShaderIDs._RayBinTileViewOffset, numTilesRayBinX * numTilesRayBinY);
 
                             // A really nice tip is to dispatch the rays as a 1D array instead of 2D, the performance difference has been measured.
                             uint dispatchSize = (uint)(bufferSizeX * bufferSizeY);
@@ -366,7 +400,7 @@ namespace UnityEngine.Rendering.HighDefinition
                         ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._DepthTexture, data.depthStencilBuffer);
                         ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._NormalBufferTexture, data.normalBuffer);
                         ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._RaytracingDirectionBuffer, data.directionBuffer);
-                        ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._RaytracingDistanceBuffer, data.distanceBuffer);
+                        ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._RaytracingDistanceBuffer, data.tmpDistanceBuffer);
                         ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._GBufferTexture[0], data.gbuffer0);
                         ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._GBufferTexture[1], data.gbuffer1);
                         ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._GBufferTexture[2], data.gbuffer2);
@@ -375,6 +409,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
                         // Bind the output texture
                         ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._RaytracingLitBufferRW, data.litBuffer);
+                        ctx.cmd.SetComputeTextureParam(data.parameters.deferredRaytracingCS, currentKernel, HDShaderIDs._RaytracingDistanceBufferRW, data.distanceBuffer);
 
                         // Evaluate the dispatch parameters
                         int areaTileSize = 8;
@@ -385,7 +420,10 @@ namespace UnityEngine.Rendering.HighDefinition
                         ctx.cmd.DispatchCompute(data.parameters.deferredRaytracingCS, currentKernel, numTilesXHR, numTilesYHR, data.parameters.viewCount);
                     });
 
-                return passData.litBuffer;
+                // Output the two buffers we need
+                output.lightingBuffer = passData.litBuffer;
+                output.distanceBuffer = passData.distanceBuffer;
+                return output;
             }
         }
     }

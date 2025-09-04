@@ -3,21 +3,38 @@ using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.VFX;
-using UnityEngine.Rendering;
 using UnityEditor.VFX.Operator;
 
 namespace UnityEditor.VFX.Block
 {
     class PositionMeshProvider : VariantProvider
     {
-        protected sealed override Dictionary<string, object[]> variants { get; } = new Dictionary<string, object[]>
+        public override IEnumerable<Variant> GetVariants()
         {
-            {"sourceMesh", Enum.GetValues(typeof(SampleMesh.SourceType)).Cast<object>().ToArray()},
-            {"compositionPosition", new object[] { AttributeCompositionMode.Overwrite } }
-        };
+            yield return new Variant(
+                "Set".Label(false).AppendLiteral("Position Mesh", false).AppendLabel("Mesh", false),
+                "Position Shape",
+                typeof(PositionMesh),
+                new[]
+                {
+                    new KeyValuePair<string, object>("sourceMesh", SampleMesh.SourceType.Mesh),
+                    new KeyValuePair<string, object>("compositionPosition", AttributeCompositionMode.Overwrite)
+                });
+
+            yield return new Variant(
+                "Set".Label(false).AppendLiteral("Position Mesh", false).AppendLabel("Skinned Mesh", false),
+                "Position Shape",
+                typeof(PositionMesh),
+                new[]
+                {
+                    new KeyValuePair<string, object>("sourceMesh", SampleMesh.SourceType.SkinnedMeshRenderer),
+                    new KeyValuePair<string, object>("compositionPosition", AttributeCompositionMode.Overwrite)
+                });
+        }
     }
 
-    [VFXInfo(category = "Attribute/position/Composition/Set", variantProvider = typeof(PositionMeshProvider))]
+    [VFXHelpURL("Block-SetPosition(Mesh)")]
+    [VFXInfo(variantProvider = typeof(PositionMeshProvider))]
     class PositionMesh : PositionBase
     {
         [VFXSetting, SerializeField, Tooltip("Specifies how Unity handles the sample when the custom vertex index is out the out of bounds of the vertex array.")]
@@ -35,14 +52,6 @@ namespace UnityEditor.VFX.Block
         [VFXSetting, SerializeField, Tooltip("Specifies the transform to apply to the root bone retrieved from the Skinned Mesh Renderer.")]
         private SampleMesh.SkinnedRootTransform skinnedTransform = SampleMesh.SkinnedRootTransform.ApplyLocalRootTransform;
 
-        [Flags]
-        enum Orientation
-        {
-            None = 0,
-            Direction = 1,
-            Axes = 2,
-        }
-
         [VFXSetting(VFXSettingAttribute.VisibleFlags.InInspector), SerializeField, Tooltip("Orient particles conform to the geometry of the mesh they are sampled from.\nThe AxisX/AxisY/AxisZ attributes and/or the attribute direction can be written.")]
         private Orientation applyOrientation = Orientation.Direction;
 
@@ -51,9 +60,9 @@ namespace UnityEditor.VFX.Block
             get
             {
                 if (sourceMesh == SampleMesh.SourceType.Mesh)
-                    return VFXBlockUtility.GetNameString(compositionPosition) + " Position (Mesh)";
+                    return VFXBlockUtility.GetNameString(compositionPosition).Label(false).AppendLiteral("Position Mesh", false).AppendLabel("Mesh");
                 else
-                    return VFXBlockUtility.GetNameString(compositionPosition) + " Position (Skinned Mesh)";
+                    return VFXBlockUtility.GetNameString(compositionPosition).Label(false).AppendLiteral("Position Mesh", false).AppendLabel("Skinned Mesh");
             }
         }
 
@@ -145,15 +154,15 @@ namespace UnityEditor.VFX.Block
             }
         }
 
-        internal override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal override void GenerateErrors(VFXErrorReporter report)
         {
-            base.GenerateErrors(manager);
+            base.GenerateErrors(report);
 
             var transformSlot = inputSlots.Last();
             if (actualSkinnedTransform == SampleMesh.SkinnedRootTransform.ApplyWorldRootTransform &&
                 transformSlot.space == VFXSpace.Local)
             {
-                manager.RegisterError("MixingSMRWorldAndLocalPostTransformBlock", VFXErrorType.Warning, SampleMesh.kMixingSMRWorldAndLocalPostTransformMsg);
+                report.RegisterError("MixingSMRWorldAndLocalPostTransformBlock", VFXErrorType.Warning, SampleMesh.kMixingSMRWorldAndLocalPostTransformMsg, this);
             }
         }
 
@@ -271,10 +280,10 @@ namespace UnityEditor.VFX.Block
                 {
                     var sourceTransform = sampling[0];
 
-                    var i = new VFXExpressionMatrixToVector3s(sourceTransform, VFXValue.Constant(0));
-                    var j = new VFXExpressionMatrixToVector3s(sourceTransform, VFXValue.Constant(1));
-                    var k = new VFXExpressionMatrixToVector3s(sourceTransform, VFXValue.Constant(2));
-                    var p = new VFXExpressionMatrixToVector3s(sourceTransform, VFXValue.Constant(3));
+                    var i = new VFXExpressionMatrixToAxis(sourceTransform, VFXValue.Constant(0));
+                    var j = new VFXExpressionMatrixToAxis(sourceTransform, VFXValue.Constant(1));
+                    var k = new VFXExpressionMatrixToAxis(sourceTransform, VFXValue.Constant(2));
+                    var p = new VFXExpressionMatrixToAxis(sourceTransform, VFXValue.Constant(3));
 
                     yield return new VFXNamedExpression(i, "readAxisX");
                     yield return new VFXNamedExpression(j, "readAxisY");

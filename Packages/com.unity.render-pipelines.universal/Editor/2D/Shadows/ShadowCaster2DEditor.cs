@@ -49,6 +49,7 @@ namespace UnityEditor.Rendering.Universal
 
         private static class Styles
         {
+            public static GUIContent shadowShape2DProvider = EditorGUIUtility.TrTextContent("Shadow Shape 2D Provider", "");
             public static GUIContent castsShadows = EditorGUIUtility.TrTextContent("Casts Shadows", "Specifies if this renderer will cast shadows");
             public static GUIContent castingSourcePrefixLabel = EditorGUIUtility.TrTextContent("Casting Source", "Specifies the source used for projected shadows");
             public static GUIContent sortingLayerPrefixLabel = EditorGUIUtility.TrTextContent("Target Sorting Layers", "Apply shadows to the specified sorting layers.");
@@ -64,8 +65,10 @@ namespace UnityEditor.Rendering.Universal
         SerializedProperty m_ShadowMesh;
         SerializedProperty m_TrimEdge;
         SerializedProperty m_AlphaCutoff;
+        SerializedProperty m_ShadowShape2DProvider;
         SortingLayerDropDown m_SortingLayerDropDown;
         CastingSourceDropDown m_CastingSourceDropDown;
+       
 
         public void OnEnable()
         {
@@ -75,6 +78,7 @@ namespace UnityEditor.Rendering.Universal
             m_ShadowMesh = serializedObject.FindProperty("m_ShadowMesh");
             m_AlphaCutoff = serializedObject.FindProperty("m_AlphaCutoff");
             m_TrimEdge = m_ShadowMesh.FindPropertyRelative("m_TrimEdge");
+            m_ShadowShape2DProvider = serializedObject.FindProperty("m_ShadowShape2DProvider");
 
             m_SortingLayerDropDown = new SortingLayerDropDown();
             m_SortingLayerDropDown.OnEnable(serializedObject, "m_ApplyToSortingLayers");
@@ -109,12 +113,8 @@ namespace UnityEditor.Rendering.Universal
 
             m_CastingSourceDropDown.OnCastingSource(serializedObject, targets, Styles.castingSourcePrefixLabel);
 
-            if ((ShadowCaster2D.ShadowCastingSources)m_CastingSource.intValue == ShadowCaster2D.ShadowCastingSources.ShapeEditor)
-                ShadowCaster2DInspectorGUI<ShadowCaster2DShadowCasterShapeTool>();
-            else if (EditorToolManager.IsActiveTool<ShadowCaster2DShadowCasterShapeTool>())
-                ToolManager.RestorePreviousTool();
-
             EditorGUILayout.PropertyField(m_CastingOption, Styles.castingOption);
+            m_SortingLayerDropDown.OnTargetSortingLayers(serializedObject, targets, Styles.sortingLayerPrefixLabel, null);
 
             bool usingShapeProvider = m_CastingSource.intValue == (int)ShadowCaster2D.ShadowCastingSources.ShapeProvider;
             if (usingShapeProvider)
@@ -126,7 +126,13 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUILayout.PropertyField(m_AlphaCutoff, Styles.alphaCutoff);
             }
 
-            m_SortingLayerDropDown.OnTargetSortingLayers(serializedObject, targets, Styles.sortingLayerPrefixLabel, null);
+            if ((ShadowCaster2D.ShadowCastingSources)m_CastingSource.intValue == ShadowCaster2D.ShadowCastingSources.ShapeEditor)
+                ShadowCaster2DInspectorGUI<ShadowCaster2DShadowCasterShapeTool>();
+            else if (EditorToolManager.IsActiveTool<ShadowCaster2DShadowCasterShapeTool>())
+                ToolManager.RestorePreviousTool();
+
+            if(m_ShadowShape2DProvider != null)
+                EditorGUILayout.PropertyField(m_ShadowShape2DProvider, Styles.shadowShape2DProvider, true);
 
             serializedObject.ApplyModifiedProperties();
         }

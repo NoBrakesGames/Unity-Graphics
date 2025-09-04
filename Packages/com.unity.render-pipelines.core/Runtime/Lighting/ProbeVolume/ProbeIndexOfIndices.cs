@@ -15,7 +15,7 @@ namespace UnityEngine.Rendering
             static uint[] s_PackedValues = new uint[kUintPerEntry];
 
             internal Vector3Int minLocalIdx;
-            internal Vector3Int maxLocalIdx;
+            internal Vector3Int maxLocalIdxPlusOne;
             internal int firstChunkIndex;
             internal int minSubdiv;
 
@@ -27,20 +27,25 @@ namespace UnityEngine.Rendering
                     vals[i] = 0;
                 }
 
-                //  Note this packing is really really generous, I really think we can get rid of 1 uint at least if we assume we don't go extreme.
-                //  but this is encompassing all scenarios.
+                //  TODO: Note this packing is too generous, we can get rid of 1 uint
+                //  minLocalIndex is in cell space so it has an upper bound
+                //  first chunk index is also on 16bits max when using max memory budget
+                // see comment below about size of valid
                 //
                 // UINT 0:
-                //  FirstChunkIndex 29 bit
-                //  MinSubdiv       3  bit
+                //  FirstChunkIndex        29 bit
+                //  MinSubdiv              3  bit
                 // UINT 1:
-                //  minLocalIdx.x   10 bit
-                //  minLocalIdx.y   10 bit
-                //  minLocalIdx.z   10 bit
+                //  minLocalIdx.x          10 bit
+                //  minLocalIdx.y          10 bit
+                //  minLocalIdx.z          10 bit
                 // UINT 2:
-                //  maxLocalIdx.x   10 bit
-                //  maxLocalIdx.y   10 bit
-                //  maxLocalIdx.z   10 bit
+                //  sizeOfValid.x          10 bit
+                //  sizeOfValid.y          10 bit
+                //  sizeOfValid.z          10 bit
+
+                // This is always less than CellSize(kEntryMaxSubdivLevel)+1 == 28. See GetEntrySubdivLevel()
+                var sizeOfValid = maxLocalIdxPlusOne - minLocalIdx;
 
                 vals[0] = (uint)firstChunkIndex & 0x1FFFFFFF;
                 vals[0] |= ((uint)minSubdiv & 0x7) << 29;
@@ -49,9 +54,9 @@ namespace UnityEngine.Rendering
                 vals[1] |= ((uint)minLocalIdx.y & 0x3FF) << 10;
                 vals[1] |= ((uint)minLocalIdx.z & 0x3FF) << 20;
 
-                vals[2] = (uint)maxLocalIdx.x & 0x3FF;
-                vals[2] |= ((uint)maxLocalIdx.y & 0x3FF) << 10;
-                vals[2] |= ((uint)maxLocalIdx.z & 0x3FF) << 20;
+                vals[2] = (uint)sizeOfValid.x & 0x3FF;
+                vals[2] |= ((uint)sizeOfValid.y & 0x3FF) << 10;
+                vals[2] |= ((uint)sizeOfValid.z & 0x3FF) << 20;
             }
         }
 
@@ -143,7 +148,7 @@ namespace UnityEngine.Rendering
                 IndexMetaData metaData = new IndexMetaData();
                 metaData.minSubdiv = entryUpdateInfo.minSubdivInCell;
                 metaData.minLocalIdx = entryUpdateInfo.hasOnlyBiggerBricks ? Vector3Int.zero : entryUpdateInfo.minValidBrickIndexForCellAtMaxRes / minSubdivCellSize;
-                metaData.maxLocalIdx = entryUpdateInfo.hasOnlyBiggerBricks ? Vector3Int.one : entryUpdateInfo.maxValidBrickIndexForCellAtMaxResPlusOne / minSubdivCellSize;
+                metaData.maxLocalIdxPlusOne = entryUpdateInfo.hasOnlyBiggerBricks ? Vector3Int.one : entryUpdateInfo.maxValidBrickIndexForCellAtMaxResPlusOne / minSubdivCellSize;
                 metaData.firstChunkIndex = entryUpdateInfo.firstChunkIndex;
 
                 metaData.Pack(out uint[] packedVals);

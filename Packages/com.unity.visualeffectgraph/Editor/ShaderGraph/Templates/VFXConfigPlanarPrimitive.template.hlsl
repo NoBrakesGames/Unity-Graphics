@@ -17,40 +17,17 @@ bool GetMeshAndElementIndex(inout VFX_SRP_ATTRIBUTES input, inout AttributesElem
     #if VFX_PRIMITIVE_TRIANGLE
         index = id / 3;
     #elif VFX_PRIMITIVE_QUAD
-    #if HAS_STRIPS
-        id += VFX_GET_INSTANCE_ID(i) * 8192;
-        const uint vertexPerStripCount = (PARTICLE_PER_STRIP_COUNT - 1) << 2;
-
-        index = id / vertexPerStripCount; // stripIndex. Needed by VFXInitInstancing
-        $splice(VFXInitInstancing)
-
-        const StripData stripData = GetStripDataFromStripIndex(index, instanceIndex);
-        uint relativeIndexInStrip = ((id % vertexPerStripCount) >> 2) + (id & 1); // relative index of particle
-
-        uint maxEdgeIndex = relativeIndexInStrip - PARTICLE_IN_EDGE + 1;
-
-        if (maxEdgeIndex >= stripData.nextIndex)
-            return false;
-
-        element.stripData = stripData;
-        element.relativeIndexInStrip = relativeIndexInStrip;
-
-        index = GetParticleIndex(relativeIndexInStrip, stripData);
-    #else
         index = (id >> 2) + VFX_GET_INSTANCE_ID(i) * 2048;
-    #endif
     #elif VFX_PRIMITIVE_OCTAGON
         index = (id >> 3) + VFX_GET_INSTANCE_ID(i) * 1024;
     #endif
 
-    #if !HAS_STRIPS
     $splice(VFXInitInstancing)
     #ifdef UNITY_INSTANCING_ENABLED
     input.instanceID = unity_InstanceID;
     #endif
-    #endif
 
-    ContextData contextData = instancingContextData[instanceActiveIndex];
+    $splice(VFXLoadContextData)
     uint systemSeed = contextData.systemSeed;
     uint nbMax = contextData.maxParticleCount;
 
@@ -59,6 +36,21 @@ bool GetMeshAndElementIndex(inout VFX_SRP_ATTRIBUTES input, inout AttributesElem
 
     #if VFX_HAS_INDIRECT_DRAW
     index = indirectBuffer[VFXGetIndirectBufferIndex(index, instanceActiveIndex)];
+    #endif
+
+    #if HAS_STRIPS_DATA
+        StripData stripData;
+        uint relativeIndexInStrip = 0;
+        #if HAS_STRIPS
+            uint primitiveId = id;
+            if (!FindIndexInStrip(index, primitiveId, instanceIndex, relativeIndexInStrip, stripData))
+                return false;
+        #else
+            stripData = GetStripDataFromParticleIndex(index, instanceIndex);
+            relativeIndexInStrip = GetRelativeIndex(index, stripData);
+        #endif
+        element.relativeIndexInStrip = relativeIndexInStrip;
+        element.stripData = stripData;
     #endif
 
     element.index = index;
@@ -73,7 +65,7 @@ bool GetMeshAndElementIndex(inout VFX_SRP_ATTRIBUTES input, inout AttributesElem
         #if VFX_STRIPS_UV_STRECHED
             uv.x = (float)(relativeIndexInStrip) / (stripData.nextIndex - 1);
         #elif VFX_STRIPS_UV_PER_SEGMENT
-            uv.x = PARTICLE_IN_EDGE;
+            uv.x = STRIP_PARTICLE_IN_EDGE;
         #else
             GetElementData(element);
             const InternalAttributesElement attributes = element.attributes;
@@ -152,9 +144,7 @@ bool GetMeshAndElementIndex(inout VFX_SRP_ATTRIBUTES input, inout AttributesElem
 
 
 #if defined(SHADER_STAGE_RAY_TRACING)
-    #define VFXAttributes InternalAttributesElement
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/VFXGraph/Shaders/VFXRayTracingCommon.hlsl"
-
 
     void GetVFXInstancingIndices(out int index, out int instanceIndex, out int instanceActiveIndex)
     {
@@ -227,11 +217,8 @@ bool GetMeshAndElementIndex(inout VFX_SRP_ATTRIBUTES input, inout AttributesElem
         output.tangentToWorld = CreateTangentToWorld(normalWS, tangentWS, /*sign(currentVertex.tangentOS.w)*/1);
 
         output.isFrontFace = dot(rayDirection, output.tangentToWorld[2]) < 0.0f;
-        VFX_SRP_VARYINGS input;
-        ZERO_INITIALIZE(VFX_SRP_VARYINGS, input);
 
-        $splice(VFXInterpolantsGenerationRT)
-        $splice(VFXSetFragInputs)
+        $splice(VFXSetFragInputsRT)
 
     #if VFX_FEATURE_MOTION_VECTORS
         $splice(VFXLoadCurrentFrameIndexParameter)

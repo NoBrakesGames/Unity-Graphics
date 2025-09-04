@@ -227,8 +227,8 @@ namespace UnityEngine.Rendering
             m_AtlasTexture = RTHandles.Alloc(
                 width: m_Width,
                 height: m_Height,
+                format: m_Format,
                 filterMode: filterMode,
-                colorFormat: m_Format,
                 wrapMode: TextureWrapMode.Clamp,
                 useMipMap: useMipMap,
                 autoGenerateMips: false,
@@ -460,7 +460,7 @@ namespace UnityEngine.Rendering
         /// <param name="width">Request width in pixels.</param>
         /// <param name="height">Request height in pixels.</param>
         /// <param name="overrideInstanceID">Override texture instance ID.</param>
-        /// <returns></returns>
+        /// <returns>True if the texture was successfully allocated and copied; false otherwise.</returns>
         public virtual bool AllocateTexture(CommandBuffer cmd, ref Vector4 scaleOffset, Texture texture, int width, int height, int overrideInstanceID = -1)
         {
             var instanceID = overrideInstanceID != -1 ? overrideInstanceID : GetTextureID(texture);
@@ -575,7 +575,7 @@ namespace UnityEngine.Rendering
         /// </summary>
         /// <param name="scaleOffset">Texture scale (.xy) and offset (.zw).</param>
         /// <param name="id">Source texture instance ID.</param>
-        /// <returns></returns>
+        /// <returns>True if the texture is in the atlas, false otherwise</returns>
         public bool IsCached(out Vector4 scaleOffset, int id)
         {
             bool cached = m_AllocationCache.TryGetValue(id, out var value);
@@ -634,6 +634,32 @@ namespace UnityEngine.Rendering
             // are valid for the texture if we need them
             else if (m_IsGPUTextureUpToDate.TryGetValue(key, out var value))
                 return value == kGPUTexInvalid || (needMips && value == kGPUTexValidMip0);
+
+            return false;
+        }
+
+        /// <summary>
+        /// Check if a slot needs to be updated in the atlas.
+        /// </summary>
+        /// <param name="id">The id.</param>
+        /// <param name="updateCount">The update count.</param>
+        /// <param name="needMips">Texture uses mips.</param>
+        /// <returns>True if slot needs update, false otherwise.</returns>
+        public virtual bool NeedsUpdate(int id, int updateCount, bool needMips = false)
+        {
+            int atlasUpdateCount;
+            if (m_IsGPUTextureUpToDate.TryGetValue(id, out atlasUpdateCount))
+            {
+                if (updateCount != atlasUpdateCount)
+                {
+                    m_IsGPUTextureUpToDate[id] = updateCount;
+                    return true;
+                }
+            }
+            else
+            {
+                m_IsGPUTextureUpToDate[id] = updateCount;
+            }
 
             return false;
         }

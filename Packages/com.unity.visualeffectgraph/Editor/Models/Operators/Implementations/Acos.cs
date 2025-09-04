@@ -2,7 +2,8 @@ using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Trigonometry")]
+    [VFXHelpURL("Operator-Acos")]
+    [VFXInfo(name = "Acos", category = "Math/Trigonometry", synonyms = new []{ "arc", "cosine" })]
     class Acos : VFXOperatorNumericUniform
     {
         public class InputProperties

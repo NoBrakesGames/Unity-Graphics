@@ -1,3 +1,4 @@
+
 ${VFXBegin:VFXVertexCommonProcess}
 #if VFX_USE_COLOR_CURRENT && defined(VFX_VARYING_COLOR)
 o.VFX_VARYING_COLOR = attributes.color;
@@ -101,7 +102,11 @@ ${VFXBegin:VFXVertexSetFlipbooksInterpolants}
 #if USE_FLIPBOOK && defined(VFX_VARYING_UV)
 	#if USE_FLIPBOOK_ARRAY_LAYOUT
 		${VFXLoadParameter:{flipBookSize}}
-		VFXUVData uvData = GetUVData(flipBookSize, o.VFX_VARYING_UV.xy, attributes.texIndex);
+		#if USE_FLIPBOOK_INTERPOLATION
+			VFXUVData uvData = GetUVData(flipBookSize, o.VFX_VARYING_UV.xy, attributes.texIndex, attributes.texIndexBlend);
+		#else
+			VFXUVData uvData = GetUVData(flipBookSize, o.VFX_VARYING_UV.xy, attributes.texIndex);
+		#endif
 		o.VFX_VARYING_UV.xyz = uvData.uvs.xyz;
 		#if USE_FLIPBOOK_INTERPOLATION && defined(VFX_VARYING_UV) && defined (VFX_VARYING_FRAMEBLEND)
 			o.VFX_VARYING_UV.w = uvData.uvs.w;
@@ -114,7 +119,11 @@ ${VFXBegin:VFXVertexSetFlipbooksInterpolants}
 	#else
 		${VFXLoadParameter:{invFlipBookSize}}
 		${VFXLoadParameter:{flipBookSize}}
-		VFXUVData uvData = GetUVData(flipBookSize, invFlipBookSize, o.VFX_VARYING_UV.xy, attributes.texIndex);
+		#if USE_FLIPBOOK_INTERPOLATION
+			VFXUVData uvData = GetUVData(flipBookSize, invFlipBookSize, o.VFX_VARYING_UV.xy, attributes.texIndex, attributes.texIndexBlend);
+		#else
+			VFXUVData uvData = GetUVData(flipBookSize, invFlipBookSize, o.VFX_VARYING_UV.xy, attributes.texIndex);
+		#endif
 		o.VFX_VARYING_UV.xy = uvData.uvs.xy;
 		#if USE_FLIPBOOK_INTERPOLATION && defined(VFX_VARYING_UV) && defined (VFX_VARYING_FRAMEBLEND)
 			o.VFX_VARYING_UV.zw = uvData.uvs.zw;
@@ -129,38 +138,57 @@ ${VFXBegin:VFXVertexSetFlipbooksInterpolants}
 ${VFXEnd}
 
 ${VFXBegin:VFXLoadAttributesOrCull}
+#if HAS_STRIPS && !VFX_HAS_INDIRECT_DRAW
+	// We render one particle less for each strip in this case
+	nbMax -= STRIP_COUNT;
+#endif
+
 uint deadCount = 0;
 #if USE_DEAD_LIST_COUNT
-deadCount = deadListCount[instanceIndex];
+deadCount = deadList[instanceIndex];
 #endif
 #if VFX_USE_INSTANCING
 if (index >= nbMax - deadCount)
 #else
 if (index >= asuint(nbMax) - deadCount)
 #endif
-
 {
-#if USE_GEOMETRY_SHADER
-	return; // cull
-#else
-	o.VFX_VARYING_POSCS.x = VFX_NAN;
-	return o; // cull
-#endif
+	CULL_VERTEX(o);
 }
 
 VFXAttributes attributes = (VFXAttributes)0;
 VFXSourceAttributes sourceAttributes = (VFXSourceAttributes)0;
 
 #if VFX_HAS_INDIRECT_DRAW
+if (index >= indirectBuffer[instanceActiveIndex])
+{
+	CULL_VERTEX(o);
+}
 index = indirectBuffer[VFXGetIndirectBufferIndex(index, instanceActiveIndex)];
+#endif
+
+#if HAS_STRIPS_DATA
+StripData stripData;
+uint relativeIndexInStrip = 0;
+uint primitiveID = 0;
+#if HAS_STRIPS
+	primitiveID = id;
+#endif
+
+if (!FindIndexInStrip(index, primitiveID, instanceIndex, relativeIndexInStrip, stripData))
+{
+	CULL_VERTEX(o);
+}
+#endif
+
+#if VFX_HAS_INDIRECT_DRAW
 ${VFXLoadAttributes}
 #else
 ${VFXLoadAttributes:{alive}}
 #if !HAS_STRIPS
 if (!attributes.alive)
 {
-	o.VFX_VARYING_POSCS.x = VFX_NAN;
-	return o; // cull
+	CULL_VERTEX(o);
 }
 #endif
 
@@ -168,7 +196,7 @@ ${VFXLoadAttributes:{(?!(alive))(\b\w)}}
 #endif
 
 // Initialize built-in needed attributes
-#if HAS_STRIPS
+#if HAS_STRIPS_DATA
 InitStripAttributes(index, attributes, stripData);
 #endif
 ${VFXEnd}
@@ -336,10 +364,10 @@ void frag(ps_input i
 
 	#ifdef WRITE_NORMAL_BUFFER
 		#ifdef VFX_VARYING_NORMAL
-			VFXComputePixelOutputToNormalBuffer(normalWS, outNormalBuffer);
+			VFXComputePixelOutputToNormalBuffer(i, normalWS, GetUVData(i), outNormalBuffer);
 		#else
 			//Fallback for point and lines, render normal as if those are face camera plane
-			VFXComputePixelOutputToNormalBuffer(VFXGetWorldToViewRotMatrix()[2], outNormalBuffer);
+			VFXComputePixelOutputToNormalBuffer(i, VFXGetWorldToViewRotMatrix()[2], GetUVData(i), outNormalBuffer);
 		#endif
 	#endif
 
@@ -377,14 +405,20 @@ float3 GetStripTangent(float3 currentPos, uint instanceIndex, uint relativeIndex
 	if (relativeIndex > 0)
 	{
 		uint prevIndex = GetParticleIndex(relativeIndex - 1,stripData);
-		prevTangent = normalize(currentPos - GetParticlePosition(prevIndex,instanceIndex));
+		float3 tangent = currentPos - GetParticlePosition(prevIndex,instanceIndex);
+		float sqrLength = dot(tangent, tangent);
+		if (sqrLength > VFX_EPSILON * VFX_EPSILON)
+			prevTangent = tangent * rsqrt(sqrLength);
 	}
 
 	float3 nextTangent = (float3)0.0f;
 	if (relativeIndex < stripData.nextIndex - 1)
 	{
 		uint nextIndex = GetParticleIndex(relativeIndex + 1,stripData);
-		nextTangent = normalize(GetParticlePosition(nextIndex, instanceIndex) - currentPos);
+		float3 tangent = GetParticlePosition(nextIndex, instanceIndex) - currentPos;
+		float sqrLength = dot(tangent, tangent);
+		if (sqrLength > VFX_EPSILON * VFX_EPSILON)
+			nextTangent = tangent * rsqrt(sqrLength);
 	}
 
 	return normalize(prevTangent + nextTangent);
@@ -392,14 +426,25 @@ float3 GetStripTangent(float3 currentPos, uint instanceIndex, uint relativeIndex
 ${VFXEnd}
 
 ${VFXBegin:VFXInitInstancing}
-uint instanceIndex, instanceActiveIndex;
-index = VFXInitInstancing(index, instanceIndex, instanceActiveIndex);
+uint instanceIndex, instanceActiveIndex, instanceCurrentIndex;
+index = VFXInitInstancing(index, instanceIndex, instanceActiveIndex, instanceCurrentIndex);
 ${VFXEnd}
 
+${VFXBegin:VFXInitInstancingCompute}
+uint instanceIndex, instanceActiveIndex, instanceCurrentIndex;
+#if defined(VFX_INSTANCING_FIXED_SIZE)
+	uint index = GetThreadId(groupId, 0, dispatchWidth);
+	index = VFXInitInstancing(index, instanceIndex, instanceActiveIndex, instanceCurrentIndex);
+	index += groupThreadId.x;
+#else
+	uint index = VFXInitInstancing(id, instanceIndex, instanceActiveIndex, instanceCurrentIndex);
+#endif
 
+${VFXEnd}
 
 ${VFXBegin:VFXInstancingConstants}
 float4 instancingConstants;
+uint2 instancingBufferOffsets;
 ${VFXEnd}
 
 ${VFXBegin:VFXFeedSortingKeys}

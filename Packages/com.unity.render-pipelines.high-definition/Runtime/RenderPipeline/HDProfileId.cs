@@ -8,6 +8,7 @@ namespace UnityEngine.Rendering.HighDefinition
     {
         CopyDepthBuffer,
         CopyDepthInTargetTexture,
+        DuplicateDepthBuffer,
         BuildCoarseStencilAndResolveIfNeeded,
         AmbientOcclusion,
         HorizonSSAO,
@@ -21,6 +22,7 @@ namespace UnityEngine.Rendering.HighDefinition
         ApplyDistortion,
         ForwardDepthPrepass,
         DeferredDepthPrepass,
+        PreRefractionDepthPrepass,
         TransparentDepthPrepass,
         GBuffer,
         DBufferRender,
@@ -96,7 +98,6 @@ namespace UnityEngine.Rendering.HighDefinition
 
         // Volumetric clouds
         VolumetricClouds,
-        VolumetricCloudsPrepare,
         VolumetricCloudsTrace,
         VolumetricCloudsReproject,
         VolumetricCloudsPreUpscale,
@@ -106,19 +107,34 @@ namespace UnityEngine.Rendering.HighDefinition
         VolumetricCloudMapGeneration,
         VolumetricCloudsAmbientProbe,
 
+        // Water Decals
+        WaterDecalDeformation,
+        WaterDecalFoam,
+        WaterDecalMask,
+        WaterDecalCurrent,
+
         // Water surface
         WaterSurfaceUpdate,
         WaterSurfaceSimulation,
-        WaterSurfaceDeformation,
         WaterSurfaceCaustics,
-        WaterSurfaceFoam,
         WaterExclusion,
-        WaterSurfaceRenderingGBuffer,
-        WaterSurfaceRenderingMaskDebug,
-        WaterSurfacePrepareLighting,
-        WaterSurfaceRenderingDeferred,
-        WaterSurfaceRenderingUnderWater,
-        WaterSurfaceRenderingWaterLine,
+        WaterGBuffer,
+        WaterMaskDebug,
+        WaterPrepareLighting,
+        WaterDeferredLighting,
+        WaterLineRendering,
+
+        // High Quality Lines
+        LinesGeometrySetup,
+        LinesVertexSetup,
+        LinesSegmentSetup,
+        LinesShadingPrepare,
+        LinesShading,
+        LinesRasterizationSetup,
+        LinesBuildClusters,
+        LinesBinningStage,
+        LinesWorkQueue,
+        LinesFineRaster,
 
         // RT Cluster
         RaytracingBuildCluster,
@@ -133,6 +149,18 @@ namespace UnityEngine.Rendering.HighDefinition
         RaytracingReflectionAdjustWeight,
         RaytracingReflectionFilter,
         RaytracingReflectionUpscale,
+
+        // ReBlur Denoiser
+        ReBlurPreBlur,
+        ReBlurTemporalAccumulation,
+        ReBlurMipGeneration,
+        ReBlurMipHistoryFix,
+        ReBlurBlur,
+        ReBlurCopyHistory,
+        ReBlurTemporalStabilization,
+        ReBlurCopyHistoryStab,
+        ReBlurPostBlur,
+
         // RTAO
         RaytracingAmbientOcclusion,
         RaytracingFilterAmbientOcclusion,
@@ -202,9 +230,6 @@ namespace UnityEngine.Rendering.HighDefinition
         DisplayShadows,
 
         RenderDeferredLightingCompute,
-        RenderDeferredLightingComputeAsPixel,
-        RenderDeferredLightingSinglePass,
-        RenderDeferredLightingSinglePassMRT,
 
         // Misc
         VolumeUpdate,
@@ -220,11 +245,17 @@ namespace UnityEngine.Rendering.HighDefinition
         // Low res transparency
         DownsampleDepth,
         LowResTransparent,
+        CombineAndUpsampleTransparent,
         UpsampleLowResTransparent,
+        CombineTransparents,
 
         // Line Rendering
         LineRenderingSetup,
         LineRenderingComposite,
+
+        // Decal
+        UpdateShaderGraphDecalTexture,
+        UpdateDecalAtlasMipmaps,
 
         // Post-processing
         AlphaCopy,
@@ -233,7 +264,8 @@ namespace UnityEngine.Rendering.HighDefinition
         DynamicExposure,
         ApplyExposure,
         TemporalAntialiasing,
-        DeepLearningSuperSamplingColorMask,
+        UpscalerColorMask,
+        FSR2,
         DeepLearningSuperSampling,
         DepthOfField,
         DepthOfFieldKernel,
@@ -246,6 +278,8 @@ namespace UnityEngine.Rendering.HighDefinition
         DepthOfFieldGatherNear,
         DepthOfFieldPreCombine,
         DepthOfFieldCombine,
+        DepthOfFieldComputeSlowTiles,
+        DepthOfFieldApertureShape,
         LensFlareScreenSpace,
         LensFlareDataDriven,
         LensFlareComputeOcclusionDataDriven,
@@ -275,9 +309,10 @@ namespace UnityEngine.Rendering.HighDefinition
         Sharpening,
         ContrastAdaptiveSharpen,
         EdgeAdaptiveSpatialUpsampling,
-        PrepareProbeVolumeList,
-        ProbeVolumeDebug,
         CustomPassBufferClearDebug,
+
+        // Temp
+        APVSamplingDebug,
 
         AOVExecute,
         AOVOutput,

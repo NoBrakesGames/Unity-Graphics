@@ -18,7 +18,8 @@ namespace UnityEngine.Rendering.HighDefinition
             LitTransmission = 1 << 3,
             LitAnisotropy = 1 << 4,
             LitIridescence = 1 << 5,
-            LitClearCoat = 1 << 6
+            LitClearCoat = 1 << 6,
+            LitColoredTransmission = 1 << 7,
         };
 
         //-----------------------------------------------------------------------------
@@ -76,7 +77,7 @@ namespace UnityEngine.Rendering.HighDefinition
             [SurfaceDataAttributes("Thickness", precision = FieldPrecision.Real)]
             public float thickness;
             [SurfaceDataAttributes("Transmission Mask", precision = FieldPrecision.Real)]
-            public float transmissionMask;
+            public Vector3 transmissionMask;
 
             // Anisotropic
             [SurfaceDataAttributes("Tangent", true)]
@@ -201,7 +202,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         public Lit() { }
 
-        public override void Build(HDRenderPipelineAsset hdAsset, HDRenderPipelineRuntimeResources defaultResources)
+        public override void Build(HDRenderPipeline _)
         {
             PreIntegratedFGD.instance.Build(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
             LTCAreaLight.instance.Build();

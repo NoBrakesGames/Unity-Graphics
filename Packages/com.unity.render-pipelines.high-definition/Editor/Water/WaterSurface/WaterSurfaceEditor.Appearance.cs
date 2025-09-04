@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
 using static UnityEditor.EditorGUI;
 
@@ -45,10 +47,7 @@ namespace UnityEditor.Rendering.HighDefinition
         SerializedProperty m_VolumeHeight;
         SerializedProperty m_VolumePriority;
         SerializedProperty m_AbsorptionDistanceMultiplier;
-        SerializedProperty m_ColorPyramidOffset;
-        SerializedProperty m_UnderWaterScatteringColorMode;
-        SerializedProperty m_UnderWaterScatteringColor;
-        SerializedProperty m_UnderWaterAmbientProbeContribution;
+        SerializedProperty m_UnderWaterRefraction;
 
         void OnEnableAppearance(PropertyFetcher<WaterSurface> o)
         {
@@ -91,25 +90,7 @@ namespace UnityEditor.Rendering.HighDefinition
             m_VolumeHeight = o.Find(x => x.volumeHeight);
             m_VolumePriority = o.Find(x => x.volumePrority);
             m_AbsorptionDistanceMultiplier = o.Find(x => x.absorptionDistanceMultiplier);
-            m_ColorPyramidOffset = o.Find(x => x.colorPyramidOffset);
-            m_UnderWaterScatteringColorMode = o.Find(x => x.underWaterScatteringColorMode);
-            m_UnderWaterScatteringColor = o.Find(x => x.underWaterScatteringColor);
-            m_UnderWaterAmbientProbeContribution = o.Find(x => x.underWaterAmbientProbeContribution);
-        }
-
-        // We pass colors to shader via constant buffers instead of Material.SetColor
-        // So we have to apply gamma correction ourselves
-        static internal void ColorFieldLinear(SerializedProperty property, GUIContent label)
-        {
-            var rect = EditorGUILayout.GetControlRect();
-            BeginProperty(rect, label, property);
-
-            BeginChangeCheck();
-            var color = ColorField(rect, label, property.colorValue.gamma, true, false, false);
-            if (EndChangeCheck())
-                property.colorValue = color.linear;
-
-            EndProperty();
+            m_UnderWaterRefraction = o.Find(x => x.underWaterRefraction);
         }
 
         static internal bool WaterBandHasAgitation(WaterSurfaceEditor serialized, Editor owner, int bandIndex)
@@ -127,67 +108,81 @@ namespace UnityEditor.Rendering.HighDefinition
             return false;
         }
 
-        internal static Material CreateNewWaterMaterialAndShader(string sceneName, string surfaceName)
+        internal static string GetWaterResourcesPath(MonoBehaviour component)
         {
-            string folderName = "Assets/WaterResources/" + sceneName;
-            // Make sure the folder exists
-            if (!AssetDatabase.IsValidFolder("Assets/WaterResources"))
-                AssetDatabase.CreateFolder("Assets", "WaterResources");
-            if (!AssetDatabase.IsValidFolder(folderName))
-                AssetDatabase.CreateFolder("Assets/WaterResources", sceneName);
+            string sceneName = component.gameObject.scene.name;
+            if (string.IsNullOrEmpty(sceneName))
+                sceneName = "Untitled";
 
-            // Make sure they don't already exist
-            var sgPath = folderName + "/" + surfaceName + ".shadergraph";
-            // First check if the shader graph or the materials exist if they do we stop right away with a message.
-            var sg = AssetDatabase.LoadAssetAtPath<Shader>(sgPath);
-            if (sg != null)
-            {
-                Debug.LogWarning("A water shader or material has already been created in the " + folderName +" folder.");
-                return null;
-            }
-
-            // Copy the shader graph
-            var originalSG = HDRenderPipeline.currentAsset.renderPipelineResources.shaders.waterPS;
-            if (!AssetDatabase.CopyAsset(AssetDatabase.GetAssetPath(originalSG), sgPath))
-            {
-                Debug.LogWarning("Failed to copy the Water Shader Graph at: " + sgPath);
-                return null;
-            }
-
-            return AssetDatabase.LoadAssetAtPath<Material>(sgPath);
+            string folderName = $"Assets/WaterResources/{sceneName}";
+            CoreUtils.EnsureFolderTreeInAssetFilePath(folderName);
+            return folderName;
         }
 
-        static internal void WaterCustomMaterialField(WaterSurfaceEditor serialized, Editor owner)
+        internal static Material CreateNewWaterMaterialAndShader(MonoBehaviour component)
         {
-            int buttonWidth = 60;
-            float indentOffset = EditorGUI.indentLevel * 15f;
-            Rect lineRect = EditorGUILayout.GetControlRect();
-            var labelRect = new Rect(lineRect.x, lineRect.y, EditorGUIUtility.labelWidth - indentOffset - 3, lineRect.height);
-            var fieldRect = new Rect(labelRect.xMax + 5, lineRect.y, lineRect.width - labelRect.width - buttonWidth - 5, lineRect.height);
-            var buttonNewRect = new Rect(fieldRect.xMax, lineRect.y, buttonWidth, lineRect.height);
+            string directory = GetWaterResourcesPath(component);
+            System.IO.Directory.CreateDirectory(directory);
 
-            // Display the label
-            EditorGUI.PrefixLabel(labelRect, k_CustomMaterial);
-
-            using (new EditorGUI.PropertyScope(fieldRect, GUIContent.none, serialized.m_CustomMaterial))
+            // Make sure they don't already exist
+            var path = $"{directory}/{component.name}.shadergraph";
+            if (AssetDatabase.AssetPathExists(path))
             {
-                serialized.m_CustomMaterial.objectReferenceValue = (Material)EditorGUI.ObjectField(fieldRect, (Material)serialized.m_CustomMaterial.objectReferenceValue, typeof(Material), false);
+                Debug.LogWarning($"A Water Shader or Material at {path} already exists.");
+                return null;
             }
 
-            if (GUI.Button(buttonNewRect, k_WaterNewLMaterialLabel, EditorStyles.miniButton))
+            var shader = GraphicsSettings.GetRenderPipelineSettings<WaterSystemRuntimeResources>().waterPS;
+            if (!AssetDatabase.CopyAsset(AssetDatabase.GetAssetPath(shader), path))
             {
+                Debug.LogWarning($"Failed to copy the Water Shader Graph to {path}");
+                return null;
+            }
+
+            return AssetDatabase.LoadAssetAtPath<Material>(path);
+        }
+
+        static internal void MaterialFieldWithButton(GUIContent label, SerializedProperty prop, System.Func<Material> onClick)
+        {
+            const int k_NewFieldWidth = 70;
+
+            var rect = EditorGUILayout.GetControlRect();
+            rect.xMax -= k_NewFieldWidth + 2;
+
+            var newFieldRect = rect;
+            newFieldRect.x = rect.xMax + 2;
+            newFieldRect.width = k_NewFieldWidth;
+            if (GUI.Button(newFieldRect, "New", EditorStyles.miniButton))
+            {
+                var value = onClick();
+                if (value != null)
+                    prop.objectReferenceValue = value;
+            }
+
+            if (label != null)
+                PropertyField(rect, prop, label);
+            else
+                PropertyField(rect, prop);
+        }
+
+        static void WaterCustomMaterialField(WaterSurfaceEditor serialized)
+        {
+            MaterialFieldWithButton(k_CustomMaterial, serialized.m_CustomMaterial, () => {
                 WaterSurface ws = (serialized.target as WaterSurface);
-                Material newMaterial = CreateNewWaterMaterialAndShader(ws.gameObject.scene.name, ws.name);
-                if (newMaterial != null)
-                    serialized.m_CustomMaterial.objectReferenceValue = newMaterial;
-            }
+                return CreateNewWaterMaterialAndShader(ws);
+            });
+
+            var material = serialized.m_CustomMaterial.objectReferenceValue as Material;
+            if (material != null && !WaterSurface.IsWaterMaterial(material))
+                EditorGUILayout.HelpBox("Water only work with a material using a shader created from the Water Master Node in ShaderGraph.", MessageType.Error);
+
             EditorGUILayout.Space();
         }
 
         static internal void WaterSurfaceAppearanceSection(WaterSurfaceEditor serialized, Editor owner)
         {
             // Handle the custom material field
-            WaterCustomMaterialField(serialized, owner);
+            WaterCustomMaterialField(serialized);
 
             // Grab the type of the surface
             WaterSurfaceType surfaceType = (WaterSurfaceType)(serialized.m_SurfaceType.enumValueIndex);
@@ -195,10 +190,14 @@ namespace UnityEditor.Rendering.HighDefinition
             EditorGUILayout.LabelField("Smoothness", EditorStyles.boldLabel);
             using (new IndentLevelScope())
             {
+                EditorGUI.BeginChangeCheck();
                 Vector2 remap = new Vector2(serialized.m_EndSmoothness.floatValue, serialized.m_StartSmoothness.floatValue);
                 EditorGUILayout.MinMaxSlider(k_SmoothnessRange, ref remap.x, ref remap.y, 0.0f, 1.0f);
-                serialized.m_EndSmoothness.floatValue = remap.x;
-                serialized.m_StartSmoothness.floatValue = remap.y;
+                if (EditorGUI.EndChangeCheck())
+                {
+                    serialized.m_EndSmoothness.floatValue = remap.x;
+                    serialized.m_StartSmoothness.floatValue = remap.y;
+                }
 
                 // Fade range
                 WaterPropertyParameterDrawer.DrawMultiPropertiesGUI(k_SmoothnessFadeRange, k_SmoothnessFadeStart, serialized.m_SmoothnessFadeStart, k_SmoothnessFadeDistance, serialized.m_SmoothnessFadeDistance);
@@ -208,26 +207,25 @@ namespace UnityEditor.Rendering.HighDefinition
             EditorGUILayout.LabelField("Refraction", EditorStyles.boldLabel);
             using (new IndentLevelScope())
             {
-                ColorFieldLinear(serialized.m_RefractionColor, k_RefractionColor);
-                serialized.m_MaxRefractionDistance.floatValue = EditorGUILayout.Slider(k_MaxRefractionDistance, serialized.m_MaxRefractionDistance.floatValue, 0.0f, 3.5f);
-                serialized.m_AbsorptionDistance.floatValue = EditorGUILayout.Slider(k_AbsorptionDistance, serialized.m_AbsorptionDistance.floatValue, 0.0f, 100.0f);
+                CoreEditorUtils.ColorFieldLinear(serialized.m_RefractionColor, k_RefractionColor);
+                EditorGUILayout.PropertyField(serialized.m_MaxRefractionDistance, k_MaxRefractionDistance);
+                EditorGUILayout.PropertyField(serialized.m_AbsorptionDistance, k_AbsorptionDistance);
             }
 
             EditorGUILayout.LabelField("Scattering", EditorStyles.boldLabel);
             using (new IndentLevelScope())
             {
-                ColorFieldLinear(serialized.m_ScatteringColor, k_ScatteringColor);
-                serialized.m_AmbientScattering.floatValue = EditorGUILayout.Slider(k_AmbientScattering, serialized.m_AmbientScattering.floatValue, 0.0f, 1.0f);
-                serialized.m_HeightScattering.floatValue = EditorGUILayout.Slider(k_HeightScattering, serialized.m_HeightScattering.floatValue, 0.0f, 1.0f);
-                serialized.m_DisplacementScattering.floatValue = EditorGUILayout.Slider(k_DisplacementScattering, serialized.m_DisplacementScattering.floatValue, 0.0f, 1.0f);
+                CoreEditorUtils.ColorFieldLinear(serialized.m_ScatteringColor, k_ScatteringColor);
+                EditorGUILayout.PropertyField(serialized.m_AmbientScattering, k_AmbientScattering);
+                EditorGUILayout.PropertyField(serialized.m_HeightScattering, k_HeightScattering);
+                EditorGUILayout.PropertyField(serialized.m_DisplacementScattering, k_DisplacementScattering);
 
                 // Given the low amplitude of the pool waves, it doesn't make any sense to have the tip scattering term available to users
                 if (surfaceType != WaterSurfaceType.Pool)
-                    serialized.m_DirectLightTipScattering.floatValue = EditorGUILayout.Slider(k_DirectLightTipScattering, serialized.m_DirectLightTipScattering.floatValue, 0.0f, 1.0f);
-                serialized.m_DirectLightBodyScattering.floatValue = EditorGUILayout.Slider(k_DirectLightBodyScattering, serialized.m_DirectLightBodyScattering.floatValue, 0.0f, 1.0f);
+                    EditorGUILayout.PropertyField(serialized.m_DirectLightTipScattering, k_DirectLightTipScattering);
+                EditorGUILayout.PropertyField(serialized.m_DirectLightBodyScattering, k_DirectLightBodyScattering);
 
                 EditorGUILayout.PropertyField(serialized.m_MaximumHeightOverride);
-                serialized.m_MaximumHeightOverride.floatValue = Mathf.Max(serialized.m_MaximumHeightOverride.floatValue, 0.0f);
             }
 
             // Caustics
@@ -238,54 +236,63 @@ namespace UnityEditor.Rendering.HighDefinition
                 using (new IndentLevelScope())
                 {
                     EditorGUILayout.PropertyField(serialized.m_CausticsResolution);
-                    int bandCount = HDRenderPipeline.EvaluateBandCount(surfaceType, serialized.m_Ripples.boolValue);
+                    int bandCount = WaterSystem.EvaluateBandCount(surfaceType, serialized.m_Ripples.boolValue);
 
-                    if (bandCount != 1)
+                    if (bandCount != 1 && !serialized.m_SurfaceType.hasMultipleDifferentValues && !serialized.m_Ripples.hasMultipleDifferentValues)
                     {
-                        switch (surfaceType)
+                        int bandIdx = WaterSystem.SanitizeCausticsBand(serialized.m_CausticsBand.intValue, bandCount);
+
+                        GUIContent label = null;
+                        List<GUIContent> options = new();
+                        List<int> values = new();
+                        if (surfaceType == WaterSurfaceType.OceanSeaLake)
                         {
-                            case WaterSurfaceType.OceanSeaLake:
-                            {
-                                serialized.m_CausticsBand.intValue = EditorGUILayout.IntSlider(k_CausticsBandSwell, serialized.m_CausticsBand.intValue, 0, bandCount - 1);
-                            }
-                            break;
-                            case WaterSurfaceType.River:
-                                serialized.m_CausticsBand.intValue = EditorGUILayout.IntSlider(k_CausticsBandAgitation, serialized.m_CausticsBand.intValue, 0, bandCount - 1);
-                            break;
-                            default:
-                                break;
+                            label = k_CausticsBandSwell;
+                            options.Add(new GUIContent("Swell First Band"));
+                            options.Add(new GUIContent("Swell Second Band"));
+                            values.Add(0);
+                            values.Add(1);
                         }
+                        if (surfaceType == WaterSurfaceType.River)
+                        {
+                            label = k_CausticsBandAgitation;
+                            options.Add(new GUIContent("Agitation"));
+                            values.Add(0);
+                            if (bandIdx == 1 && serialized.m_Ripples.boolValue)
+                                bandIdx = 2;
+                        }
+
+                        if (serialized.m_Ripples.boolValue)
+                        {
+                            options.Add(new GUIContent("Ripples"));
+                            values.Add(2);
+                        }
+
+                        EditorGUI.BeginChangeCheck();
+                        int value = EditorGUILayout.IntPopup(label, bandIdx, options.ToArray(), values.ToArray());
+                        if (EditorGUI.EndChangeCheck())
+                            serialized.m_CausticsBand.intValue = value;
                     }
-                    else
-                        serialized.m_CausticsBand.intValue = 0;
 
                     EditorGUILayout.PropertyField(serialized.m_CausticsVirtualPlaneDistance, k_CausticsVirtualPlaneDistance);
-                    serialized.m_CausticsVirtualPlaneDistance.floatValue = Mathf.Max(serialized.m_CausticsVirtualPlaneDistance.floatValue, 0.001f);
-
                     EditorGUILayout.PropertyField(serialized.m_CausticsTilingFactor, k_CausticsTilingFactor);
-                    serialized.m_CausticsTilingFactor.floatValue = Mathf.Max(serialized.m_CausticsTilingFactor.floatValue, 0.01f);
-                    
-                    if (WaterSurfaceUI.ShowAdditionalProperties())
+
+                    if (AdvancedProperties.BeginGroup())
                     {
                         EditorGUILayout.PropertyField(serialized.m_CausticsIntensity, k_CausticsInstensity);
-                        serialized.m_CausticsIntensity.floatValue = Mathf.Max(serialized.m_CausticsIntensity.floatValue, 0.0f);
-
                         EditorGUILayout.PropertyField(serialized.m_CausticsPlaneBlendDistance);
-                        serialized.m_CausticsPlaneBlendDistance.floatValue = Mathf.Max(serialized.m_CausticsPlaneBlendDistance.floatValue, 0.0f);
-
                         EditorGUILayout.PropertyField(serialized.m_CausticsDirectionalShadow, k_CausticsDirectionalShadow);
 
                         if (serialized.m_CausticsDirectionalShadow.boolValue)
                         {
                             using (new IndentLevelScope())
-                            {
-                                serialized.m_CausticsDirectionalShadowDimmer.floatValue = EditorGUILayout.Slider(k_CausticsDirectionalShadowDimmer, serialized.m_CausticsDirectionalShadowDimmer.floatValue, 0.0f, 1.0f);
-                            }
+                                EditorGUILayout.PropertyField(serialized.m_CausticsDirectionalShadowDimmer, k_CausticsDirectionalShadowDimmer);
                         }
                     }
+                    AdvancedProperties.EndGroup();
 
                     // Display an info box if the wind speed is null for the target band
-                    if (!WaterBandHasAgitation(serialized, owner, serialized.m_CausticsBand.intValue))
+                    if (!WaterBandHasAgitation(serialized, owner, WaterSystem.SanitizeCausticsBand(serialized.m_CausticsBand.intValue, bandCount)))
                     {
                         EditorGUILayout.HelpBox("The selected simulation band has currently a null wind speed and will not generate caustics.", MessageType.Info, wide: true);
                     }
@@ -320,33 +327,17 @@ namespace UnityEditor.Rendering.HighDefinition
                     else
                     {
                         EditorGUILayout.PropertyField(serialized.m_VolumeDepth);
-                        serialized.m_VolumeDepth.floatValue = Mathf.Max(serialized.m_VolumeDepth.floatValue, 0.0f);
-
                         EditorGUILayout.PropertyField(serialized.m_VolumeHeight);
-                        serialized.m_VolumeHeight.floatValue = Mathf.Max(serialized.m_VolumeHeight.floatValue, 0.0f);
                     }
 
                     // Priority
                     EditorGUILayout.PropertyField(serialized.m_VolumePriority);
-                    serialized.m_VolumePriority.intValue = serialized.m_VolumePriority.intValue > 0 ? serialized.m_VolumePriority.intValue : 0;
 
                     // View distance
                     EditorGUILayout.PropertyField(serialized.m_AbsorptionDistanceMultiplier);
-                    serialized.m_AbsorptionDistanceMultiplier.floatValue = Mathf.Max(serialized.m_AbsorptionDistanceMultiplier.floatValue, 0.0f);
 
-                    // Color pyramid offset
-                    serialized.m_ColorPyramidOffset.intValue = EditorGUILayout.IntSlider(k_ColorPyramidOffset, serialized.m_ColorPyramidOffset.intValue, 0, 4);
-
-                    // Scattering color for underwater
-                    EditorGUILayout.PropertyField(serialized.m_UnderWaterScatteringColorMode, k_UnderWaterScatteringColorMode);
-                    if ((WaterSurface.UnderWaterScatteringColorMode)serialized.m_UnderWaterScatteringColorMode.enumValueIndex == WaterSurface.UnderWaterScatteringColorMode.Custom)
-                    {
-                        using (new IndentLevelScope())
-                            ColorFieldLinear(serialized.m_UnderWaterScatteringColor, k_UnderWaterScatteringColor);
-                    }
-
-                    // Ambient probe contribution
-                    serialized.m_UnderWaterAmbientProbeContribution.floatValue = EditorGUILayout.Slider(k_UnderWaterAmbientProbeContribution, serialized.m_UnderWaterAmbientProbeContribution.floatValue, 0.0f, 1.0f);
+                    // Refraction fallback
+                    EditorGUILayout.PropertyField(serialized.m_UnderWaterRefraction, k_UnderWaterRefraction);
                 }
             }
         }

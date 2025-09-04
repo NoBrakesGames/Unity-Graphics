@@ -1,11 +1,11 @@
-using System;
 using System.Collections.Generic;
-using System.Linq;
+
 using UnityEngine;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Attribute/orientation")]
+    [VFXHelpURL("Block-ConnectTarget")]
+    [VFXInfo(category = "Orientation")]
     class ConnectTarget : VFXBlock
     {
         public enum OrientMode

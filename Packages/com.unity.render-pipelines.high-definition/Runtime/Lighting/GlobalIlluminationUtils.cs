@@ -3,7 +3,7 @@ using Unity.Collections;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
-    class GlobalIlluminationUtils
+    internal static class GlobalIlluminationUtils
     {
         // Return true if the light must be added to the baking
         public static bool LightDataGIExtract(Light light, ref LightDataGI lightDataGI)
@@ -31,7 +31,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
             float lightDimmer = 1;
 
-            if (lightMode == LightMode.Realtime && add.affectDiffuse)
+            if (lightMode == LightMode.Realtime || lightMode == LightMode.Mixed)
                 lightDimmer = add.lightDimmer;
 
             lightDataGI.instanceID = light.GetInstanceID();
@@ -49,6 +49,22 @@ namespace UnityEngine.Rendering.HighDefinition
 
             lightDataGI.color = directColor;
             lightDataGI.indirectColor = indirectColor;
+
+            if (add.interactsWithSky)
+            {
+                var staticSkySettings = SkyManager.GetStaticLightingSky()?.skySettings;
+                if (staticSkySettings != null)
+                {
+                    Vector3 atmosphericAttenuation = staticSkySettings.EvaluateAtmosphericAttenuation(-light.transform.forward, Vector3.zero);
+                    lightDataGI.color.red *= atmosphericAttenuation.x;
+                    lightDataGI.color.green *= atmosphericAttenuation.y;
+                    lightDataGI.color.blue *= atmosphericAttenuation.z;
+
+                    lightDataGI.indirectColor.red *= atmosphericAttenuation.x;
+                    lightDataGI.indirectColor.green *= atmosphericAttenuation.y;
+                    lightDataGI.indirectColor.blue *= atmosphericAttenuation.z;
+                }
+            }
 
             // Note that the HDRI is correctly integrated in the GlobalIllumination system, we don't need to do anything regarding it.
 
@@ -227,13 +243,9 @@ namespace UnityEngine.Rendering.HighDefinition
                     lightDataGI.range = light.range;
                     lightDataGI.coneAngle = 0.0f;
                     lightDataGI.innerConeAngle = 0.0f;
-#if UNITY_EDITOR
                     lightDataGI.shape0 = light.areaSize.x;
                     lightDataGI.shape1 = light.areaSize.y;
-#else
-                    lightDataGI.shape0 = 0.0f;
-                    lightDataGI.shape1 = 0.0f;
-#endif
+
                     // TEMP: for now, if we bake a rectangle type this will disable the light for runtime, need to speak with GI team about it!
                     lightDataGI.type = UnityEngine.Experimental.GlobalIllumination.LightType.Disc;
                     lightDataGI.falloff = add.applyRangeAttenuation ? FalloffType.InverseSquared : FalloffType.InverseSquaredNoRangeAttenuation;

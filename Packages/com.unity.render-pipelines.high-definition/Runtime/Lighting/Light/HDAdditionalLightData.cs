@@ -1,23 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using JetBrains.Annotations;
-using Unity.Burst;
-using UnityEngine;
 using UnityEngine.LowLevel;
 using UnityEngine.PlayerLoop;
-using UnityEngine.Rendering;
 using UnityEngine.Assertions;
-using System.Linq;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 using UnityEngine.Serialization;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
-using Unity.Jobs;
-using Unity.Mathematics;
-using Unity.Profiling;
+
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -30,7 +22,6 @@ namespace UnityEngine.Rendering.HighDefinition
         public Vector3 oldLossyScale;
         public bool oldDisplayAreaLightEmissiveMesh;
         public float oldLightColorTemperature;
-        public float oldIntensity;
         public bool lightEnabled;
     }
 
@@ -59,6 +50,25 @@ namespace UnityEngine.Rendering.HighDefinition
 
             public static BoolScalableSetting UseContactShadow(HDRenderPipelineAsset hdrp) =>
                 hdrp.currentPlatformRenderPipelineSettings.lightSettings.useContactShadow;
+        }
+
+        /// <summary>
+        /// Light source used to shade the celestial body.
+        /// </summary>
+        public enum CelestialBodyShadingSource
+        {
+            /// <summary>
+            /// The celestial body will emit light.
+            /// </summary>
+            Emission = 1,
+            /// <summary>
+            /// The celestial body will reflect light from a directional light in the scene.
+            /// </summary>
+            ReflectSunLight = 0,
+            /// <summary>
+            /// The celestial body will be illuminated by an artifical light source.
+            /// </summary>
+            Manual = 2,
         }
 
         /// <summary>
@@ -135,62 +145,6 @@ namespace UnityEngine.Rendering.HighDefinition
         [ExcludeCopy]
         internal HDLightRenderEntity lightEntity = HDLightRenderEntity.Invalid;
 
-        [SerializeField, FormerlySerializedAs("displayLightIntensity")]
-        float m_Intensity;
-        /// <summary>
-        /// Get/Set the intensity of the light using the current light unit.
-        /// </summary>
-        public float intensity
-        {
-            get => m_Intensity;
-            set
-            {
-                if (m_Intensity == value)
-                    return;
-
-                m_Intensity = Mathf.Clamp(value, 0, float.MaxValue);
-                UpdateLightIntensity();
-            }
-        }
-
-        // Only for Spotlight, should be hide for other light
-        [SerializeField, FormerlySerializedAs("enableSpotReflector")]
-        bool m_EnableSpotReflector = true;
-        /// <summary>
-        /// Get/Set the Spot Reflection option on spot lights.
-        /// </summary>
-        public bool enableSpotReflector
-        {
-            get => m_EnableSpotReflector;
-            set
-            {
-                if (m_EnableSpotReflector == value)
-                    return;
-
-                m_EnableSpotReflector = value;
-                UpdateLightIntensity();
-            }
-        }
-
-        // Lux unity for all light except directional require a distance
-        [SerializeField, FormerlySerializedAs("luxAtDistance")]
-        float m_LuxAtDistance = 1.0f;
-        /// <summary>
-        /// Set/Get the distance for spot lights where the emission intensity is matches the value set in the intensity property.
-        /// </summary>
-        public float luxAtDistance
-        {
-            get => m_LuxAtDistance;
-            set
-            {
-                if (m_LuxAtDistance == value)
-                    return;
-
-                m_LuxAtDistance = Mathf.Clamp(value, 0, float.MaxValue);
-                UpdateLightIntensity();
-            }
-        }
-
         [Range(k_MinSpotInnerPercent, k_MaxSpotInnerPercent)]
         [SerializeField]
         float m_InnerSpotPercent; // To display this field in the UI this need to be public
@@ -206,7 +160,6 @@ namespace UnityEngine.Rendering.HighDefinition
                     return;
 
                 m_InnerSpotPercent = Mathf.Clamp(value, k_MinSpotInnerPercent, k_MaxSpotInnerPercent);
-                UpdateLightIntensity();
 
                 if (lightEntity.valid)
                     HDLightRenderDatabase.instance.EditLightDataAsRef(lightEntity).innerSpotPercent = m_InnerSpotPercent;
@@ -283,35 +236,6 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 if (lightEntity.valid)
                     HDLightRenderDatabase.instance.EditLightDataAsRef(lightEntity).volumetricDimmer = m_VolumetricDimmer;
-            }
-        }
-
-        // Used internally to convert any light unit input into light intensity
-        [SerializeField, FormerlySerializedAs("lightUnit")]
-        LightUnit m_LightUnit = LightUnit.Lumen;
-        /// <summary>
-        /// Get/Set the light unit. When changing the light unit, the intensity will be converted to match the previous intensity in the new unit.
-        /// </summary>
-        public LightUnit lightUnit
-        {
-            get => m_LightUnit;
-            set
-            {
-                if (m_LightUnit == value)
-                    return;
-
-                var lightType = legacyLight.type;
-                if (!IsValidLightUnitForType(lightType, value))
-                {
-                    var supportedTypes = String.Join(", ", GetSupportedLightUnits(lightType));
-                    Debug.LogError($"Set Light Unit '{value}' to a {GetLightTypeName()} is not allowed, only {supportedTypes} are supported.");
-                    return;
-                }
-
-                LightUtils.ConvertLightIntensity(m_LightUnit, value, this, legacyLight);
-
-                m_LightUnit = value;
-                UpdateLightIntensity();
             }
         }
 
@@ -751,6 +675,28 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
+
+        [SerializeField]
+        bool m_IncludeForPathTracing = true;
+        /// <summary>
+        /// Controls if the light is enabled when the camera has Path Tracing enabled.
+        /// </summary>
+        public bool includeForPathTracing
+        {
+            get => m_IncludeForPathTracing;
+            set
+            {
+                if (m_IncludeForPathTracing == value)
+                    return;
+
+                m_IncludeForPathTracing = value;
+
+                if (lightEntity.valid)
+                    HDLightRenderDatabase.instance.EditLightDataAsRef(lightEntity).includeForPathTracing = m_IncludeForPathTracing;
+                UpdateAllLightValues();
+            }
+        }
+
         [Range(k_MinAreaLightShadowCone, k_MaxAreaLightShadowCone)]
         [SerializeField, FormerlySerializedAs("areaLightShadowCone")]
         float m_AreaLightShadowCone = 120.0f;
@@ -804,7 +750,8 @@ namespace UnityEngine.Rendering.HighDefinition
         /// </summary>
         public bool interactsWithSky
         {
-            get => m_InteractsWithSky;
+            // m_InteractWithSky can be true if user changed from directional to point light, so we need to check current type
+            get => m_InteractsWithSky && legacyLight.type == LightType.Directional;
             set
             {
                 if (m_InteractsWithSky == value)
@@ -815,10 +762,11 @@ namespace UnityEngine.Rendering.HighDefinition
                     HDLightRenderDatabase.instance.EditLightDataAsRef(lightEntity).interactsWithSky = m_InteractsWithSky;
             }
         }
+
         [SerializeField, FormerlySerializedAs("angularDiameter")]
         float m_AngularDiameter = 0.5f;
         /// <summary>
-        /// Angular diameter of the emissive celestial body represented by the light as seen from the camera (in degrees).
+        /// Angular diameter of the celestial body represented by the light as seen from the camera (in degrees).
         /// Used to render the sun/moon disk.
         /// </summary>
         public float angularDiameter
@@ -834,100 +782,103 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
-        [SerializeField, FormerlySerializedAs("flareSize")]
-        float m_FlareSize = 2.0f;
+        /// <summary>
+        /// Angular diameter mode to use.
+        /// </summary>
+        [SerializeField, FormerlySerializedAs("m_DiameterMultiplerMode")]
+        public bool diameterMultiplerMode = false;
+
+        /// <summary>
+        /// Multiplier for the angular diameter of the celestial body used only when rendering the sun disk.
+        /// </summary>
+        [SerializeField, Min(0.0f), FormerlySerializedAs("m_DiameterMultiplier")]
+        public float diameterMultiplier = 1.0f;
+
+        /// <summary>
+        /// Override for the angular diameter of the celestial body used only when rendering the sun disk.
+        /// </summary>Mode
+        [SerializeField, Min(0.0f), FormerlySerializedAs("m_DiameterOverride")]
+        public float diameterOverride = 0.5f;
+
+        /// <summary>
+        /// Shading source of the celestial body.
+        /// </summary>
+        [SerializeField, FormerlySerializedAs("m_EmissiveLightSource")]
+        public CelestialBodyShadingSource celestialBodyShadingSource = CelestialBodyShadingSource.Emission;
+
+        /// <summary>
+        /// The Directional light that should illuminate this celestial body.
+        /// </summary>
+        [SerializeField]
+        public Light sunLightOverride;
+
+        /// <summary>
+        /// Color of the light source.
+        /// </summary>
+        [SerializeField]
+        internal Color sunColor = Color.white;
+
+        /// <summary>
+        /// Intensity of the light source in Lux.
+        /// </summary>
+        [SerializeField, Min(0.0f)]
+        internal float sunIntensity = 130000.0f;
+
+        /// <summary>
+        /// The percentage of moon that receives sunlight.
+        /// </summary>
+        [SerializeField, Range(0, 1), FormerlySerializedAs("m_MoonPhase")]
+        public float moonPhase = 0.2f;
+
+        /// <summary>
+        /// The rotation of the moon phase.
+        /// </summary>
+        [SerializeField, Range(0, 360.0f), FormerlySerializedAs("m_MoonPhaseRotation")]
+        public float moonPhaseRotation = 0.0f;
+
+        /// <summary>
+        /// The intensity of the sunlight reflected from the planet onto the moon.
+        /// </summary>
+        [SerializeField, Min(0.0f), FormerlySerializedAs("m_Earthshine")]
+        public float earthshine = 1.0f;
+
         /// <summary>
         /// Size the flare around the celestial body (in degrees).
         /// </summary>
-        public float flareSize
-        {
-            get => m_FlareSize;
-            set
-            {
-                if (m_FlareSize == value)
-                    return;
+        [SerializeField, Range(0, 90), FormerlySerializedAs("m_FlareSize")]
+        public float flareSize = 2.0f;
 
-                m_FlareSize = value; // Serialization code clamps
-                if (lightEntity.valid)
-                    HDLightRenderDatabase.instance.EditLightDataAsRef(lightEntity).flareSize = m_FlareSize;
-            }
-        }
-
-        [SerializeField, FormerlySerializedAs("flareTint")]
-        Color m_FlareTint = Color.white;
         /// <summary>
         /// Tints the flare of the celestial body.
         /// </summary>
-        public Color flareTint
-        {
-            get => m_FlareTint;
-            set
-            {
-                if (m_FlareTint == value)
-                    return;
+        [SerializeField, FormerlySerializedAs("m_FlareTint")]
+        public Color flareTint = Color.white;
 
-                m_FlareTint = value;
-                if (lightEntity.valid)
-                    HDLightRenderDatabase.instance.EditLightDataAsRef(lightEntity).flareTint = m_FlareTint;
-            }
-        }
-
-        [SerializeField, FormerlySerializedAs("flareFalloff")]
-        float m_FlareFalloff = 4.0f;
         /// <summary>
         /// The falloff rate of flare intensity as the angle from the light increases.
         /// </summary>
-        public float flareFalloff
-        {
-            get => m_FlareFalloff;
-            set
-            {
-                if (m_FlareFalloff == value)
-                    return;
+        [SerializeField, Min(0.0f), FormerlySerializedAs("m_FlareFalloff")]
+        public float flareFalloff = 4.0f;
 
-                m_FlareFalloff = value; // Serialization code clamps
-                if (lightEntity.valid)
-                    HDLightRenderDatabase.instance.EditLightDataAsRef(lightEntity).flareFalloff = m_FlareFalloff;
-            }
-        }
+        /// <summary>
+        /// Intensity of the flare.
+        /// </summary>
+        [SerializeField, Range(0, 1)]
+        public float flareMultiplier = 1.0f;
 
-        [SerializeField, FormerlySerializedAs("surfaceTexture")]
-        Texture m_SurfaceTexture = null;
         /// <summary>
         /// Texture of the surface of the celestial body. Acts like a multiplier.
         /// </summary>
-        public Texture surfaceTexture
-        {
-            get => m_SurfaceTexture;
-            set
-            {
-                if (m_SurfaceTexture == value)
-                    return;
+        [SerializeField, FormerlySerializedAs("m_SurfaceTexture")]
+        public Texture surfaceTexture = null;
 
-                m_SurfaceTexture = value;
-            }
-        }
-
-        [SerializeField, FormerlySerializedAs("surfaceTint")]
-        Color m_SurfaceTint = Color.white;
         /// <summary>
         /// Tints the surface of the celestial body.
         /// </summary>
-        public Color surfaceTint
-        {
-            get => m_SurfaceTint;
-            set
-            {
-                if (m_SurfaceTint == value)
-                    return;
+        [SerializeField, FormerlySerializedAs("m_SurfaceTint")]
+        public Color surfaceTint = Color.white;
 
-                m_SurfaceTint = value;
-                if (lightEntity.valid)
-                    HDLightRenderDatabase.instance.EditLightDataAsRef(lightEntity).surfaceTint = m_SurfaceTint;
-            }
-        }
-
-        [SerializeField, FormerlySerializedAs("distance")]
+        [SerializeField, Min(0.0f), FormerlySerializedAs("distance")]
         float m_Distance = 150000000000; // Sun to Earth
         /// <summary>
         /// Distance from the camera to the emissive celestial body represented by the light.
@@ -1200,7 +1151,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         // Now the renderingLayerMask is used for shadow layers and not light layers
         [SerializeField, FormerlySerializedAs("lightlayersMask")]
-        RenderingLayerMask m_LightlayersMask = RenderingLayerMask.LightLayerDefault;
+        RenderingLayerMask m_LightlayersMask = (RenderingLayerMask) (uint) UnityEngine.RenderingLayerMask.defaultRenderingLayerMask;
         /// <summary>
         /// Controls which layer will be affected by this light
         /// </summary>
@@ -1340,6 +1291,163 @@ namespace UnityEngine.Rendering.HighDefinition
                 if (lightEntity.valid)
                 {
                     HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).minFilterSize = m_MinFilterSize;
+                }
+            }
+        }
+
+        [Range(1, 64)]
+        [SerializeField] int m_DirLightPCSSBlockerSampleCount = 24;
+        /// <summary>
+        /// Controls the number of samples used to detect blockers for directional lights PCSS shadows.
+        /// </summary>
+        // Note: We duplicate this setting so its default value can be different than other light types
+        public int dirLightPCSSBlockerSampleCount
+        {
+            get => m_DirLightPCSSBlockerSampleCount;
+            set
+            {
+                if (m_DirLightPCSSBlockerSampleCount == value)
+                    return;
+
+                m_DirLightPCSSBlockerSampleCount = Mathf.Clamp(value, 1, 64);
+
+                if (lightEntity.valid)
+                {
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).dirLightPCSSBlockerSampleCount = (byte)m_DirLightPCSSBlockerSampleCount;
+                }
+            }
+        }
+
+        [Range(1, 64)]
+        [SerializeField] int m_DirLightPCSSFilterSampleCount = 16;
+        /// <summary>
+        /// Controls the number of samples used to filter for directional lights PCSS shadows.
+        /// </summary>
+        // Note: We duplicate this setting so its default value can be different than other light types
+        public int dirLightPCSSFilterSampleCount
+        {
+            get => m_DirLightPCSSFilterSampleCount;
+            set
+            {
+                if (m_DirLightPCSSFilterSampleCount == value)
+                    return;
+
+                m_DirLightPCSSFilterSampleCount = Mathf.Clamp(value, 1, 64);
+
+                if (lightEntity.valid)
+                {
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).dirLightPCSSFilterSampleCount = (byte)m_DirLightPCSSFilterSampleCount;
+                }
+            }
+        }
+
+        [SerializeField] float m_DirLightPCSSMaxPenumbraSize = 0.56f; // Default matching previous API max blocker distance at 64m for a light angular diameter of 0.5
+        /// <summary>
+        /// Maximum penumbra size (in world space), limiting blur filter kernel size
+        /// Measured against a receiving surface perpendicular to light direction (penumbra may get wider for different angles)
+        /// Very large kernels may affect GPU performance and/or produce undesirable artifacts close to caster
+        /// </summary>
+        public float dirLightPCSSMaxPenumbraSize
+        {
+            get => m_DirLightPCSSMaxPenumbraSize;
+            set
+            {
+                m_DirLightPCSSMaxPenumbraSize = Math.Max(value, 0.0f);
+                if (lightEntity.valid)
+                {
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).dirLightPCSSMaxPenumbraSize = m_DirLightPCSSMaxPenumbraSize;
+                }
+            }
+        }
+
+        [SerializeField] float m_DirLightPCSSMaxSamplingDistance = 0.5f;
+        /// <summary>
+        /// Maximum distance from the receiver PCSS shadow sampling occurs, this is to avoid light bleeding due to distant
+        /// blockers hiding the cone apex and leading to missing occlusion, the lower the least light bleeding but too low will cause self-shadowing
+        /// Note that the algorithm will also clamp the sampling distance in function of the blocker distance, to avoid light bleeding with very close blockers
+        /// </summary>
+        public float dirLightPCSSMaxSamplingDistance
+        {
+            get => m_DirLightPCSSMaxSamplingDistance;
+            set
+            {
+                m_DirLightPCSSMaxSamplingDistance = Math.Max(value, 0.0f);
+                if (lightEntity.valid)
+                {
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).dirLightPCSSMaxSamplingDistance = m_DirLightPCSSMaxSamplingDistance;
+                }
+            }
+        }
+        [SerializeField] float m_DirLightPCSSMinFilterSizeTexels = 1.5f;
+        /// <summary>
+        /// Minimum PCSS filter size (in shadowmap texels) to avoid aliasing
+        /// </summary>
+        public float dirLightPCSSMinFilterSizeTexels
+        {
+            get => m_DirLightPCSSMinFilterSizeTexels;
+            set
+            {
+                m_DirLightPCSSMinFilterSizeTexels = Math.Max(value, 0.0f);
+                if (lightEntity.valid)
+                {
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).dirLightPCSSMinFilterSizeTexels = m_DirLightPCSSMinFilterSizeTexels;
+                }
+            }
+        }
+
+        [SerializeField] float m_DirLightPCSSMinFilterMaxAngularDiameter = 10.0f;
+        /// <summary>
+        /// Maximum angular diameter to use to reach minimum filter size, this makes a wider cone at the apex
+        /// So that we quickly reach minimum filter size while avoiding self-shadowing
+        /// </summary>
+        public float dirLightPCSSMinFilterMaxAngularDiameter
+        {
+            get => m_DirLightPCSSMinFilterMaxAngularDiameter;
+            set
+            {
+                m_DirLightPCSSMinFilterMaxAngularDiameter = Math.Max(value, 0.0f);
+                if (lightEntity.valid)
+                {
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).dirLightPCSSMinFilterMaxAngularDiameter = m_DirLightPCSSMinFilterMaxAngularDiameter;
+                }
+            }
+        }
+
+        [SerializeField] float m_DirLightPCSSBlockerSearchAngularDiameter = 12.0f;
+        /// <summary>
+        /// Angular diameter to use for blocker search, will include blockers outside of the light cone
+        /// when greater than m_AngularDiameter to reduce light bleeding.  Increasing this value too much may
+        /// result in self-shadowing artifacts.  A value below m_AngularDiameter will get clamped to m_AngularDiameter
+        /// </summary>
+        public float dirLightPCSSBlockerSearchAngularDiameter
+        {
+            get => m_DirLightPCSSBlockerSearchAngularDiameter;
+            set
+            {
+                m_DirLightPCSSBlockerSearchAngularDiameter = Math.Max(value, 0.0f);
+                if (lightEntity.valid)
+                {
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).dirLightPCSSBlockerSearchAngularDiameter = m_DirLightPCSSBlockerSearchAngularDiameter;
+                }
+            }
+        }
+
+        [Range(1, 6)]
+        [SerializeField] float m_DirLightPCSSBlockerSamplingClumpExponent = 2.0f;
+        /// <summary>
+        /// Affects how blocker search samples are distributed.  Samples distance to center is elevated to this power.
+        /// A clump exponent of 1 means uniform distribution on the sampling disk.
+        /// A clump exponent of 2 means distance from center of the uniform distribution are squared (clumped toward center)
+        /// </summary>
+        public float dirLightPCSSBlockerSamplingClumpExponent
+        {
+            get => m_DirLightPCSSBlockerSamplingClumpExponent;
+            set
+            {
+                m_DirLightPCSSBlockerSamplingClumpExponent = Math.Max(value, 0.0f);
+                if (lightEntity.valid)
+                {
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).dirLightPCSSBlockerSamplingClumpExponent = m_DirLightPCSSBlockerSamplingClumpExponent;
                 }
             }
         }
@@ -1638,23 +1746,9 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 if (m_ShadowUpdateMode == value)
                     return;
-
-                if (m_ShadowUpdateMode != ShadowUpdateMode.EveryFrame && value == ShadowUpdateMode.EveryFrame)
-                {
-                    if (!preserveCachedShadow)
-                    {
-                        HDShadowManager.cachedShadowManager.EvictLight(this, this.legacyLight.type);
-                    }
-                }
-                else if (legacyLight.shadows != LightShadows.None && m_ShadowUpdateMode == ShadowUpdateMode.EveryFrame && value != ShadowUpdateMode.EveryFrame)
-                {
-                    // If we are OnDemand not rendered on placement, we defer the registering of the light until the rendering is requested.
-                    if (!(shadowUpdateMode == ShadowUpdateMode.OnDemand && !onDemandShadowRenderOnPlacement))
-                        HDShadowManager.cachedShadowManager.RegisterLight(this);
-                }
-
                 m_ShadowUpdateMode = value;
 
+                RegisterCachedShadowLightOptional();
                 if (lightEntity.valid)
                 {
                     HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).shadowUpdateMode = value;
@@ -1970,6 +2064,8 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
+        internal bool hasShadowCache { get { return lightIdxForCachedShadows != -1; } }
+
         unsafe Vector3* m_CachedViewPositions
         {
             get
@@ -1990,12 +2086,18 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
-        // temporary matrix that stores the previous light data (mainly used to discard history for ray traced screen space shadows)
+        // Temporary matrix that stores the previous light data (mainly used to discard history for ray traced screen space shadows)
         [System.NonSerialized, ExcludeCopy]
         internal Matrix4x4 previousTransform = Matrix4x4.identity;
         // Temporary index that stores the current shadow index for the light
         [System.NonSerialized, ExcludeCopy]
         internal int shadowIndex = -1;
+        // Temporary information if the shadow was cached
+        [System.NonSerialized, ExcludeCopy]
+        internal bool wasReallyVisibleLastFrame = true;
+
+        [System.NonSerialized, ExcludeCopy]
+        internal bool fallbackToCachedShadows = false;
 
         // Runtime datas used to compute light intensity
         [ExcludeCopy]
@@ -2020,7 +2122,7 @@ namespace UnityEngine.Rendering.HighDefinition
         [ExcludeCopy]
         GameObject m_ChildEmissiveMeshViewer;
         [ExcludeCopy]
-        MeshFilter m_EmissiveMeshFilter;
+        internal MeshFilter m_EmissiveMeshFilter;
 
         [field: ExcludeCopy]
         internal MeshRenderer emissiveMeshRenderer { get; private set; }
@@ -2212,7 +2314,8 @@ namespace UnityEngine.Rendering.HighDefinition
         void OnDisable()
         {
             // If it is within the cached system we need to evict it, unless user explicitly requires not to.
-            if (!preserveCachedShadow && lightIdxForCachedShadows >= 0)
+            // If the shadow was pending placement in the atlas, we also evict it, even if the user wants to preserve it.
+            if ((!preserveCachedShadow || HDShadowManager.cachedShadowManager.LightIsPendingPlacement(lightIdxForCachedShadows, shadowMapType)) && hasShadowCache)
             {
                 HDShadowManager.cachedShadowManager.EvictLight(this, legacyLight.type);
             }
@@ -2245,7 +2348,9 @@ namespace UnityEngine.Rendering.HighDefinition
         public void RequestShadowMapRendering()
         {
             if (shadowUpdateMode == ShadowUpdateMode.OnDemand)
+            {
                 HDShadowManager.cachedShadowManager.ScheduleShadowUpdate(this);
+            }
         }
 
         /// <summary>
@@ -2257,12 +2362,41 @@ namespace UnityEngine.Rendering.HighDefinition
         public void RequestSubShadowMapRendering(int shadowIndex)
         {
             if (shadowUpdateMode == ShadowUpdateMode.OnDemand)
+            {
                 HDShadowManager.cachedShadowManager.ScheduleShadowUpdate(this, shadowIndex);
+            }
         }
 
         internal bool ShadowIsUpdatedEveryFrame()
         {
             return shadowUpdateMode == ShadowUpdateMode.EveryFrame;
+        }
+
+        // TODO: This is used to avoid compilation errors due to unreachable code
+        static bool s_EnableFallbackToCachedShadows = false;
+
+        internal void RegisterCachedShadowLightOptional()
+        {
+            // TODO Enable fall back to cached shadows for relevant systems
+            fallbackToCachedShadows = (shadowUpdateMode == ShadowUpdateMode.EveryFrame)
+                && (legacyLight.type != LightType.Directional)
+                && s_EnableFallbackToCachedShadows;
+
+            bool wantsShadowCache = shadowUpdateMode != ShadowUpdateMode.EveryFrame || fallbackToCachedShadows;
+
+            wantsShadowCache = wantsShadowCache && (legacyLight.shadows != LightShadows.None);
+
+            if (!wantsShadowCache && hasShadowCache && !preserveCachedShadow)
+            {
+                HDShadowManager.cachedShadowManager.EvictLight(this, this.legacyLight.type);
+            }
+
+            bool onDemand = shadowUpdateMode == ShadowUpdateMode.OnDemand && !onDemandShadowRenderOnPlacement;
+
+            if (wantsShadowCache && !hasShadowCache && !onDemand && lightEntity.valid)
+            {
+                HDShadowManager.cachedShadowManager.RegisterLight(this);
+            }
         }
 
         internal ShadowMapUpdateType GetShadowUpdateType(LightType lightType)
@@ -2289,8 +2423,13 @@ namespace UnityEngine.Rendering.HighDefinition
             return ShadowMapUpdateType.Cached;
         }
 
-        internal int GetResolutionFromSettings(ShadowMapType shadowMapType, HDShadowInitParameters initParameters)
+        internal int GetResolutionFromSettings(ShadowMapType shadowMapType, HDShadowInitParameters initParameters, bool cachedResolution = false)
         {
+            if (cachedResolution && fallbackToCachedShadows)
+            {
+                return HDShadowManager.k_OffscreenShadowMapResolution;
+            }
+
             switch (shadowMapType)
             {
                 case ShadowMapType.CascadedDirectional:
@@ -2309,7 +2448,7 @@ namespace UnityEngine.Rendering.HighDefinition
             return GetResolutionFromSettings(GetShadowMapType(lightType), initParameters);
         }
 
-        internal void ReserveShadowMap(Camera camera, HDShadowManager shadowManager, HDShadowSettings shadowSettings, in HDShadowInitParameters initParameters, in VisibleLight visibleLight, LightType lightType)
+        internal void ReserveShadowMap(Camera camera, HDShadowManager shadowManager, HDShadowSettings shadowSettings, in HDShadowInitParameters initParameters, in VisibleLight visibleLight, LightType lightType, bool forcedVisible)
         {
             HDLightRenderDatabase renderDatabase = HDLightRenderDatabase.instance;
 
@@ -2323,6 +2462,11 @@ namespace UnityEngine.Rendering.HighDefinition
 
             // Reserve wanted resolution in the shadow atlas
             int resolution = GetResolutionFromSettings(shadowType, initParameters);
+
+            //Exit out early if we dont want to render the shadow anyways
+            if (resolution == 0)
+                return;
+
             Vector2 viewportSize = new Vector2(resolution, resolution);
 
             bool viewPortRescaling = false;
@@ -2363,13 +2507,39 @@ namespace UnityEngine.Rendering.HighDefinition
             if (lightType == LightType.Directional)
                 shadowManager.UpdateDirectionalShadowResolution((int)viewportSize.x, shadowSettings.cascadeShadowSplitCount.value);
 
-            int count = GetShadowRequestCount(shadowSettings.cascadeShadowSplitCount.value, lightType);
+            if (shadowIsInCacheSystem)
+                viewportSize = new Vector2(resolution, resolution);
 
+            int count = GetShadowRequestCount(shadowSettings.cascadeShadowSplitCount.value, lightType);
             var updateType = GetShadowUpdateType(lightType);
+            bool hasCachedComponent = !ShadowIsUpdatedEveryFrame();
+
+            if (forcedVisible && !shadowIsInCacheSystem)
+            {
+                // Limit resolution for offscreen lights with dynamic shadowmap
+                viewportSize = Vector2.Min(viewportSize, new Vector2(HDShadowManager.k_OffscreenShadowMapResolution, HDShadowManager.k_OffscreenShadowMapResolution));
+                if (lightEntity.valid)
+                {
+                    // Change this in the database
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).shadowUpdateMode = ShadowUpdateMode.OnDemand;
+                }
+                HDShadowManager.cachedShadowManager.ScheduleShadowUpdate(this);
+                updateType = ShadowMapUpdateType.Cached;
+                wasReallyVisibleLastFrame = false;
+            }
+            else
+            {
+                if (lightEntity.valid)
+                {
+                    // Change this in the database
+                    HDLightRenderDatabase.instance.EditAdditionalLightUpdateDataAsRef(lightEntity).shadowUpdateMode = m_ShadowUpdateMode;
+                }
+                wasReallyVisibleLastFrame = true;
+            }
             var requestIndices = shadowRequestIndices;
             for (int index = 0; index < count; index++)
             {
-                requestIndices[index] = shadowManager.ReserveShadowResolutions(shadowIsInCacheSystem ? new Vector2(resolution, resolution) : viewportSize, shadowMapType, GetInstanceID(), index, updateType);
+                requestIndices[index] = shadowManager.ReserveShadowResolutions(viewportSize, shadowMapType, GetInstanceID(), index, updateType);
             }
         }
 
@@ -2406,10 +2576,6 @@ namespace UnityEngine.Rendering.HighDefinition
 
             return -offset;
         }
-
-
-
-
 
         // We need these old states to make timeline and the animator record the intensity value and the emissive mesh changes
         [System.NonSerialized]
@@ -2462,6 +2628,16 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
+        internal Color EvaluateLightColor()
+        {
+            Color finalColor = legacyLight.color.linear * legacyLight.intensity;
+
+            if (legacyLight.useColorTemperature)
+                finalColor *= Mathf.CorrelatedColorTemperatureToRGB(legacyLight.colorTemperature);
+
+            return finalColor;
+        }
+
         // TODO: we might be able to get rid to that
         [System.NonSerialized, ExcludeCopy]
         bool m_Animated;
@@ -2489,12 +2665,44 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 HDAdditionalLightData lightData = allAdditionalLightDatas[i];
 
+                // HDRP manually subcribes to the player loop callback and calls the tick function. This can trigger an
+                // edge case during async scene loads where the component is initialized, but the parent GameObject is
+                // not. In this case, we simply skip the tick logic. This is in a try block because there's no other
+                // way. Simply accessing the .gameObject member calls a getter that will throw a null ref exception in
+                // this invalid state.
+                try
+                {
+                    var go = lightData.gameObject;
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
                 if (lightData.cachedLightType != lightData.legacyLight.type)
                 {
                     // ^ The light type has changed since the last tick.
                     if (lightData.m_ShadowUpdateMode != ShadowUpdateMode.EveryFrame && lightData.cachedLightType.HasValue)
                     {
                         HDShadowManager.cachedShadowManager.EvictLight(lightData, lightData.cachedLightType.Value);
+                    }
+
+                    var directionalLights = HDLightRenderDatabase.instance.directionalLights;
+                    if (lightData.cachedLightType == LightType.Directional)
+                    {
+                        directionalLights.Add(lightData);
+                    }
+                    else if (lightData.legacyLight.type != LightType.Directional)
+                    {
+                        // Remove the light from directionalLights, We use a loop to avoid a GC allocation (UUM-69806)
+                        for (int k = 0; k < directionalLights.Count; ++k)
+                        {
+                            if (ReferenceEquals(directionalLights[k], lightData))
+                            {
+                                directionalLights.RemoveAt(k);
+                                break;
+                            }
+                        }
                     }
 
 #if UNITY_EDITOR
@@ -2511,16 +2719,22 @@ namespace UnityEngine.Rendering.HighDefinition
 
                     lightData.cachedLightType = lightData.legacyLight.type;
 
-                    if (lightData.legacyLight.shadows != LightShadows.None && lightData.m_ShadowUpdateMode != ShadowUpdateMode.EveryFrame)
-                    {
-                        HDShadowManager.cachedShadowManager.RegisterLight(lightData);
-                    }
-
-                    // If the current light unit is not supported by the new light type, we change it
-                    var supportedUnits = GetSupportedLightUnits(lightData.legacyLight.type);
-                    if (!supportedUnits.Any(u => u == lightData.lightUnit))
-                        lightData.lightUnit = supportedUnits.First();
+                    lightData.RegisterCachedShadowLightOptional();
                 }
+
+                bool forceShadowCulling = false;
+                // TODO enable for relevant systems
+                if (s_EnableFallbackToCachedShadows)
+                {
+                    // Only force lights that will fall back to cached shadows
+                    forceShadowCulling = lightData.fallbackToCachedShadows;
+
+                    // If we have something in the cache, there is no need to force culling
+                    // if the light is visible again it will be culled, until then we use
+                    // the cached shadow map
+                    forceShadowCulling &= lightData.wasReallyVisibleLastFrame;
+                }
+                lightData.legacyLight.forceVisible = forceShadowCulling;
 
                 // TODO: The rest of this loop only handles animation. Iterate over a separate list in builds,
                 // containing only lights with Animator components.
@@ -2605,22 +2819,45 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 // Check if the intensity have been changed by the inspector or an animator
                 if (lightData.timelineWorkaround.oldLossyScale != lightData.transform.lossyScale
-                    || lightData.intensity != lightData.timelineWorkaround.oldIntensity
                     || lightData.legacyLight.colorTemperature != lightData.timelineWorkaround.oldLightColorTemperature)
                 {
-                    lightData.UpdateLightIntensity();
                     lightData.UpdateAreaLightEmissiveMesh();
                     lightData.timelineWorkaround.oldLossyScale = lightData.transform.lossyScale;
-                    lightData.timelineWorkaround.oldIntensity = lightData.intensity;
                     lightData.timelineWorkaround.oldLightColorTemperature = lightData.legacyLight.colorTemperature;
                 }
 
+#if !UNITY_EDITOR
                 // Same check for light angle to update intensity using spot angle
-                if (lightData.legacyLight.type.IsSpot() && (lightData.timelineWorkaround.oldSpotAngle != lightData.legacyLight.spotAngle))
+                if ((lightData.legacyLight.type == LightType.Spot || lightData.legacyLight.type == LightType.Pyramid) &&
+                    (lightData.timelineWorkaround.oldSpotAngle != lightData.legacyLight.spotAngle))
                 {
-                    lightData.UpdateLightIntensity();
+                    // If light unit is currently displayed in lumen and 'reflector' is on and the spot angle has changed,
+                    // recalculate intensity (candela) so lumen value remains constant
+                    if (lightData.legacyLight.lightUnit == LightUnit.Lumen && lightData.legacyLight.enableSpotReflector)
+                    {
+                        float oldSolidAngle;
+                        float newSolidAngle;
+                        if (lightData.legacyLight.type == LightType.Spot)
+                        {
+                            oldSolidAngle = LightUnitUtils.GetSolidAngleFromSpotLight(lightData.timelineWorkaround.oldSpotAngle);
+                            newSolidAngle = LightUnitUtils.GetSolidAngleFromSpotLight(lightData.legacyLight.spotAngle);
+                        }
+                        else // Pyramid
+                        {
+                            oldSolidAngle = LightUnitUtils.GetSolidAngleFromPyramidLight(
+                                lightData.timelineWorkaround.oldSpotAngle,
+                                lightData.aspectRatio);
+                            newSolidAngle = LightUnitUtils.GetSolidAngleFromPyramidLight(
+                                lightData.legacyLight.spotAngle,
+                                lightData.aspectRatio);
+                        }
+
+                        float oldLumen = LightUnitUtils.CandelaToLumen(lightData.legacyLight.intensity, oldSolidAngle);
+                        lightData.legacyLight.intensity = LightUnitUtils.LumenToCandela(oldLumen, newSolidAngle);
+                    }
                     lightData.timelineWorkaround.oldSpotAngle = lightData.legacyLight.spotAngle;
                 }
+#endif
 
                 if (lightData.legacyLight.color != lightData.timelineWorkaround.oldLightColor
                     || lightData.timelineWorkaround.oldLossyScale != lightData.transform.lossyScale
@@ -2648,14 +2885,10 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="data">Destination component</param>
         public void CopyTo(HDAdditionalLightData data)
         {
-            data.m_Intensity = m_Intensity;
-            data.m_EnableSpotReflector = m_EnableSpotReflector;
-            data.m_LuxAtDistance = m_LuxAtDistance;
             data.m_InnerSpotPercent = m_InnerSpotPercent;
             data.m_SpotIESCutoffPercent = m_SpotIESCutoffPercent;
             data.m_LightDimmer = m_LightDimmer;
             data.m_VolumetricDimmer = m_VolumetricDimmer;
-            data.m_LightUnit = m_LightUnit;
             data.m_FadeDistance = m_FadeDistance;
             data.m_VolumetricFadeDistance = m_VolumetricFadeDistance;
             data.m_AffectDiffuse = m_AffectDiffuse;
@@ -2675,15 +2908,27 @@ namespace UnityEngine.Rendering.HighDefinition
             data.m_IESPoint = m_IESPoint;
             data.m_IESSpot = m_IESSpot;
             data.m_IncludeForRayTracing = m_IncludeForRayTracing;
+            data.m_IncludeForPathTracing = m_IncludeForPathTracing;
             data.m_AreaLightShadowCone = m_AreaLightShadowCone;
             data.m_UseScreenSpaceShadows = m_UseScreenSpaceShadows;
             data.m_InteractsWithSky = m_InteractsWithSky;
             data.m_AngularDiameter = m_AngularDiameter;
-            data.m_FlareSize = m_FlareSize;
-            data.m_FlareTint = m_FlareTint;
-            data.m_FlareFalloff = m_FlareFalloff;
-            data.m_SurfaceTexture = m_SurfaceTexture;
-            data.m_SurfaceTint = m_SurfaceTint;
+            data.diameterMultiplerMode = diameterMultiplerMode;
+            data.diameterMultiplier = diameterMultiplier;
+            data.diameterOverride = diameterOverride;
+            data.celestialBodyShadingSource = celestialBodyShadingSource;
+            data.sunLightOverride = sunLightOverride;
+            data.sunColor = sunColor;
+            data.sunIntensity = sunIntensity;
+            data.moonPhase = moonPhase;
+            data.moonPhaseRotation = moonPhaseRotation;
+            data.earthshine = earthshine;
+            data.flareSize = flareSize;
+            data.flareTint = flareTint;
+            data.flareFalloff = flareFalloff;
+            data.flareMultiplier = flareMultiplier;
+            data.surfaceTexture = surfaceTexture;
+            data.surfaceTint = surfaceTint;
             data.m_Distance = m_Distance;
             data.m_UseRayTracedShadows = m_UseRayTracedShadows;
             data.m_NumRayTracingSamples = m_NumRayTracingSamples;
@@ -2740,6 +2985,15 @@ namespace UnityEngine.Rendering.HighDefinition
             data.m_AreaLightEmissiveMeshShadowCastingMode = m_AreaLightEmissiveMeshShadowCastingMode;
             data.m_AreaLightEmissiveMeshMotionVectorGenerationMode = m_AreaLightEmissiveMeshMotionVectorGenerationMode;
             data.m_AreaLightEmissiveMeshLayer = m_AreaLightEmissiveMeshLayer;
+            data.dirLightPCSSMaxPenumbraSize = dirLightPCSSMaxPenumbraSize;
+            data.dirLightPCSSMaxSamplingDistance = dirLightPCSSMaxSamplingDistance;
+            data.dirLightPCSSMinFilterSizeTexels = dirLightPCSSMinFilterSizeTexels;
+            data.dirLightPCSSMinFilterMaxAngularDiameter = dirLightPCSSMinFilterMaxAngularDiameter;
+            data.dirLightPCSSBlockerSearchAngularDiameter = dirLightPCSSBlockerSearchAngularDiameter;
+            data.dirLightPCSSBlockerSamplingClumpExponent = dirLightPCSSBlockerSamplingClumpExponent;
+            data.dirLightPCSSBlockerSampleCount = dirLightPCSSBlockerSampleCount;
+            data.dirLightPCSSFilterSampleCount = dirLightPCSSFilterSampleCount;
+
 
 #if UNITY_EDITOR
             data.timelineWorkaround = timelineWorkaround;
@@ -2756,32 +3010,32 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="lightData"></param>
         public static void InitDefaultHDAdditionalLightData(HDAdditionalLightData lightData)
         {
-            // Special treatment for Unity built-in area light. Change it to our rectangle light
             var light = lightData.legacyLight;
 
             // Set light intensity and unit using its type
-            //note: requiring type convert Rectangle and Disc to Area and correctly set areaLight
-            switch (lightData.legacyLight.type)
+            switch (light.type)
             {
                 case LightType.Directional:
-                    lightData.lightUnit = LightUnit.Lux;
-                    lightData.intensity = k_DefaultDirectionalLightIntensity / Mathf.PI * 100000.0f; // Change back to just k_DefaultDirectionalLightIntensity on 11.0.0 (can't change constant as it's a breaking change)
+                    light.lightUnit = LightUnit.Lux;
+                    light.intensity = k_DefaultDirectionalLightIntensity / Mathf.PI * 100000.0f; // Change back to just k_DefaultDirectionalLightIntensity on 11.0.0 (can't change constant as it's a breaking change)
+                    break;
+                case LightType.Box:
+                    light.lightUnit = LightUnit.Lux;
+                    light.intensity = LightUnitUtils.LumenToCandela(k_DefaultPunctualLightIntensity, LightUnitUtils.SphereSolidAngle); // Find a proper default for box lights
                     break;
                 case LightType.Rectangle:
-                    lightData.lightUnit = LightUnit.Lumen;
-                    lightData.intensity = k_DefaultAreaLightIntensity;
+                case LightType.Disc:
+                case LightType.Tube:
+                    light.lightUnit = LightUnit.Lumen;
+                    light.intensity = LightUnitUtils.ConvertIntensity(light, k_DefaultAreaLightIntensity, LightUnit.Lumen, LightUnit.Nits);
                     lightData.shadowNearPlane = 0;
                     light.shadows = LightShadows.None;
                     break;
-                case LightType.Disc:
-                    //[TODO: to be defined]
-                    break;
                 case LightType.Point:
                 case LightType.Spot:
-                case LightType.Box:
                 case LightType.Pyramid:
-                    lightData.lightUnit = LightUnit.Lumen;
-                    lightData.intensity = k_DefaultPunctualLightIntensity;
+                    light.lightUnit = LightUnit.Lumen;
+                    light.intensity = LightUnitUtils.ConvertIntensity(light, k_DefaultPunctualLightIntensity, LightUnit.Lumen, LightUnit.Candela);
                     break;
             }
 
@@ -2814,93 +3068,6 @@ namespace UnityEngine.Rendering.HighDefinition
         }
 
         #region Update functions to patch values in the Light component when we change properties inside HDAdditionalLightData
-
-        void SetLightIntensityPunctual(float intensity)
-        {
-            switch (legacyLight.type)
-            {
-                case LightType.Directional:
-                    legacyLight.intensity = intensity; // Always in lux
-                    break;
-                case LightType.Point:
-                    if (lightUnit == LightUnit.Candela)
-                        legacyLight.intensity = intensity;
-                    else
-                        legacyLight.intensity = LightUtils.ConvertPointLightLumenToCandela(intensity);
-                    break;
-                case LightType.Spot:
-                case LightType.Box:
-                case LightType.Pyramid:
-                    if (lightUnit == LightUnit.Candela)
-                    {
-                        // When using candela, reflector don't have any effect. Our intensity is candela = lumens/steradian and the user
-                        // provide desired value for an angle of 1 steradian.
-                        legacyLight.intensity = intensity;
-                    }
-                    else  // lumen
-                    {
-                        if (enableSpotReflector)
-                        {
-                            var lightType = legacyLight.type;
-                            // If reflector is enabled all the lighting from the sphere is focus inside the solid angle of current shape
-                            if (lightType == LightType.Spot)
-                            {
-                                legacyLight.intensity = LightUtils.ConvertSpotLightLumenToCandela(intensity, legacyLight.spotAngle * Mathf.Deg2Rad, true);
-                            }
-                            else if (lightType == LightType.Pyramid)
-                            {
-                                float angleA, angleB;
-                                LightUtils.CalculateAnglesForPyramid(aspectRatio, legacyLight.spotAngle * Mathf.Deg2Rad, out angleA, out angleB);
-
-                                legacyLight.intensity = LightUtils.ConvertFrustrumLightLumenToCandela(intensity, angleA, angleB);
-                            }
-                            else // Box shape, fallback to punctual light.
-                            {
-                                legacyLight.intensity = LightUtils.ConvertPointLightLumenToCandela(intensity);
-                            }
-                        }
-                        else
-                        {
-                            // No reflector, angle act as occlusion of point light.
-                            legacyLight.intensity = LightUtils.ConvertPointLightLumenToCandela(intensity);
-                        }
-                    }
-                    break;
-            }
-        }
-
-        void UpdateLightIntensity()
-        {
-            var lightType = legacyLight.type;
-            if (lightUnit == LightUnit.Lumen)
-            {
-                if (!lightType.IsArea())
-                    SetLightIntensityPunctual(intensity);
-                else
-                    legacyLight.intensity = LightUtils.ConvertAreaLightLumenToLuminance(lightType, intensity, shapeWidth, m_ShapeHeight);
-            }
-            else if (lightUnit == LightUnit.Ev100)
-            {
-                legacyLight.intensity = LightUtils.ConvertEvToLuminance(m_Intensity);
-            }
-            else
-            {
-                if ((lightType.IsSpot() || lightType == LightType.Point) && lightUnit == LightUnit.Lux)
-                {
-                    // Box are local directional light with lux unity without at distance
-                    if (lightType == LightType.Box)
-                        legacyLight.intensity = m_Intensity;
-                    else
-                        legacyLight.intensity = LightUtils.ConvertLuxToCandela(m_Intensity, luxAtDistance);
-                }
-                else
-                    legacyLight.intensity = m_Intensity;
-            }
-
-#if UNITY_EDITOR
-            legacyLight.SetLightDirty(); // Should be apply only to parameter that's affect GI, but make the code cleaner
-#endif
-        }
 
         void Awake()
         {
@@ -2960,17 +3127,17 @@ namespace UnityEngine.Rendering.HighDefinition
             }
 
             // Update Mesh
-            if (HDRenderPipelineGlobalSettings.instance != null && !HDRenderPipelineGlobalSettings.instance.Equals(null))
+            if (GraphicsSettings.TryGetRenderPipelineSettings<HDRenderPipelineRuntimeAssets>(out var assets))
             {
                 switch (lightType)
                 {
                     case LightType.Tube:
-                        if (m_EmissiveMeshFilter.sharedMesh != HDRenderPipelineGlobalSettings.instance.renderPipelineResources.assets.emissiveCylinderMesh)
-                            m_EmissiveMeshFilter.sharedMesh = HDRenderPipelineGlobalSettings.instance.renderPipelineResources.assets.emissiveCylinderMesh;
+                        if (m_EmissiveMeshFilter.sharedMesh != assets.emissiveCylinderMesh)
+                            m_EmissiveMeshFilter.sharedMesh = assets.emissiveCylinderMesh;
                         break;
                     default:
-                        if (m_EmissiveMeshFilter.sharedMesh != HDRenderPipelineGlobalSettings.instance.renderPipelineResources.assets.emissiveQuadMesh)
-                            m_EmissiveMeshFilter.sharedMesh = HDRenderPipelineGlobalSettings.instance.renderPipelineResources.assets.emissiveQuadMesh;
+                        if (m_EmissiveMeshFilter.sharedMesh != assets.emissiveQuadMesh)
+                            m_EmissiveMeshFilter.sharedMesh = assets.emissiveQuadMesh;
                         break;
                 }
             }
@@ -2990,6 +3157,10 @@ namespace UnityEngine.Rendering.HighDefinition
                 case LightType.Tube:
                     m_ShapeWidth = lightSize.x;
                     break;
+                case LightType.Disc:
+                    m_ShapeWidth = lightSize.x;
+                    m_ShapeHeight = lightSize.x;
+                    break;
                 default:
                     break;
             }
@@ -3001,9 +3172,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 lightRenderData.shapeHeight = m_ShapeHeight;
             }
 
-#if UNITY_EDITOR
             legacyLight.areaSize = lightSize;
-#endif
 
             // Update child emissive mesh scale
             Vector3 lossyScale = emissiveMeshRenderer.transform.localRotation * transform.lossyScale;
@@ -3027,11 +3196,8 @@ namespace UnityEngine.Rendering.HighDefinition
             // m_Light.intensity is in luminance which is the value we need for emissive color
             Color value = legacyLight.color.linear * legacyLight.intensity;
 
-            // We don't have access to the color temperature in the player because it's a private member of the Light component
-#if UNITY_EDITOR
             if (useColorTemperature)
                 value *= Mathf.CorrelatedColorTemperatureToRGB(legacyLight.colorTemperature);
-#endif
 
             value *= lightDimmer;
 
@@ -3067,7 +3233,15 @@ namespace UnityEngine.Rendering.HighDefinition
             float halfWidth = m_ShapeWidth * 0.5f;
             float halfHeight = m_ShapeHeight * 0.5f;
             float diag = Mathf.Sqrt(halfWidth * halfWidth + halfHeight * halfHeight);
-            legacyLight.boundingSphereOverride = new Vector4(0.0f, 0.0f, 0.0f, Mathf.Max(range, diag));
+            legacyLight.boundingSphereOverride = new Vector4(0.0f, 0.0f, 0.0f, range + diag);
+        }
+
+        void UpdateDiscLightBounds()
+        {
+            legacyLight.useShadowMatrixOverride = false;
+            // TODO: Don't use bounding sphere overrides. Support this properly in Unity native instead.
+            legacyLight.useBoundingSphereOverride = true;
+            legacyLight.boundingSphereOverride = new Vector4(0.0f, 0.0f, 0.0f, range + m_ShapeWidth);
         }
 
         void UpdateTubeLightBounds()
@@ -3075,7 +3249,7 @@ namespace UnityEngine.Rendering.HighDefinition
             legacyLight.useShadowMatrixOverride = false;
             // TODO: Don't use bounding sphere overrides. Support this properly in Unity native instead.
             legacyLight.useBoundingSphereOverride = true;
-            legacyLight.boundingSphereOverride = new Vector4(0.0f, 0.0f, 0.0f, Mathf.Max(range, m_ShapeWidth * 0.5f));
+            legacyLight.boundingSphereOverride = new Vector4(0.0f, 0.0f, 0.0f, range + m_ShapeWidth * 0.5f);
         }
 
         void UpdateBoxLightBounds()
@@ -3122,6 +3296,9 @@ namespace UnityEngine.Rendering.HighDefinition
                 case LightType.Rectangle:
                     UpdateRectangleLightBounds();
                     break;
+                case LightType.Disc:
+                    UpdateDiscLightBounds();
+                    break;
                 case LightType.Tube:
                     UpdateTubeLightBounds();
                     break;
@@ -3138,11 +3315,16 @@ namespace UnityEngine.Rendering.HighDefinition
             shapeWidth = m_ShapeWidth;
             shapeHeight = m_ShapeHeight;
 
-#if UNITY_EDITOR
-            // We don't want to update the disc area since their shape is largely handled by builtin.
-            if (legacyLight.type != LightType.Disc)
+            if (legacyLight.type == LightType.Pyramid)
+            {
+                // Pyramid lights use areaSize.x for aspect ratio.
+                legacyLight.areaSize = new Vector2(aspectRatio, 0);
+            }
+            else if (legacyLight.type != LightType.Disc)
+            {
+                // We don't want to update the disc area since their shape is largely handled by builtin.
                 legacyLight.areaSize = new Vector2(shapeWidth, shapeHeight);
-#endif
+            }
         }
 
         /// <summary>
@@ -3157,9 +3339,6 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             UpdateShapeSize();
 
-            // Update light intensity
-            UpdateLightIntensity();
-
             // Patch bounds
             UpdateBounds();
 
@@ -3172,12 +3351,7 @@ namespace UnityEngine.Rendering.HighDefinition
             if (wentThroughCachedShadowSystem)
                 HDShadowManager.cachedShadowManager.EvictLight(this, legacyLight.type);
 
-            if (!ShadowIsUpdatedEveryFrame() && legacyLight.shadows != LightShadows.None)
-            {
-                // If we are OnDemand not rendered on placement, we defer the registering of the light until the rendering is requested.
-                if (!(shadowUpdateMode == ShadowUpdateMode.OnDemand && !onDemandShadowRenderOnPlacement))
-                    HDShadowManager.cachedShadowManager.RegisterLight(this);
-            }
+            RegisterCachedShadowLightOptional();
         }
 
         #endregion
@@ -3209,34 +3383,6 @@ namespace UnityEngine.Rendering.HighDefinition
             useColorTemperature = enable;
         }
 
-        /// <summary>
-        /// Set the intensity of the light using the current unit.
-        /// </summary>
-        /// <param name="intensity"></param>
-        public void SetIntensity(float intensity) => this.intensity = intensity;
-
-        /// <summary>
-        /// Set the intensity of the light using unit in parameter.
-        /// </summary>
-        /// <param name="intensity"></param>
-        /// <param name="unit">Unit must be a valid Light Unit for the current light type</param>
-        public void SetIntensity(float intensity, LightUnit unit)
-        {
-            this.lightUnit = unit;
-            this.intensity = intensity;
-        }
-
-        /// <summary>
-        /// For Spot Lights only, set the intensity that the spot should emit at a certain distance in meter
-        /// </summary>
-        /// <param name="luxIntensity"></param>
-        /// <param name="distance"></param>
-        public void SetSpotLightLuxAt(float luxIntensity, float distance)
-        {
-            lightUnit = LightUnit.Lux;
-            luxAtDistance = distance;
-            intensity = luxIntensity;
-        }
 
         /// <summary>
         /// Set light cookie. Note that the texture must have a power of two size.
@@ -3304,11 +3450,6 @@ namespace UnityEngine.Rendering.HighDefinition
             this.volumetricDimmer = volumetricDimmer;
         }
 
-        /// <summary>
-        /// Set the light unit.
-        /// </summary>
-        /// <param name="unit">Unit of the light</param>
-        public void SetLightUnit(LightUnit unit) => lightUnit = unit;
 
         /// <summary>
         /// Enable shadows on a light.
@@ -3324,7 +3465,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Set the shadow resolution.
         /// </summary>
-        /// <param name="resolution">Must be between 16 and 16384</param>
+        /// <param name="resolution">Must be between 16 and 16384 but we will allow 0 to turn off the shadow</param>
         public void SetShadowResolution(int resolution)
         {
             if (shadowResolution.@override != resolution)
@@ -3452,12 +3593,6 @@ namespace UnityEngine.Rendering.HighDefinition
         public float[] SetLayerShadowCullDistances(float[] layerShadowCullDistances) => legacyLight.layerShadowCullDistances = layerShadowCullDistances;
 
         /// <summary>
-        /// Get the list of supported light units depending on the current light type.
-        /// </summary>
-        /// <returns></returns>
-        public LightUnit[] GetSupportedLightUnits() => GetSupportedLightUnits(legacyLight.type);
-
-        /// <summary>
         /// Set the area light size.
         /// </summary>
         /// <param name="size"></param>
@@ -3565,6 +3700,7 @@ namespace UnityEngine.Rendering.HighDefinition
             lightRenderData.angularDiameter = m_AngularDiameter;
             lightRenderData.volumetricFadeDistance = m_VolumetricFadeDistance;
             lightRenderData.includeForRayTracing = m_IncludeForRayTracing;
+            lightRenderData.includeForPathTracing = m_IncludeForPathTracing;
             lightRenderData.useScreenSpaceShadows = m_UseScreenSpaceShadows;
 
             // If we are pure shadowmask, we disable raytraced shadows.
@@ -3585,8 +3721,6 @@ namespace UnityEngine.Rendering.HighDefinition
             lightRenderData.volumetricShadowDimmer = m_VolumetricShadowDimmer;
             lightRenderData.shapeWidth = m_ShapeWidth;
             lightRenderData.shapeHeight = m_ShapeHeight;
-            lightRenderData.flareSize = m_FlareSize;
-            lightRenderData.flareFalloff = m_FlareFalloff;
             lightRenderData.aspectRatio = m_AspectRatio;
             lightRenderData.innerSpotPercent = m_InnerSpotPercent;
             lightRenderData.spotIESCutoffPercent = m_SpotIESCutoffPercent;
@@ -3598,9 +3732,7 @@ namespace UnityEngine.Rendering.HighDefinition
             lightRenderData.applyRangeAttenuation = m_ApplyRangeAttenuation;
             lightRenderData.penumbraTint = m_PenumbraTint;
             lightRenderData.interactsWithSky = m_InteractsWithSky;
-            lightRenderData.surfaceTint = m_SurfaceTint;
             lightRenderData.shadowTint = m_ShadowTint;
-            lightRenderData.flareTint = m_FlareTint;
 
             lightEntities.EditAdditionalLightUpdateDataAsRef(lightEntity).Set(this);
         }
@@ -3621,12 +3753,7 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             CreateHDLightRenderEntity();
 
-            if (!ShadowIsUpdatedEveryFrame() && legacyLight.shadows != LightShadows.None)
-            {
-                // If we are OnDemand not rendered on placement, we defer the registering of the light until the rendering is requested.
-                if (!(shadowUpdateMode == ShadowUpdateMode.OnDemand && !onDemandShadowRenderOnPlacement))
-                    HDShadowManager.cachedShadowManager.RegisterLight(this);
-            }
+            RegisterCachedShadowLightOptional();
 
             SetEmissiveMeshRendererEnabled(true);
         }

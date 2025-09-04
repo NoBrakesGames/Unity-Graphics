@@ -1,6 +1,6 @@
 using System;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -26,7 +26,7 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             return renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
             {
-                colorFormat = GraphicsFormat.R8_SNorm,
+                format = GraphicsFormat.R8_SNorm,
                 dimension = TextureXR.dimension,
                 enableRandomWrite = true,
                 useMipMap = true,
@@ -86,6 +86,8 @@ namespace UnityEngine.Rendering.HighDefinition
             public TextureHandle debugBuffer;
             public TextureHandle rayCountTexture;
             public TextureHandle outputBuffer;
+
+            public bool enableDecals;
         }
 
         TextureHandle RaytracingRecursiveRender(RenderGraph renderGraph, HDCamera hdCamera, TextureHandle colorBuffer, TextureHandle depthPyramid, TextureHandle flagMask, TextureHandle rayCountTexture)
@@ -120,7 +122,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 // Other data
                 passData.accelerationStructure = RequestAccelerationStructure(hdCamera);
                 passData.lightCluster = RequestLightCluster();
-                passData.recursiveRenderingRT = m_GlobalSettings.renderPipelineRayTracingResources.forwardRaytracing;
+                passData.recursiveRenderingRT = rayTracingResources.forwardRayTracing;
                 passData.skyTexture = m_SkyManager.GetSkyReflection(hdCamera);
                 passData.shaderVariablesRayTracingCB = m_ShaderVariablesRayTracingCB;
                 passData.ditheredTextureSet = GetBlueNoiseManager().DitheredTextureSet8SPP();
@@ -132,7 +134,9 @@ namespace UnityEngine.Rendering.HighDefinition
                 // Right now the debug buffer is written to independently of what is happening. This must be changed
                 // TODO RENDERGRAPH
                 passData.debugBuffer = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Recursive Rendering Debug Texture" }));
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Recursive Rendering Debug Texture" }));
+
+                passData.enableDecals = hdCamera.frameSettings.IsEnabled(FrameSettingsField.Decals);
 
                 builder.SetRenderFunc(
                     (RecursiveRenderingPassData data, RenderGraphContext ctx) =>
@@ -175,6 +179,11 @@ namespace UnityEngine.Rendering.HighDefinition
 
                         // If this is the right debug mode and we have at least one light, write the first shadow to the de-noised texture
                         ctx.cmd.SetRayTracingTextureParam(data.recursiveRenderingRT, HDShaderIDs._RaytracingPrimaryDebug, data.debugBuffer);
+
+                        if (data.enableDecals)
+                        {
+                            DecalSystem.instance.SetAtlas(ctx.cmd);
+                        }
 
                         // Run the computation
                         ctx.cmd.DispatchRays(data.recursiveRenderingRT, m_RayGenShaderName, (uint)data.texWidth, (uint)data.texHeight, (uint)data.viewCount);

@@ -345,273 +345,51 @@ namespace UnityEngine.Rendering.HighDefinition
         public uint renderingLayers;
         public int cameraUnderWater;
 
-        // Refraction data Data
-        public Vector3 transparencyColor;
-        public float outScatteringCoefficient;
+        // Extinction coefficient
+        public Vector3 extinction;
+        // Extinction coefficient multiplier for underwater
+        public float extinctionMultiplier;
 
-        // Scattering color
-        public Vector3 scatteringColor;
+        // Albedo
+        public Vector3 albedo;
         // Roughness used for environment lighting
         public float envPerceptualRoughness;
 
-        // Smoothness fade transition values
-        public float smoothnessFadeStart;
-        public float smoothnessFadeDistance;
-        public float roughnessEndValue;
-        // Color pyramid scale
-        public float colorPyramidScale;
+        public Vector3 foamColor;
+        public float padding1;
+
+        public Vector3 underwaterColor;
+        public float padding2;
 
         // Vertical direction of the water surface (used for SSR, Env Lighting, etc)
         public Vector3 upDirection;
-        public int colorPyramidMipOffset;
+        public float roughnessEndValue;
 
-        // Padding
-        public Vector2 padding;
+        public float smoothnessFadeStart;
+        public float smoothnessFadeDistance;
+        public int disableIOR;
         public float tipScatteringHeight;
-        public float underWaterAmbientProbeContribution;
-    }
-
-    [GenerateHLSL(needAccessors = false, generateCBuffer = true)]
-    unsafe struct ShaderVariablesWater
-    {
-        // Resolution at which the simulation is evaluated
-        public uint _BandResolution;
-        // Maximal wave height of the current setup
-        public float _MaxWaveHeight;
-        // Current simulation time
-        public float _SimulationTime;
-        // Maximal wave height (used for tip scattering)
-        public float _ScatteringWaveHeight;
-
-        // Per band data
-        public int4 _PatchGroup;
-        public Vector4 _PatchSize;
-        public Vector4 _PatchOrientation;
-        public Vector4 _PatchWindSpeed;
-        public Vector4 _PatchDirectionDampener;
-        public Vector4 _PatchAmplitudeMultiplier;
-        public Vector4 _PatchCurrentSpeed;
-        public Vector4 _PatchFadeA;
-        public Vector4 _PatchFadeB;
-
-        // Per group data
-        public float2 _GroupOrientation;
-        public int _PaddingW0;
-        public int _WaterFoamRegionResolution;
-
-        // Smoothness of the foam
-        public float _FoamSmoothness;
-        // Controls the fade multiplier of the foam
-        public float _FoamPersistenceMultiplier;
-        // Amount of surface foam
-        public float _SimulationFoamAmount;
-        // Foam Intensity
-        public float _SimulationFoamIntensity;
-
-        // Amount of choppiness
-        public float _Choppiness;
-        // Delta-time since the last simulation step
-        public float _DeltaTime;
-        // Maximal horizontal displacement
-        public float _MaxWaveDisplacement;
-        // Maximum refraction distance
-        public float _MaxRefractionDistance;
-
-        // Horizontal offsets of the foam texture
-        public Vector2 _FoamOffsets;
-        // Tiling parameter of the foam texture
-        public float _FoamTilling;
-        // Attenuation of the foam due to the wind
-        public float _SimulationFoamWindAttenuation;
-
-        // Color applied to the surfaces that are through the refraction
-        public Vector4 _TransparencyColor;
-
-        public Vector4 _ScatteringColorTips;
-
-        public float _DisplacementScattering;
-        public int _WaterInitialFrame;
-        public int _SurfaceIndex;
-        public float _CausticsRegionSize;
-
-        // Up direction of the water surface
-        public float4 _WaterUpDirection;
-
-        public Vector4 _DeepFoamColor;
-
-        public float _OutScatteringCoefficient;
-        public float _PaddingW2;
-        public float _HeightBasedScattering;
-        public float _WaterSmoothness;
-
-        public Vector4 _FoamJacobianLambda;
-
-        // Scale of the water mask
-        public Vector2 _WaterMaskScale;
-        // Offset of the water mask
-        public Vector2 _WaterMaskOffset;
-
-        // Scale of the foam mask
-        public Vector2 _SimulationFoamMaskScale;
-        // Offset of the foam mask
-        public Vector2 _SimulationFoamMaskOffset;
-
-        // Size of the foam region
-        public Vector2 _FoamRegionScale;
-        // Center of the foam region
-        public Vector2 _FoamRegionOffset;
-
-        // Offsets used to guarantee the coherence between the different simulation resolutions
-        public int _WaterRefSimRes;
-        public float _WaterSpectrumOffset;
-        public int _WaterSampleOffset;
-        public int _WaterBandCount;
-
-        public Vector2 _WaterMaskRemap;
-        public float _AmbientScattering;
-        public int _CausticsBandIndex;
-    }
-
-    [GenerateHLSL(needAccessors = false, generateCBuffer = true)]
-    unsafe struct ShaderVariablesWaterRendering
-    {
-        // Offset of the patch w/r to the origin
-        public Vector4 _PatchOffset;
-
-        // Horizontal size of the grid in the horizontal plane
-        public Vector2 _GridSize;
-        // Number of LODs used to render infinite water surfaces
-        public uint _WaterLODCount;
-        // Number of water patches that need to be rendered
-        public uint _NumWaterPatches;
-
-        // Padding
-        public float _CausticsShadowIntensity;
-        // Intensity of the water caustics
-        public float _CausticsIntensity;
-        // Current Map Influence
-        public Vector2 _CurrentMapInfluence;
-
-        // Scale & offset of the large
-        public Vector4 _Group0CurrentRegionScaleOffset;
-        // Scale & offset of the ripples
-        public Vector4 _Group1CurrentRegionScaleOffset;
-
-        // Blend distance
-        public float _CausticsPlaneBlendDistance;
-        // Type of caustics that are rendered
-        public int _WaterCausticsEnabled;
-        // Which rendering layers should affect this surface - for decals
-        public uint _WaterRenderingLayer;
-        // Flag that defines if the geometry used is procedural or not
-        public int _WaterProceduralGeometry;
-
-        // Max tessellation factor
-        public float _WaterMaxTessellationFactor;
-        // Distance at which the fade of the tessellation starts
-        public float _WaterTessellationFadeStart;
-        // Size of the range of the tessellation
-        public float _WaterTessellationFadeRange;
-        // Flag that defines if the camera is in the underwater volume of this surface
-        public int _CameraInUnderwaterRegion;
-
-        // This is only used for the instanced quad (non-infinite)
-        // Center of the quad in world space
-        public Vector2 _RegionCenter;
-        // Size of the quad in world space
-        public Vector2 _RegionExtent;
-
-        // Ambient probe of the water system
-        public Vector4 _WaterAmbientProbe;
-
-        // Offset applied to the caustics LOD
-        public float _CausticsMaxLOD;
-        public float _MaxWaterDeformation;
-        public float _CausticsTilingFactor;
-        public float _PaddingWR2;
-
-        // Transform of the water surface
-        public Matrix4x4 _WaterSurfaceTransformRWS;
-        public Matrix4x4 _WaterSurfaceTransform_Inverse;
-        public Matrix4x4 _WaterCustomMeshTransform;
-        public Matrix4x4 _WaterCustomMeshTransform_Inverse;
-    }
-
-    [GenerateHLSL(needAccessors = false, generateCBuffer = true)]
-    unsafe struct ShaderVariablesUnderWater
-    {
-        // Refraction color of the water surface
-        public Vector4 _WaterRefractionColor;
-        // Scattering color of the water surface
-        public Vector4 _WaterScatteringColor;
-
-        // Multiplier of the view distance when under water
-        public float _MaxViewDistanceMultiplier;
-        // Scattering coefficient for the absorption
-        public float _OutScatteringCoeff;
-        // Vertical transition size of the water
-        public float _WaterTransitionSize;
-        // Under water ambient probe contribution
-        public float _UnderWaterAmbientProbeContribution;
-    }
-
-    [GenerateHLSL(needAccessors = false, generateCBuffer = true)]
-    unsafe struct ShaderVariablesWaterDeformation
-    {
-        public Vector2 _WaterDeformationCenter;
-        public Vector2 _WaterDeformationExtent;
-
-        public Vector2 _PaddingWD0;
-        public int _PaddingWD1;
-        public int _WaterDeformationResolution;
     }
 
     [GenerateHLSL(PackingRules.Exact, false)]
-    struct WaterDeformerData
+    struct WaterDecalData
     {
+        public Vector2 positionXZ;
+        public Vector2 forwardXZ;
+
         public float2 regionSize;
-        public int type;
+        public float surfaceFoamDimmer;
+        public float deepFoamDimmer;
+
         public float amplitude;
+        public float padding0;
+        public float padding1;
+        public float padding2;
 
-        public Vector3 position;
-        public float rotation;
-
-        public float2 blendRegion;
-        public float2 breakingRange;
-
-        public float bowWaveElevation;
-        public float waveLength;
-        public int waveRepetition;
-        public float waveSpeed;
-
-        public float waveOffset;
-        public int cubicBlend;
-        public float deepFoamDimmer;
-        public float surfaceFoamDimmer;
-
-        public float2 deepFoamRange;
-        public float2 padding3;
-
-        // Scale and offset used to read in the texture atlas
-        public Vector4 scaleOffset;
-    }
-
-    [GenerateHLSL(PackingRules.Exact, false)]
-    struct WaterGeneratorData
-    {
-        public Vector3 position;
-        public float rotation;
-
-        public float2 regionSize;
-        public int type;
-        public int padding0;
-
-        public float2 padding1;
-        public float deepFoamDimmer;
-        public float surfaceFoamDimmer;
-
-        // Scale and offset used to read in the texture atlas
-        public Vector4 scaleOffset;
+        public Vector4 deformFoamScaleOffset;
+        public Vector4 maskScaleOffset;
+        public Vector4 largeCurrentScaleOffset;
+        public Vector4 ripplesCurrentScaleOffset;
     }
 
     [GenerateHLSL(PackingRules.Exact, false)]
@@ -619,19 +397,5 @@ namespace UnityEngine.Rendering.HighDefinition
     {
         public float4 dir0;
         public float4 dir1;
-    }
-
-    [GenerateHLSL(needAccessors = false, generateCBuffer = true)]
-    unsafe struct ShaderVariablesWaterDebug
-    {
-        public int _WaterDebugMode;
-        public int _WaterMaskDebugMode;
-        public int _WaterCurrentDebugMode;
-        public float _CurrentDebugMultiplier;
-
-        public int _WaterFoamDebugMode;
-        public int _PaddingWDbg0;
-        public int _PaddingWDbg1;
-        public int _PaddingWDbg2;
     }
 }

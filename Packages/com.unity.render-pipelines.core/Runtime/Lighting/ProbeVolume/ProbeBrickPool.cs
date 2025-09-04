@@ -3,11 +3,29 @@ using System.Collections.Generic;
 using UnityEngine.Profiling;
 using UnityEngine.Experimental.Rendering;
 using Cell = UnityEngine.Rendering.ProbeReferenceVolume.Cell;
+using CellStreamingScratchBuffer = UnityEngine.Rendering.ProbeReferenceVolume.CellStreamingScratchBuffer;
+using CellStreamingScratchBufferLayout = UnityEngine.Rendering.ProbeReferenceVolume.CellStreamingScratchBufferLayout;
 
 namespace UnityEngine.Rendering
 {
     internal class ProbeBrickPool
     {
+        internal static readonly int _Out_L0_L1Rx = Shader.PropertyToID("_Out_L0_L1Rx");
+        internal static readonly int _Out_L1G_L1Ry = Shader.PropertyToID("_Out_L1G_L1Ry");
+        internal static readonly int _Out_L1B_L1Rz = Shader.PropertyToID("_Out_L1B_L1Rz");
+        internal static readonly int _Out_Shared = Shader.PropertyToID("_Out_Shared");
+        internal static readonly int _Out_ProbeOcclusion = Shader.PropertyToID("_Out_ProbeOcclusion");
+        internal static readonly int _Out_SkyOcclusionL0L1 = Shader.PropertyToID("_Out_SkyOcclusionL0L1");
+        internal static readonly int _Out_SkyShadingDirectionIndices = Shader.PropertyToID("_Out_SkyShadingDirectionIndices");
+        internal static readonly int _Out_L2_0 = Shader.PropertyToID("_Out_L2_0");
+        internal static readonly int _Out_L2_1 = Shader.PropertyToID("_Out_L2_1");
+        internal static readonly int _Out_L2_2 = Shader.PropertyToID("_Out_L2_2");
+        internal static readonly int _Out_L2_3 = Shader.PropertyToID("_Out_L2_3");
+        internal static readonly int _ProbeVolumeScratchBufferLayout = Shader.PropertyToID(nameof(ProbeReferenceVolume.CellStreamingScratchBufferLayout));
+        internal static readonly int _ProbeVolumeScratchBuffer= Shader.PropertyToID("_ScratchBuffer");
+
+        internal static int DivRoundUp(int x, int y) => (x + y - 1) / y;
+
         const int kChunkSizeInBricks = 128;
 
         [DebuggerDisplay("Chunk ({x}, {y}, {z})")]
@@ -30,7 +48,11 @@ namespace UnityEngine.Rendering
             internal Texture TexL2_2;
             internal Texture TexL2_3;
 
-            internal Texture3D TexValidity;
+            internal Texture TexProbeOcclusion;
+
+            internal Texture TexValidity;
+            internal Texture TexSkyOcclusion;
+            internal Texture TexSkyShadingDirectionIndices;
 
             internal int width;
             internal int height;
@@ -48,7 +70,11 @@ namespace UnityEngine.Rendering
                 CoreUtils.Destroy(TexL2_2);
                 CoreUtils.Destroy(TexL2_3);
 
+                CoreUtils.Destroy(TexProbeOcclusion);
+
                 CoreUtils.Destroy(TexValidity);
+                CoreUtils.Destroy(TexSkyOcclusion);
+                CoreUtils.Destroy(TexSkyShadingDirectionIndices);
 
                 TexL0_L1rx = null;
 
@@ -59,7 +85,10 @@ namespace UnityEngine.Rendering
                 TexL2_1 = null;
                 TexL2_2 = null;
                 TexL2_3 = null;
+                TexProbeOcclusion = null;
                 TexValidity = null;
+                TexSkyOcclusion = null;
+                TexSkyShadingDirectionIndices = null;
             }
         }
 
@@ -79,24 +108,90 @@ namespace UnityEngine.Rendering
 
         ProbeVolumeSHBands m_SHBands;
         bool m_ContainsValidity;
+        bool m_ContainsProbeOcclusion;
+        bool m_ContainsRenderingLayers;
+        bool m_ContainsSkyOcclusion;
+        bool m_ContainsSkyShadingDirection;
 
-        internal ProbeBrickPool(ProbeVolumeTextureMemoryBudget memoryBudget, ProbeVolumeSHBands shBands, bool allocateValidityData = true)
+        static ComputeShader s_DataUploadCS;
+        static int s_DataUploadKernel;
+        static ComputeShader s_DataUploadL2CS;
+        static int s_DataUploadL2Kernel;
+        static LocalKeyword s_DataUpload_Shared;
+        static LocalKeyword s_DataUpload_ProbeOcclusion;
+        static LocalKeyword s_DataUpload_SkyOcclusion;
+        static LocalKeyword s_DataUpload_SkyShadingDirection;
+
+        internal static void Initialize()
+        {
+            if (!SystemInfo.supportsComputeShaders)
+                return;
+
+            s_DataUploadCS = GraphicsSettings.GetRenderPipelineSettings<ProbeVolumeRuntimeResources>()?.probeVolumeUploadDataCS;
+            s_DataUploadL2CS = GraphicsSettings.GetRenderPipelineSettings<ProbeVolumeRuntimeResources>()?.probeVolumeUploadDataL2CS;
+
+            if (s_DataUploadCS != null)
+            {
+                s_DataUploadKernel = s_DataUploadCS ? s_DataUploadCS.FindKernel("UploadData") : -1;
+                s_DataUpload_Shared = new LocalKeyword(s_DataUploadCS, "PROBE_VOLUMES_SHARED_DATA");
+                s_DataUpload_ProbeOcclusion = new LocalKeyword(s_DataUploadCS, "PROBE_VOLUMES_PROBE_OCCLUSION");
+                s_DataUpload_SkyOcclusion = new LocalKeyword(s_DataUploadCS, "PROBE_VOLUMES_SKY_OCCLUSION");
+                s_DataUpload_SkyShadingDirection = new LocalKeyword(s_DataUploadCS, "PROBE_VOLUMES_SKY_SHADING_DIRECTION");
+            }
+
+            if (s_DataUploadL2CS != null)
+            {
+                s_DataUploadL2Kernel = s_DataUploadL2CS ? s_DataUploadL2CS.FindKernel("UploadDataL2") : -1;
+            }
+        }
+
+        internal Texture GetValidityTexture()
+        {
+            return m_Pool.TexValidity;
+        }
+
+        internal Texture GetSkyOcclusionTexture()
+        {
+            return m_Pool.TexSkyOcclusion;
+        }
+
+        internal Texture GetSkyShadingDirectionIndicesTexture()
+        {
+            return m_Pool.TexSkyShadingDirectionIndices;
+        }
+
+        internal Texture GetProbeOcclusionTexture()
+        {
+            return m_Pool.TexProbeOcclusion;
+        }
+
+        internal ProbeBrickPool(ProbeVolumeTextureMemoryBudget memoryBudget, ProbeVolumeSHBands shBands, bool allocateValidityData = false, bool allocateRenderingLayerData = false, bool allocateSkyOcclusion = false, bool allocateSkyShadingData = false, bool allocateProbeOcclusionData = false)
         {
             Profiler.BeginSample("Create ProbeBrickPool");
             m_NextFreeChunk.x = m_NextFreeChunk.y = m_NextFreeChunk.z = 0;
 
             m_SHBands = shBands;
             m_ContainsValidity = allocateValidityData;
+            m_ContainsProbeOcclusion = allocateProbeOcclusionData;
+            m_ContainsRenderingLayers = allocateRenderingLayerData;
+            m_ContainsSkyOcclusion = allocateSkyOcclusion;
+            m_ContainsSkyShadingDirection = allocateSkyShadingData;
 
             m_FreeList = new Stack<BrickChunkAlloc>(256);
 
             DerivePoolSizeFromBudget(memoryBudget, out int width, out int height, out int depth);
-            m_Pool = CreateDataLocation(width * height * depth, false, shBands, "APV", true, allocateValidityData, out int estimatedCost);
-            estimatedVMemCost = estimatedCost;
+            AllocatePool(width, height, depth);
 
             m_AvailableChunkCount = (m_Pool.width / (kChunkSizeInBricks * kBrickProbeCountPerDim)) * (m_Pool.height / kBrickProbeCountPerDim) * (m_Pool.depth / kBrickProbeCountPerDim);
 
             Profiler.EndSample();
+        }
+
+        internal void AllocatePool(int width, int height, int depth)
+        {
+            m_Pool = CreateDataLocation(width * height * depth, false, m_SHBands, "APV", true,
+                m_ContainsValidity, m_ContainsRenderingLayers, m_ContainsSkyOcclusion, m_ContainsSkyShadingDirection, m_ContainsProbeOcclusion, out int estimatedCost);
+            estimatedVMemCost = estimatedCost;
         }
 
         public int GetRemainingChunkCount()
@@ -110,9 +205,24 @@ namespace UnityEngine.Rendering
             if (m_Pool.TexL0_L1rx == null)
             {
                 m_Pool.Cleanup();
-                m_Pool = CreateDataLocation(m_Pool.width * m_Pool.height * m_Pool.depth, false, m_SHBands, "APV", true, m_ContainsValidity, out int estimatedCost);
-                estimatedVMemCost = estimatedCost;
+                AllocatePool(m_Pool.width, m_Pool.height, m_Pool.depth);
             }
+        }
+
+        internal bool EnsureTextureValidity(bool renderingLayers, bool skyOcclusion, bool skyDirection, bool probeOcclusion)
+        {
+            if (m_ContainsRenderingLayers != renderingLayers || m_ContainsSkyOcclusion != skyOcclusion || m_ContainsSkyShadingDirection != skyDirection || m_ContainsProbeOcclusion != probeOcclusion)
+            {
+                m_Pool.Cleanup();
+
+                m_ContainsRenderingLayers = renderingLayers;
+                m_ContainsSkyOcclusion = skyOcclusion;
+                m_ContainsSkyShadingDirection = skyDirection;
+                m_ContainsProbeOcclusion = probeOcclusion;
+                AllocatePool(m_Pool.width, m_Pool.height, m_Pool.depth);
+                return false;
+            }
+            return true;
         }
 
         internal static int GetChunkSizeInBrickCount() { return kChunkSizeInBricks; }
@@ -133,7 +243,11 @@ namespace UnityEngine.Rendering
             rr.L2_2 = m_Pool.TexL2_2 as RenderTexture;
             rr.L2_3 = m_Pool.TexL2_3 as RenderTexture;
 
-            rr.Validity = m_Pool.TexValidity;
+            rr.ProbeOcclusion = m_Pool.TexProbeOcclusion as RenderTexture;
+
+            rr.Validity = m_Pool.TexValidity as RenderTexture;
+            rr.SkyOcclusionL0L1 = m_Pool.TexSkyOcclusion as RenderTexture;
+            rr.SkyShadingDirectionIndices = m_Pool.TexSkyShadingDirectionIndices as RenderTexture;
         }
 
         internal void Clear()
@@ -167,6 +281,7 @@ namespace UnityEngine.Rendering
                     if (!ignoreErrorLog)
                         Debug.LogError("Cannot allocate more brick chunks, probe volume brick pool is full.");
 
+                    Deallocate(outAllocations);
                     outAllocations.Clear();
                     return false; // failure case, pool is full
                 }
@@ -216,6 +331,15 @@ namespace UnityEngine.Rendering
                     if (m_ContainsValidity)
                         Graphics.CopyTexture(source.TexValidity, src.z + j, 0, src.x, src.y, width, kBrickProbeCountPerDim, m_Pool.TexValidity, dst.z + j, 0, dst.x, dst.y);
 
+                    if (m_ContainsSkyOcclusion)
+                    {
+                        Graphics.CopyTexture(source.TexSkyOcclusion, src.z + j, 0, src.x, src.y, width, kBrickProbeCountPerDim, m_Pool.TexSkyOcclusion, dst.z + j, 0, dst.x, dst.y);
+                        if (m_ContainsSkyShadingDirection)
+                        {
+                            Graphics.CopyTexture(source.TexSkyShadingDirectionIndices, src.z + j, 0, src.x, src.y, width, kBrickProbeCountPerDim, m_Pool.TexSkyShadingDirectionIndices, dst.z + j, 0, dst.x, dst.y);
+                        }
+                    }
+
                     if (bands == ProbeVolumeSHBands.SphericalHarmonicsL2)
                     {
                         Graphics.CopyTexture(source.TexL2_0, src.z + j, 0, src.x, src.y, width, kBrickProbeCountPerDim, m_Pool.TexL2_0, dst.z + j, 0, dst.x, dst.y);
@@ -223,6 +347,83 @@ namespace UnityEngine.Rendering
                         Graphics.CopyTexture(source.TexL2_2, src.z + j, 0, src.x, src.y, width, kBrickProbeCountPerDim, m_Pool.TexL2_2, dst.z + j, 0, dst.x, dst.y);
                         Graphics.CopyTexture(source.TexL2_3, src.z + j, 0, src.x, src.y, width, kBrickProbeCountPerDim, m_Pool.TexL2_3, dst.z + j, 0, dst.x, dst.y);
                     }
+
+                    if (m_ContainsProbeOcclusion)
+                    {
+                        Graphics.CopyTexture(source.TexProbeOcclusion, src.z + j, 0, src.x, src.y, width, kBrickProbeCountPerDim, m_Pool.TexProbeOcclusion, dst.z + j, 0, dst.x, dst.y);
+                    }
+                }
+            }
+        }
+
+        internal void Update(CommandBuffer cmd, CellStreamingScratchBuffer dataBuffer, CellStreamingScratchBufferLayout layout,
+            List<BrickChunkAlloc> dstLocations, bool updateSharedData, Texture validityTexture, ProbeVolumeSHBands bands,
+            bool skyOcclusion, Texture skyOcclusionTexture, bool skyShadingDirections, Texture skyShadingDirectionsTexture, bool probeOcclusion)
+        {
+            using (new ProfilingScope(cmd, ProfilingSampler.Get(CoreProfileId.APVDiskStreamingUpdatePool)))
+            {
+                int chunkCount = dstLocations.Count;
+
+                cmd.SetComputeTextureParam(s_DataUploadCS, s_DataUploadKernel, _Out_L0_L1Rx, m_Pool.TexL0_L1rx);
+                cmd.SetComputeTextureParam(s_DataUploadCS, s_DataUploadKernel, _Out_L1G_L1Ry, m_Pool.TexL1_G_ry);
+                cmd.SetComputeTextureParam(s_DataUploadCS, s_DataUploadKernel, _Out_L1B_L1Rz, m_Pool.TexL1_B_rz);
+
+                if (updateSharedData)
+                {
+                    cmd.EnableKeyword(s_DataUploadCS, s_DataUpload_Shared);
+                    cmd.SetComputeTextureParam(s_DataUploadCS, s_DataUploadKernel, _Out_Shared, validityTexture);
+
+                    if (skyOcclusion)
+                    {
+                        cmd.EnableKeyword(s_DataUploadCS, s_DataUpload_SkyOcclusion);
+                        cmd.SetComputeTextureParam(s_DataUploadCS, s_DataUploadKernel, _Out_SkyOcclusionL0L1, skyOcclusionTexture);
+                        if (skyShadingDirections)
+                        {
+                            cmd.SetComputeTextureParam(s_DataUploadCS, s_DataUploadKernel, _Out_SkyShadingDirectionIndices, skyShadingDirectionsTexture);
+                            cmd.EnableKeyword(s_DataUploadCS, s_DataUpload_SkyShadingDirection);
+                        }
+                        else
+                            cmd.DisableKeyword(s_DataUploadCS, s_DataUpload_SkyShadingDirection);
+                    }
+                }
+                else
+                {
+                    cmd.DisableKeyword(s_DataUploadCS, s_DataUpload_Shared);
+                    cmd.DisableKeyword(s_DataUploadCS, s_DataUpload_SkyOcclusion);
+                    cmd.DisableKeyword(s_DataUploadCS, s_DataUpload_SkyShadingDirection);
+                }
+
+                if (bands == ProbeVolumeSHBands.SphericalHarmonicsL2)
+                {
+                    cmd.SetComputeTextureParam(s_DataUploadL2CS, s_DataUploadL2Kernel, _Out_L2_0, m_Pool.TexL2_0);
+                    cmd.SetComputeTextureParam(s_DataUploadL2CS, s_DataUploadL2Kernel, _Out_L2_1, m_Pool.TexL2_1);
+                    cmd.SetComputeTextureParam(s_DataUploadL2CS, s_DataUploadL2Kernel, _Out_L2_2, m_Pool.TexL2_2);
+                    cmd.SetComputeTextureParam(s_DataUploadL2CS, s_DataUploadL2Kernel, _Out_L2_3, m_Pool.TexL2_3);
+                }
+
+                if (probeOcclusion)
+                {
+                    cmd.EnableKeyword(s_DataUploadCS, s_DataUpload_ProbeOcclusion);
+                    cmd.SetComputeTextureParam(s_DataUploadCS, s_DataUploadKernel, _Out_ProbeOcclusion, m_Pool.TexProbeOcclusion);
+                }
+                else
+                {
+                    cmd.DisableKeyword(s_DataUploadCS, s_DataUpload_ProbeOcclusion);
+                }
+
+                const int numthreads = 64;
+                const int probePerThread = 4; // We can upload 4 probes per thread in the current shader.
+                int threadX = DivRoundUp(kChunkSizeInBricks * kBrickProbeCountTotal / probePerThread, numthreads);
+
+                ConstantBuffer.Push(cmd, layout, s_DataUploadCS, _ProbeVolumeScratchBufferLayout);
+                cmd.SetComputeBufferParam(s_DataUploadCS, s_DataUploadKernel, _ProbeVolumeScratchBuffer, dataBuffer.buffer);
+                cmd.DispatchCompute(s_DataUploadCS, s_DataUploadKernel, threadX, 1, chunkCount);
+
+                if (bands == ProbeVolumeSHBands.SphericalHarmonicsL2)
+                {
+                    ConstantBuffer.Push(cmd, layout, s_DataUploadL2CS, _ProbeVolumeScratchBufferLayout);
+                    cmd.SetComputeBufferParam(s_DataUploadL2CS, s_DataUploadL2Kernel, _ProbeVolumeScratchBuffer, dataBuffer.buffer);
+                    cmd.DispatchCompute(s_DataUploadL2CS, s_DataUploadL2Kernel, threadX, 1, chunkCount);
                 }
             }
         }
@@ -279,7 +480,8 @@ namespace UnityEngine.Rendering
             return (width * height * depth) * elementSize;
         }
 
-        internal static int EstimateMemoryCost(ProbeVolumeTextureMemoryBudget memoryBudget, bool compressed, ProbeVolumeSHBands bands, bool allocateValidityData)
+        // Only computes the cost of textures allocated by the blending pool
+        internal static int EstimateMemoryCostForBlending(ProbeVolumeTextureMemoryBudget memoryBudget, bool compressed, ProbeVolumeSHBands bands)
         {
             if (memoryBudget == 0)
                 return 0;
@@ -296,9 +498,6 @@ namespace UnityEngine.Rendering
 
             allocatedBytes += EstimateMemoryCost(width, height, depth, L0Format);
             allocatedBytes += EstimateMemoryCost(width, height, depth, L1L2Format) * 2;
-
-            if (allocateValidityData)
-                allocatedBytes += EstimateMemoryCost(width, height, depth, GraphicsFormat.R8_UNorm);
 
             if (bands == ProbeVolumeSHBands.SphericalHarmonicsL2)
                 allocatedBytes += EstimateMemoryCost(width, height, depth, L1L2Format) * 3;
@@ -320,7 +519,7 @@ namespace UnityEngine.Rendering
                     volumeDepth = depth,
                     graphicsFormat = format,
                     mipCount = 1,
-                    enableRandomWrite = true,
+                    enableRandomWrite = SystemInfo.supportsComputeShaders,
                     dimension = TextureDimension.Tex3D,
                     msaaSamples = 1,
                 });
@@ -336,7 +535,8 @@ namespace UnityEngine.Rendering
             return texture;
         }
 
-        public static DataLocation CreateDataLocation(int numProbes, bool compressed, ProbeVolumeSHBands bands, string name, bool allocateRendertexture, bool allocateValidityData, out int allocatedBytes)
+        public static DataLocation CreateDataLocation(int numProbes, bool compressed, ProbeVolumeSHBands bands, string name, bool allocateRendertexture,
+            bool allocateValidityData, bool allocateRenderingLayers, bool allocateSkyOcclusionData, bool allocateSkyShadingDirectionData, bool allocateProbeOcclusionData, out int allocatedBytes)
         {
             Vector3Int locSize = ProbeCountToDataLocSize(numProbes);
             int width = locSize.x;
@@ -347,15 +547,36 @@ namespace UnityEngine.Rendering
             var L0Format = GraphicsFormat.R16G16B16A16_SFloat;
             var L1L2Format = compressed ? GraphicsFormat.RGBA_BC7_UNorm : GraphicsFormat.R8G8B8A8_UNorm;
 
+            var ValidityFormat = allocateRenderingLayers ?
+                // for 32 bits we use a float format but it's an uint
+                GraphicsFormat.R32_SFloat :
+                // NOTE: Platforms that do not support Sample nor LoadStore for R8_UNorm need to fallback to RGBA8_UNorm since that format should be supported for both (e.g. GLES3.x)
+                SystemInfo.IsFormatSupported(GraphicsFormat.R8_UNorm, GraphicsFormatUsage.Sample | GraphicsFormatUsage.LoadStore) ? GraphicsFormat.R8_UNorm : GraphicsFormat.R8G8B8A8_UNorm;
+
             allocatedBytes = 0;
             loc.TexL0_L1rx = CreateDataTexture(width, height, depth, L0Format, $"{name}_TexL0_L1rx", allocateRendertexture, ref allocatedBytes);
             loc.TexL1_G_ry = CreateDataTexture(width, height, depth, L1L2Format, $"{name}_TexL1_G_ry", allocateRendertexture, ref allocatedBytes);
             loc.TexL1_B_rz = CreateDataTexture(width, height, depth, L1L2Format, $"{name}_TexL1_B_rz", allocateRendertexture, ref allocatedBytes);
 
             if (allocateValidityData)
-                loc.TexValidity = CreateDataTexture(width, height, depth, GraphicsFormat.R8_UNorm, $"{name}_Validity", false, ref allocatedBytes) as Texture3D;
+                loc.TexValidity = CreateDataTexture(width, height, depth, ValidityFormat, $"{name}_Validity", allocateRendertexture, ref allocatedBytes);
             else
                 loc.TexValidity = null;
+
+            if (allocateSkyOcclusionData)
+                loc.TexSkyOcclusion = CreateDataTexture(width, height, depth, GraphicsFormat.R16G16B16A16_SFloat, $"{name}_SkyOcclusion", allocateRendertexture, ref allocatedBytes);
+            else
+                loc.TexSkyOcclusion = null;
+
+            if (allocateSkyShadingDirectionData)
+                loc.TexSkyShadingDirectionIndices = CreateDataTexture(width, height, depth, GraphicsFormat.R8_UNorm, $"{name}_SkyShadingDirectionIndices", allocateRendertexture, ref allocatedBytes);
+            else
+                loc.TexSkyShadingDirectionIndices = null;
+
+            if (allocateProbeOcclusionData)
+                loc.TexProbeOcclusion = CreateDataTexture(width, height, depth, GraphicsFormat.R8G8B8A8_UNorm, $"{name}_ProbeOcclusion", allocateRendertexture, ref allocatedBytes);
+            else
+                loc.TexProbeOcclusion = null;
 
             if (bands == ProbeVolumeSHBands.SphericalHarmonicsL2)
             {
@@ -409,6 +630,7 @@ namespace UnityEngine.Rendering
         static readonly int _State0_L2_1 = Shader.PropertyToID("_State0_L2_1");
         static readonly int _State0_L2_2 = Shader.PropertyToID("_State0_L2_2");
         static readonly int _State0_L2_3 = Shader.PropertyToID("_State0_L2_3");
+        static readonly int _State0_ProbeOcclusion = Shader.PropertyToID("_State0_ProbeOcclusion");
 
         static readonly int _State1_L0_L1Rx = Shader.PropertyToID("_State1_L0_L1Rx");
         static readonly int _State1_L1G_L1Ry = Shader.PropertyToID("_State1_L1G_L1Ry");
@@ -417,21 +639,15 @@ namespace UnityEngine.Rendering
         static readonly int _State1_L2_1 = Shader.PropertyToID("_State1_L2_1");
         static readonly int _State1_L2_2 = Shader.PropertyToID("_State1_L2_2");
         static readonly int _State1_L2_3 = Shader.PropertyToID("_State1_L2_3");
+        static readonly int _State1_ProbeOcclusion = Shader.PropertyToID("_State1_ProbeOcclusion");
 
-        static readonly int _Out_L0_L1Rx = Shader.PropertyToID("_Out_L0_L1Rx");
-        static readonly int _Out_L1G_L1Ry = Shader.PropertyToID("_Out_L1G_L1Ry");
-        static readonly int _Out_L1B_L1Rz = Shader.PropertyToID("_Out_L1B_L1Rz");
-        static readonly int _Out_L2_0 = Shader.PropertyToID("_Out_L2_0");
-        static readonly int _Out_L2_1 = Shader.PropertyToID("_Out_L2_1");
-        static readonly int _Out_L2_2 = Shader.PropertyToID("_Out_L2_2");
-        static readonly int _Out_L2_3 = Shader.PropertyToID("_Out_L2_3");
-
-        internal static bool isSupported => stateBlendShader != null;
-
-        internal static void Initialize(in ProbeVolumeSystemParameters parameters)
+        internal static void Initialize()
         {
-            stateBlendShader = parameters.scenarioBlendingShader;
-            scenarioBlendingKernel = stateBlendShader ? stateBlendShader.FindKernel("BlendScenarios") : -1;
+            if (SystemInfo.supportsComputeShaders)
+            {
+                stateBlendShader = GraphicsSettings.GetRenderPipelineSettings<ProbeVolumeRuntimeResources>()?.probeVolumeBlendStatesCS;
+                scenarioBlendingKernel = stateBlendShader ? stateBlendShader.FindKernel("BlendScenarios") : -1;
+            }
         }
 
         Vector4[] m_ChunkList;
@@ -440,17 +656,18 @@ namespace UnityEngine.Rendering
         ProbeBrickPool m_State0, m_State1;
         ProbeVolumeTextureMemoryBudget m_MemoryBudget;
         ProbeVolumeSHBands m_ShBands;
+        bool m_ProbeOcclusion;
 
         internal bool isAllocated => m_State0 != null;
         internal int estimatedVMemCost
         {
             get
             {
-                if (!isSupported || !ProbeReferenceVolume.instance.supportLightingScenarios)
+                if (!ProbeReferenceVolume.instance.supportScenarioBlending)
                     return 0;
                 if (isAllocated)
                     return m_State0.estimatedVMemCost + m_State1.estimatedVMemCost;
-                return ProbeBrickPool.EstimateMemoryCost(m_MemoryBudget, false, m_ShBands, false) * 2;
+                return ProbeBrickPool.EstimateMemoryCostForBlending(m_MemoryBudget, false, m_ShBands) * 2;
             }
         }
 
@@ -458,11 +675,12 @@ namespace UnityEngine.Rendering
         internal int GetPoolHeight() { return m_State0.m_Pool.height; }
         internal int GetPoolDepth() { return m_State0.m_Pool.depth; }
 
-        internal ProbeBrickBlendingPool(ProbeVolumeBlendingTextureMemoryBudget memoryBudget, ProbeVolumeSHBands shBands)
+        internal ProbeBrickBlendingPool(ProbeVolumeBlendingTextureMemoryBudget memoryBudget, ProbeVolumeSHBands shBands, bool probeOcclusion)
         {
             // Casting to other memory budget struct works cause it's casted to int in the end anyway
             m_MemoryBudget = (ProbeVolumeTextureMemoryBudget)memoryBudget;
             m_ShBands = shBands;
+            m_ProbeOcclusion = probeOcclusion;
         }
 
         internal void AllocateResourcesIfNeeded()
@@ -470,8 +688,8 @@ namespace UnityEngine.Rendering
             if (isAllocated)
                 return;
 
-            m_State0 = new ProbeBrickPool(m_MemoryBudget, m_ShBands, false);
-            m_State1 = new ProbeBrickPool(m_MemoryBudget, m_ShBands, false);
+            m_State0 = new ProbeBrickPool(m_MemoryBudget, m_ShBands, allocateProbeOcclusionData: m_ProbeOcclusion);
+            m_State1 = new ProbeBrickPool(m_MemoryBudget, m_ShBands, allocateProbeOcclusionData: m_ProbeOcclusion);
 
             int maxAvailablebrickCount = (GetPoolWidth()  / ProbeBrickPool.kChunkProbeCountPerDim)
                                        * (GetPoolHeight() / ProbeBrickPool.kBrickProbeCountPerDim)
@@ -486,7 +704,16 @@ namespace UnityEngine.Rendering
             (state == 0 ? m_State0 : m_State1).Update(source, srcLocations, dstLocations, destStartIndex, bands);
         }
 
-        static int DivRoundUp(int x, int y) => (x + y - 1) / y;
+        internal void Update(CommandBuffer cmd, CellStreamingScratchBuffer dataBuffer, CellStreamingScratchBufferLayout layout,
+            List<ProbeBrickPool.BrickChunkAlloc> dstLocations, ProbeVolumeSHBands bands, int state, Texture validityTexture,
+            bool skyOcclusion, Texture skyOcclusionTexture, bool skyShadingDirections, Texture skyShadingDirectionsTexture, bool probeOcclusion)
+        {
+            bool updateShared = state == 0 ? true : false;
+
+            (state == 0 ? m_State0 : m_State1).Update(cmd, dataBuffer, layout, dstLocations,
+                updateShared, validityTexture, bands, updateShared && skyOcclusion, skyOcclusionTexture,
+                updateShared && skyShadingDirections, skyShadingDirectionsTexture, probeOcclusion);
+        }
 
         internal void PerformBlending(CommandBuffer cmd, float factor, ProbeBrickPool dstPool)
         {
@@ -501,9 +728,9 @@ namespace UnityEngine.Rendering
             cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _State1_L1G_L1Ry, m_State1.m_Pool.TexL1_G_ry);
             cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _State1_L1B_L1Rz, m_State1.m_Pool.TexL1_B_rz);
 
-            cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _Out_L0_L1Rx, dstPool.m_Pool.TexL0_L1rx);
-            cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _Out_L1G_L1Ry, dstPool.m_Pool.TexL1_G_ry);
-            cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _Out_L1B_L1Rz, dstPool.m_Pool.TexL1_B_rz);
+            cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, ProbeBrickPool._Out_L0_L1Rx, dstPool.m_Pool.TexL0_L1rx);
+            cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, ProbeBrickPool._Out_L1G_L1Ry, dstPool.m_Pool.TexL1_G_ry);
+            cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, ProbeBrickPool._Out_L1B_L1Rz, dstPool.m_Pool.TexL1_B_rz);
 
             if (m_ShBands == ProbeVolumeSHBands.SphericalHarmonicsL2)
             {
@@ -519,20 +746,30 @@ namespace UnityEngine.Rendering
                 cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _State1_L2_2, m_State1.m_Pool.TexL2_2);
                 cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _State1_L2_3, m_State1.m_Pool.TexL2_3);
 
-                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _Out_L2_0, dstPool.m_Pool.TexL2_0);
-                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _Out_L2_1, dstPool.m_Pool.TexL2_1);
-                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _Out_L2_2, dstPool.m_Pool.TexL2_2);
-                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _Out_L2_3, dstPool.m_Pool.TexL2_3);
+                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, ProbeBrickPool._Out_L2_0, dstPool.m_Pool.TexL2_0);
+                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, ProbeBrickPool._Out_L2_1, dstPool.m_Pool.TexL2_1);
+                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, ProbeBrickPool._Out_L2_2, dstPool.m_Pool.TexL2_2);
+                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, ProbeBrickPool._Out_L2_3, dstPool.m_Pool.TexL2_3);
             }
             else
                 stateBlendShader.DisableKeyword("PROBE_VOLUMES_L2");
 
+            if (m_ProbeOcclusion)
+            {
+                stateBlendShader.EnableKeyword("USE_APV_PROBE_OCCLUSION");
+                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _State0_ProbeOcclusion, m_State0.m_Pool.TexProbeOcclusion);
+                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, _State1_ProbeOcclusion, m_State1.m_Pool.TexProbeOcclusion);
+                cmd.SetComputeTextureParam(stateBlendShader, scenarioBlendingKernel, ProbeBrickPool._Out_ProbeOcclusion, dstPool.m_Pool.TexProbeOcclusion);
+            }
+            else
+                stateBlendShader.DisableKeyword("USE_APV_PROBE_OCCLUSION");
+
             var poolDim_LerpFactor = new Vector4(dstPool.GetPoolWidth(), dstPool.GetPoolHeight(), factor, 0.0f);
 
             const int numthreads = 4;
-            int threadX = DivRoundUp(ProbeBrickPool.kChunkProbeCountPerDim, numthreads);
-            int threadY = DivRoundUp(ProbeBrickPool.kBrickProbeCountPerDim, numthreads);
-            int threadZ = DivRoundUp(ProbeBrickPool.kBrickProbeCountPerDim, numthreads);
+            int threadX = ProbeBrickPool.DivRoundUp(ProbeBrickPool.kChunkProbeCountPerDim, numthreads);
+            int threadY = ProbeBrickPool.DivRoundUp(ProbeBrickPool.kBrickProbeCountPerDim, numthreads);
+            int threadZ = ProbeBrickPool.DivRoundUp(ProbeBrickPool.kBrickProbeCountPerDim, numthreads);
 
             cmd.SetComputeVectorArrayParam(stateBlendShader, _ChunkList, m_ChunkList);
             cmd.SetComputeVectorParam(stateBlendShader, _PoolDim_LerpFactor, poolDim_LerpFactor);

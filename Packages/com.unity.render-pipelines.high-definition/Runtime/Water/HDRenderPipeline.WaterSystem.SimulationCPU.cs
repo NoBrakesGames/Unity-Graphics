@@ -110,7 +110,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 // Second part of the Phillips spectrum term
                 float2 k = Mathf.PI * 2.0f * ((float2)coords.xy - simulationResolution * 0.5f)  / patchSize;
-                float2 windDirection = -HDRenderPipeline.OrientationToDirection(orientation);
+                float2 windDirection = -WaterSystem.OrientationToDirection(orientation);
                 float P = Phillips(k, windDirection, windSpeed, directionDampner, patchSize);
 
                 // Combine and output
@@ -356,7 +356,7 @@ namespace UnityEngine.Rendering.HighDefinition
         }
     }
 
-    public partial class HDRenderPipeline
+    partial class WaterSystem
     {
         // Function that returns the number of butterfly passes depending on the resolution
         internal static int ButterFlyCount(WaterSimulationResolution simRes)
@@ -391,28 +391,22 @@ namespace UnityEngine.Rendering.HighDefinition
         internal NativeArray<half> m_DefaultDeformationBuffer;
         internal NativeArray<uint> m_DefaultCurrentMap;
 
-        void InitializeCPUWaterSimulation()
+        internal void InitializeCPUWaterSimulation()
         {
-            // Only initialize if the asset supports it
-            if (!m_Asset.currentPlatformRenderPipelineSettings.waterCPUSimulation)
-                return;
-
-            // Flag required for freeing the resources at the end
             m_ActiveWaterSimulationCPU = true;
 
-            // Convert the resolution to and int
-            int res = (int)m_WaterBandResolution;
+            if (m_RenderPipeline.asset.currentPlatformRenderPipelineSettings.waterScriptInteractionsMode == WaterScriptInteractionsMode.CPUSimulation)
+            {
+                int res = (int)m_WaterBandResolution;
 
-            // Allocate all the intermediary buffer
-            htR0 = new NativeArray<float4>(res * res, Allocator.Persistent);
-            htI0 = new NativeArray<float4>(res * res, Allocator.Persistent);
-            htR1 = new NativeArray<float4>(res * res, Allocator.Persistent);
-            htI1 = new NativeArray<float4>(res * res, Allocator.Persistent);
-            pingPong = new NativeArray<float3>(res * res * 4, Allocator.Persistent);
-            indices = new NativeArray<uint4>(res * res, Allocator.Persistent);
-
-            // Sector Data
-            m_SectorData = new NativeArray<float4>(WaterConsts.k_SectorSwizzle, Allocator.Persistent);
+                // Allocate all the intermediary buffer
+                htR0 = new NativeArray<float4>(res * res, Allocator.Persistent);
+                htI0 = new NativeArray<float4>(res * res, Allocator.Persistent);
+                htR1 = new NativeArray<float4>(res * res, Allocator.Persistent);
+                htI1 = new NativeArray<float4>(res * res, Allocator.Persistent);
+                pingPong = new NativeArray<float3>(res * res * 4, Allocator.Persistent);
+                indices = new NativeArray<uint4>(res * res, Allocator.Persistent);
+            }
 
             // Default textures
             m_DefaultWaterMask = new NativeArray<uint>(1, Allocator.Persistent);
@@ -421,35 +415,40 @@ namespace UnityEngine.Rendering.HighDefinition
             m_DefaultDeformationBuffer[0] = half(0.0f);
             m_DefaultCurrentMap = new NativeArray<uint>(1, Allocator.Persistent);
             m_DefaultCurrentMap[0] = 0;
+
+            // Sector Data
+            m_SectorData = new NativeArray<float4>(WaterConsts.k_SectorSwizzle, Allocator.Persistent);
         }
 
         void ReleaseCPUWaterSimulation()
         {
-            // If it was not previously initialized, we don't have anything to do
-            if (!m_ActiveWaterSimulationCPU)
-                return;
+            if (!m_ActiveWaterSimulationCPU) return;
+            m_ActiveWaterSimulationCPU = false;
 
-            // Free the native buffers
-            m_DefaultCurrentMap.Dispose();
-            m_DefaultDeformationBuffer.Dispose();
+            if (htR0.IsCreated)
+            {
+                htR0.Dispose();
+                htI0.Dispose();
+                htR1.Dispose();
+                htI1.Dispose();
+                pingPong.Dispose();
+                indices.Dispose();
+            }
+
             m_DefaultWaterMask.Dispose();
+            m_DefaultDeformationBuffer.Dispose();
+            m_DefaultCurrentMap.Dispose();
             m_SectorData.Dispose();
-            htR0.Dispose();
-            htI0.Dispose();
-            htR1.Dispose();
-            htI1.Dispose();
-            pingPong.Dispose();
-            indices.Dispose();
         }
 
-        void UpdateCPUWaterSimulation(WaterSurface waterSurface, bool evaluateSpetrum)
+        void UpdateCPUWaterSimulation(WaterSurface waterSurface)
         {
             // If the asset doesn't support the CPU simulation or the surface doesn't, we don't have to do anything
-            if (!m_ActiveWaterSimulationCPU || !waterSurface.cpuSimulation)
+            if (!waterSurface.scriptInteractions || m_GPUReadbackMode)
                 return;
 
             // Based on if the simulation has been flagged as half or full resolution
-            WaterSimulationResolution cpuSimResolution = waterSurface.GetSimulationResolutionCPU();
+            WaterSimulationResolution cpuSimResolution = m_WaterCPUSimulationResolution;
             uint cpuSimResUint = (uint)cpuSimResolution;
 
             // Number of pixels per band
@@ -457,11 +456,11 @@ namespace UnityEngine.Rendering.HighDefinition
             int waterSampleOffset = EvaluateWaterNoiseSampleOffset(cpuSimResolution);
 
             // Re-evaluate the spectrum if needed.
-            if (evaluateSpetrum)
+            if (!waterSurface.simulation.cpuSpectrumValid)
             {
                 // To avoid re-evaluating
                 // If we get here, it means the spectrum is invalid and we need to go re-evaluate it
-                for (int bandIndex = 0; bandIndex < waterSurface.simulation.spectrum.numActiveBands; ++bandIndex)
+                for (int bandIndex = 0; bandIndex < waterSurface.simulation.numActiveBands; ++bandIndex)
                 {
                     // Prepare the first band
                     WaterCPUSimulation.PhillipsSpectrumInitialization spectrumInit = new WaterCPUSimulation.PhillipsSpectrumInitialization();
@@ -479,10 +478,12 @@ namespace UnityEngine.Rendering.HighDefinition
                     JobHandle handle = spectrumInit.Schedule((int)numPixels, 1);
                     handle.Complete();
                 }
+
+                waterSurface.simulation.cpuSpectrumValid = true;
             }
 
             // For each band, we evaluate the dispersion then the two inverse fft passes
-            int activeBandCount = HDRenderPipeline.EvaluateCPUBandCount(waterSurface.surfaceType, waterSurface.ripples, waterSurface.cpuEvaluateRipples);
+            int activeBandCount = WaterSystem.EvaluateCPUBandCount(waterSurface.surfaceType, waterSurface.ripples, waterSurface.cpuEvaluateRipples);
             for (int bandIndex = 0; bandIndex < activeBandCount; ++bandIndex)
             {
                 // Prepare the first band
@@ -554,20 +555,27 @@ namespace UnityEngine.Rendering.HighDefinition
         void UpdateCPUBuffers(CommandBuffer cmd, WaterSurface currentWater)
         {
             // If the asset doesn't support the CPU simulation or the surface doesn't, we don't have to do anything
-            if (!m_ActiveWaterSimulationCPU || !currentWater.cpuSimulation)
+            if (!currentWater.scriptInteractions)
                 return;
 
-            if (currentWater.waterMask != null)
-                currentWater.waterMaskSynchronizer.EnqueueRequest(cmd, currentWater.waterMask, true);
+            if (m_GPUReadbackMode)
+                currentWater.displacementBufferSynchronizer.EnqueueRequest(cmd, currentWater.simulation.gpuBuffers.displacementBuffer, true);
 
-            if (currentWater.deformation && m_ActiveWaterDeformation)
-                currentWater.deformationBufferSychro.EnqueueRequest(cmd, currentWater.deformationBuffer, true);
+            var deformationBuffer = currentWater.GetDeformationBuffer(this, true);
+            if (deformationBuffer != null)
+                currentWater.deformationBufferSychro.EnqueueRequest(cmd, deformationBuffer, true);
 
-            if (currentWater.largeCurrentMap != null)
-                currentWater.largeCurrentMapSynchronizer.EnqueueRequest(cmd, currentWater.largeCurrentMap, true);
+            var waterMask = currentWater.GetSimulationMaskBuffer(this, true);
+            if (waterMask != null)
+                currentWater.waterMaskSynchronizer.EnqueueRequest(cmd, waterMask, true);
 
-            if (currentWater.ripplesCurrentMap != null)
-                currentWater.ripplesCurrentMapSynchronizer.EnqueueRequest(cmd, currentWater.ripplesCurrentMap, true);
+            var largeCurrentMap = currentWater.GetLargeCurrentBuffer(this, true);
+            if (largeCurrentMap != null)
+                currentWater.largeCurrentMapSynchronizer.EnqueueRequest(cmd, largeCurrentMap, true);
+
+            var ripplesCurrentMap = currentWater.GetRipplesCurrentBuffer(this, true);
+            if (ripplesCurrentMap != null)
+                currentWater.ripplesCurrentMapSynchronizer.EnqueueRequest(cmd, ripplesCurrentMap, true);
         }
     }
 }

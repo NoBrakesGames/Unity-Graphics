@@ -8,6 +8,87 @@ namespace UnityEditor.VFX
 {
     static class SanitizeHelper
     {
+        public static void MigrateSGOutputToComposed(VFXShaderGraphParticleOutput shaderGraphOutput)
+        {
+            var shaderGraph = shaderGraphOutput.GetOrRefreshShaderGraphObject(false);
+            if (shaderGraph == null)
+                return;
+
+            if (!shaderGraph.generatesWithShaderGraph)
+                return;
+
+            Type topologyType = null;
+            Type composedType = null;
+            if (shaderGraphOutput.HasStrips())
+            {
+                topologyType = typeof(ParticleTopologyQuadStrip);
+                composedType = typeof(VFXComposedParticleStripOutput);
+            }
+            else
+            {
+                switch (shaderGraphOutput.taskType)
+                {
+                    case VFXTaskType.ParticleMeshOutput:
+                        topologyType = typeof(ParticleTopologyMesh);
+                        break;
+                    case VFXTaskType.ParticleQuadOutput:
+                    case VFXTaskType.ParticleTriangleOutput:
+                    case VFXTaskType.ParticleOctagonOutput:
+                        topologyType = typeof(ParticleTopologyPlanarPrimitive);
+                        break;
+                }
+
+                composedType = typeof(VFXComposedParticleOutput);
+            }
+
+            if (topologyType == null)
+            {
+                Debug.LogError("Unexpected output primitive: " + shaderGraphOutput);
+                return;
+            }
+
+            var composed = (VFXAbstractComposedParticleOutput)ScriptableObject.CreateInstance(composedType);
+            composed.SetSettingValue("m_Topology", Activator.CreateInstance(topologyType));
+            composed.label = shaderGraphOutput.label;
+
+            //Transfer blocks
+            var sourceBlocks = new List<VFXBlock>(shaderGraphOutput.children);
+            foreach (var block in sourceBlocks)
+                composed.AddChild(block, -1, false);
+
+            //Transfer settings (it should include materialSettings)
+            var sourceSettings = new List<KeyValuePair<string, object>>();
+            var destSettings = new List<VFXSetting>(composed.GetSettings(true, VFXSettingAttribute.VisibleFlags.Default));
+            foreach (var setting in destSettings)
+            {
+                var sourceSetting = shaderGraphOutput.GetSetting(setting.name);
+                if (!sourceSetting.valid)
+                    continue;
+
+                if (VFXConverter.TryConvertTo(sourceSetting.value, setting.field.FieldType, out var value))
+                    sourceSettings.Add(new KeyValuePair<string, object>(setting.field.Name, value));
+            }
+            composed.SetSettingValues(sourceSettings);
+
+            //Transfer slots
+            foreach (var slot in composed.inputSlots)
+            {
+                var refSlot = shaderGraphOutput.inputSlots.FirstOrDefault(o => o.name == slot.name);
+                VFXSlot.CopyLinksAndValue(slot, refSlot, false);
+            }
+
+            //Transfer flow edges
+            foreach (var link in shaderGraphOutput.inputFlowSlot[0].link)
+            {
+                composed.LinkFrom(link.context, link.slotIndex);
+            }
+
+            //Unlink previous flow before replacing model to avoid being kept in data owners
+            shaderGraphOutput.UnlinkAll();
+
+            VFXModel.ReplaceModel(composed, shaderGraphOutput);
+        }
+
         public static void MigrateVector3OutputToSpaceableKeepingLegacyBehavior(VFXOperator op, string newTypeInfo)
         {
             Debug.LogFormat("Sanitizing Graph: Automatically replace Vector3 to {0} for {1}. An inline Vector3 operator has been added.", newTypeInfo, op.name);
@@ -18,6 +99,128 @@ namespace UnityEditor.VFX
             VFXSlot.CopyLinksAndValue(inlineVector3.outputSlots[0], op.outputSlots[0], false /* we should avoid ReSyncSlot at this stage*/);
             op.outputSlots[0].Link(inlineVector3.inputSlots[0], true /* notify here to correctly invalidate */);
             op.GetParent().AddChild(inlineVector3);
+        }
+
+        public static void MigrateBlockPositionToComposed(VFXGraph graph, Vector2 position, PositionShape to, VFXBlock from, PositionShapeBase.Type shapeType)
+        {
+            var fromSettings = from.GetSettings(true);
+            var toSettings = to.GetSettings(true);
+
+            foreach (var fromSetting in fromSettings)
+            {
+                var toSetting = toSettings.FirstOrDefault(o =>
+                    o.name.Equals(fromSetting.name, StringComparison.InvariantCultureIgnoreCase));
+
+                if (toSetting.field == null)
+                    throw new InvalidOperationException("Unexpected migration, can't find approriate settings: " + fromSetting.name);
+
+                var fromValue = fromSetting.value;
+                to.SetSettingValue(toSetting.name, fromValue);
+            }
+
+            to.SetSettingValue("shape", shapeType);
+            VFXSlot.CopyLinksAndValue(to.activationSlot, from.activationSlot);
+
+            if (from.inputSlots.Count == to.inputSlots.Count)
+            {
+                // Special case for AABox as it is migrated to OBox with no rotation
+                int slotStartOffset = 0;
+                if (from.inputSlots[0].property.type == typeof(AABox) && shapeType == PositionShapeBase.Type.OrientedBox)
+                {
+                    CopyLinksAndValueFromAABoxToOBox(to.inputSlots[0], from.inputSlots[0]);
+                    slotStartOffset = 1;
+                }
+
+                for (int i = slotStartOffset; i < from.inputSlots.Count; ++i)
+                {
+                    var fromInputSlot = from.inputSlots[i];
+                    var toInputSlot = to.inputSlots.FirstOrDefault(o => o.name == fromInputSlot.name);
+                    VFXSlot.CopyLinksAndValue(toInputSlot, fromInputSlot, true);
+                }
+            }
+            else // Add height sequencer
+            {
+                if (shapeType != PositionShapeBase.Type.Torus &&
+                    shapeType != PositionShapeBase.Type.Sphere &&
+                    shapeType != PositionShapeBase.Type.Cone)
+                    throw new InvalidOperationException("Unexpected migration to " + shapeType);
+
+                if (to.spawnMode != PositionBase.SpawnMode.Custom)
+                    throw new InvalidOperationException("Unexpected migration using spawn mode " + to.spawnMode);
+
+                //Copy Matching node by name
+                foreach (var fromInputSlot in from.inputSlots)
+                {
+                    var toInputSlot = to.inputSlots.FirstOrDefault(o => o.name == fromInputSlot.name);
+                    if (toInputSlot == null)
+                        throw new InvalidOperationException("Unexpected migration, can't find slot named " + fromInputSlot.name);
+
+                    VFXSlot.CopyLinksAndValue(toInputSlot, fromInputSlot, true);
+                }
+
+                var heightSlot = to.inputSlots.FirstOrDefault(o => o.name == "heightSequencer");
+                if (heightSlot == null)
+                    throw new NullReferenceException();
+
+                var randomNode = ScriptableObject.CreateInstance<Operator.Random>();
+                randomNode.SetSettingValue("constant", false);
+                if (randomNode.inputSlots.Count != 2)
+                    throw new InvalidOperationException("Unexpected migration, can't setup property random operator");
+                graph.AddChild(randomNode);
+                randomNode.position = position - new Vector2(120, 0);
+
+                if (!heightSlot.Link(randomNode.outputSlots[0]))
+                    throw new InvalidOperationException("Unexpected migration, can't setup property random operator");
+            }
+
+            //Extra clean up, some blocks are migrated twice, avoid previous migration keeping unwanted references in m_SlotOwners
+            VFXModel.UnlinkModel(from);
+        }
+
+        public static void MigrateBlockCollisionShapeToComposed(CollisionShape to, VFXBlock from, CollisionShapeBase.Type shapeType)
+        {
+            var fromSettings = from.GetSettings(true);
+            var toSettings = to.GetSettings(true);
+
+            foreach (var fromSetting in fromSettings)
+            {
+                var toSetting = toSettings.FirstOrDefault(o =>
+                    o.name.Equals(fromSetting.name, StringComparison.InvariantCultureIgnoreCase));
+                var fromValue = fromSetting.value;
+                to.SetSettingValue(toSetting.name, fromValue);
+            }
+
+            to.SetSettingValue("shape", shapeType);
+
+            // Special case for AABox as it is migrated to OBox with no rotation
+            int slotStartOffset = 0;
+            if (from.inputSlots[0].property.type == typeof(AABox) && shapeType == CollisionShapeBase.Type.OrientedBox)
+            {
+                CopyLinksAndValueFromAABoxToOBox(to.inputSlots[0], from.inputSlots[0]);
+                slotStartOffset = 1;
+            }
+
+            if (from.inputSlots.Count != to.inputSlots.Count)
+                throw new InvalidOperationException();
+
+            VFXSlot.CopyLinksAndValue(to.activationSlot, from.activationSlot);
+            for (int i = slotStartOffset; i < from.inputSlots.Count; ++i)
+            {
+                var fromInputSlot = from.inputSlots[i];
+                var toInputSlot = to.inputSlots.FirstOrDefault(o => o.name == fromInputSlot.name);
+                VFXSlot.CopyLinksAndValue(toInputSlot, fromInputSlot, true);
+            }
+            
+            // Override bounce speed limit to 0 for sanitized block to avoid changes in behavior
+            if (to.behavior == CollisionBase.Behavior.Collision)
+            {
+                to.SetSettingValue(nameof(CollisionBase.overrideBounceThreshold), true);
+                var slot = to.inputSlots.First(s => s.name == nameof(CollisionBase.CollisionProperties.BounceSpeedThreshold));
+                slot.value = 0.0f;
+            }
+
+            //Extra clean up, some blocks are migrated twice, avoid previous migration keeping unwanted references in m_SlotOwners
+            VFXModel.UnlinkModel(from);
         }
 
         public static void MigrateBlockTShapeFromShape(VFXBlock to, VFXBlock from)
@@ -572,6 +775,30 @@ namespace UnityEditor.VFX
 
             newSampleMesh.Invalidate(VFXModel.InvalidationCause.kConnectionChanged);
             VFXModel.ReplaceModel(newSampleMesh, op);
+        }
+
+        public static void CopyLinksAndValueFromAABoxToOBox(VFXSlot to, VFXSlot from)
+        {
+            if (from.property.type != typeof(AABox) || to.property.type != typeof(OrientedBox))
+                throw new ArgumentException("Slots are not of the expected type");
+
+            if (from.direction != VFXSlot.Direction.kInput || to.direction != VFXSlot.Direction.kInput)
+                throw new ArgumentException("Slots are not input slots");
+
+            to.UnlinkAll(true);
+
+            // First copy value and space
+            var aab = (AABox)from.value;
+            var ob = new OrientedBox
+            {
+                center = aab.center,
+                angles = Vector3.zero,
+                size = aab.size,
+            };
+            to.value = ob;
+            
+            VFXSlot.CopyLinks(to, from, true); // Will work as sub-slots names match
+            VFXSlot.CopySpace(to, from, true);
         }
     }
 }

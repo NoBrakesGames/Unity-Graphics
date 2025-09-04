@@ -35,7 +35,7 @@ EditorBuildSettings:
   - enabled: 1
     path: Packages/com.unity.testing.visualeffectgraph/Scenes/009_MultiCamera.unity
     guid: 6d090a604691ff048bb6cd282208c7bd
-  - enabled: 0
+  - enabled: 1
     path: Assets/GraphicsTests/009_MultiCamera_MotionVector.unity
     guid: e454a4c443ff76a40bc2ae733ef1ff71
   - enabled: 1
@@ -74,6 +74,18 @@ EditorBuildSettings:
   - enabled: 0
     path: Packages/com.unity.testing.visualeffectgraph/Scenes/020_PrefabInstanciation.unity
     guid: 4fad57eaceb460845ade4ee59dd02745
+  - enabled: 1
+    path: Packages/com.unity.testing.visualeffectgraph/Scenes/024_StripIndirectAndSorting.unity
+    guid: 673d2dc917b35534896164975171c05f
+  - enabled: 1
+    path: Packages/com.unity.testing.visualeffectgraph/Scenes/025_Flipbook.unity
+    guid: 5225b8aba587ba546b0315581715cd5b
+  - enabled: 1
+    path: Packages/com.unity.testing.visualeffectgraph/Scenes/025_ShaderKeywords.unity
+    guid: e11040b9d33c05d42aa28be2278f0146
+  - enabled: 1
+    path: Packages/com.unity.testing.visualeffectgraph/Scenes/026_RWBuffer.unity
+    guid: 6ae9549c79226fb458d7fec09ac258df
   - enabled: 1
     path: Assets/GraphicsTests/100_Fog.unity
     guid: b288e123b6536de40bc86452b3811b20
@@ -120,9 +132,31 @@ EditorBuildSettings:
     path: Assets/GraphicsTests/105_MotionVectors.unity
     guid: 5de9ddd5ce5b150408a504798854e72e
   - enabled: 1
+    path: Assets/GraphicsTests/106_SampleSceneColorAndDepth.unity
+    guid: 001278b81ccf8004e96455183da29bc9
+  - enabled: 1
+    path: Assets/GraphicsTests/106_SampleSceneColorAndDepth_Custom.unity
+    guid: c7d2587d0a33fe54fa13d806367dad0e
+  - enabled: 1
     path: Assets/GraphicsTests/Instancing/Instancing512.unity
     guid: 73939114e75ef4f4f8e9ffb3df23b104
   - enabled: 1
     path: Assets/GraphicsTests/Instancing/InstancingBatch.unity
     guid: 6226140a2b65b294fbe0a07b323ab6c0
+  - enabled: 1
+    path: Assets/GraphicsTests/106_URPDecals/106_URPDecals.unity
+    guid: 7e1dad271e7c87e43beed7912ced2d03
+  - enabled: 1
+    path: Assets/GraphicsTests/39_SmokeLighting/39_SmokeLighting.unity
+    guid: 9a3f325e5c930ca4f8a9c0645aeb6ccb
+  - enabled: 1
+    path: Assets/GraphicsTests/39_SmokeLighting/39_SmokeLighting_APV.unity
+    guid: 5a0d193bee9575545950651f66b8c2c1
+  - enabled: 1
+    path: Assets/GraphicsTests/Instancing/40_InstancingSplitCompute.unity
+    guid: 3cad14ca912fac94c86c2c740e932fc2
+  - enabled: 1
+    path: Assets/GraphicsTests/43_OddNegativeScale/43_OddNegativeScale.unity
+    guid: 1b0e8bd450fc8f349b6bbd4f9230b3d9
   m_configObjects: {}
+  m_UseUCBPForAssetBundles: 0

@@ -1,11 +1,12 @@
 using System.Collections.Generic;
-using UnityEngine;
+
 using UnityEngine.VFX;
 
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Constants")]
+    [VFXHelpURL("Operator-Epsilon")]
+    [VFXInfo(name = "Epsilon (ε)", category = "Math/Constants")]
     class Epsilon : VFXOperator
     {
         override public string name { get { return "Epsilon (ε)"; } }

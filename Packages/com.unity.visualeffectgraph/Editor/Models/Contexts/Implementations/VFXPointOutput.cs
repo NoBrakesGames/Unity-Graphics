@@ -1,13 +1,14 @@
 using System.Collections.Generic;
+
 using UnityEngine;
-using UnityEngine.VFX;
 
 namespace UnityEditor.VFX
 {
-    [VFXInfo]
+    [VFXHelpURL("Context-OutputPoint")]
+    [VFXInfo(name = "Output Particle|Point", category = "#5Output Debug")]
     class VFXPointOutput : VFXAbstractParticleOutput
     {
-        public override string name { get { return "Output Particle Point"; } }
+        public override string name => "Output Particle\nPoint";
         public override string codeGeneratorTemplate { get { return RenderPipeTemplate("VFXParticlePoints"); } }
         public override VFXTaskType taskType { get { return VFXTaskType.ParticlePointOutput; } }
         public override bool implementsMotionVector { get { return true; } }

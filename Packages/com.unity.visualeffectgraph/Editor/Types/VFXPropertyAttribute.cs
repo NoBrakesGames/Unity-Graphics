@@ -45,6 +45,16 @@ namespace UnityEditor.VFX
         public bool snapToPower { get; } = false;
     }
 
+    sealed class GraphicsBufferUsageAttribute : PropertyAttribute
+    {
+        public BufferUsage usage { get; }
+
+        public GraphicsBufferUsageAttribute(BufferUsage usage)
+        {
+            this.usage = usage;
+        }
+    }
+
     // Attribute used to constrain a property to a Regex query
     [System.AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
     sealed class RegexAttribute : PropertyAttribute
@@ -72,6 +82,7 @@ namespace UnityEditor.VFX
             Enum = GraphAttribute | 1 << 9,
             MinMax = GraphAttribute | 1 << 10,
             Logarithmic = GraphAttribute | 1 << 11,
+            GraphicsBufferUsage = 1 << 12,
 
             // Tells whether this attribute modifies the expression graph
             GraphAttribute = 1 << 31,
@@ -91,6 +102,7 @@ namespace UnityEditor.VFX
             { typeof(EnumAttribute),        Type.Enum },
             { typeof(MinMaxAttribute),      Type.MinMax},
             { typeof(LogarithmicAttribute), Type.Logarithmic},
+            { typeof(GraphicsBufferUsageAttribute), Type.GraphicsBufferUsage},
         };
 
         public VFXPropertyAttributes(params object[] attributes) : this()
@@ -112,6 +124,8 @@ namespace UnityEditor.VFX
                     m_Flag |= attributeType;
                 }
             }
+            else
+                m_AllAttributes = Array.Empty<Attribute>(); // Just to discriminate between uninitialized and no properties
         }
 
         public bool IsEqual(VFXPropertyAttributes other)
@@ -299,6 +313,8 @@ namespace UnityEditor.VFX
         {
             return (m_Flag & type) == type;
         }
+
+        public bool IsInitialized => m_AllAttributes != null;
 
         public IReadOnlyCollection<Attribute> attributes => m_AllAttributes != null ? m_AllAttributes : new Attribute[0];
 

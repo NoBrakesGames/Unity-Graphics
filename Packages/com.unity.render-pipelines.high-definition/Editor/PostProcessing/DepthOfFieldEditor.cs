@@ -1,3 +1,4 @@
+using System;
 using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
@@ -23,6 +24,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
             public static GUIContent k_DepthOfFieldMode = new GUIContent("Focus Mode", "Controls the focus of the camera lens.");
 
+            public static readonly string PbrDofResolutionTitle = "Enable High Resolution";
             public static readonly string InfoBox = "Physically Based DoF currently has a high performance overhead. Enabling TAA is highly recommended when using this option.";
             public static readonly string FocusDistanceInfoBox = "When using the Physical Camera mode, the depth of field will be influenced by the Aperture, the Focal Length and the Sensor size set in the physical properties of the camera.";
         }
@@ -51,6 +53,8 @@ namespace UnityEditor.Rendering.HighDefinition
         SerializedDataParameter m_Resolution;
         SerializedDataParameter m_PhysicallyBased;
         SerializedDataParameter m_LimitManualRangeNearBlur;
+        SerializedDataParameter m_AdaptiveSamplingWeight;
+        SerializedDataParameter m_CoCStabilization;
 
         public override void OnEnable()
         {
@@ -75,12 +79,15 @@ namespace UnityEditor.Rendering.HighDefinition
             m_Resolution = Unpack(o.Find("m_Resolution"));
             m_PhysicallyBased = Unpack(o.Find("m_PhysicallyBased"));
             m_LimitManualRangeNearBlur = Unpack(o.Find("m_LimitManualRangeNearBlur"));
-
+            m_AdaptiveSamplingWeight = Unpack(o.Find("m_AdaptiveSamplingWeight"));
+            m_CoCStabilization = Unpack(o.Find(x => x.coCStabilization));
             base.OnEnable();
         }
 
         public override void OnInspectorGUI()
         {
+            HDEditorUtils.EnsureFrameSetting(FrameSettingsField.DepthOfField);
+
             PropertyField(m_FocusMode, Styles.k_DepthOfFieldMode);
 
             int mode = m_FocusMode.value.intValue;
@@ -179,10 +186,11 @@ namespace UnityEditor.Rendering.HighDefinition
                 PropertyField(m_NearMaxBlur, Styles.k_NearMaxBlur);
                 PropertyField(m_FarSampleCount, Styles.k_FarSampleCount);
                 PropertyField(m_FarMaxBlur, Styles.k_FarMaxBlur);
-
-                PropertyField(m_Resolution);
-                PropertyField(m_HighQualityFiltering);
                 PropertyField(m_PhysicallyBased);
+                PropertyField(m_Resolution);
+                if (m_PhysicallyBased.value.boolValue)
+                    PropertyField(m_AdaptiveSamplingWeight);
+
                 if (m_PhysicallyBased.value.boolValue)
                 {
                     if (BeginAdditionalPropertiesScope())
@@ -192,11 +200,17 @@ namespace UnityEditor.Rendering.HighDefinition
                     }
                     EndAdditionalPropertiesScope();
                 }
+                else
+                {
+                    PropertyField(m_HighQualityFiltering);
+                }
 
                 if (m_FocusMode.value.intValue == (int)DepthOfFieldMode.Manual && !m_PhysicallyBased.value.boolValue)
                 {
                     PropertyField(m_LimitManualRangeNearBlur);
                 }
+
+                PropertyField(m_CoCStabilization);
             }
         }
 
@@ -210,7 +224,6 @@ namespace UnityEditor.Rendering.HighDefinition
             settings.Save<int>(m_FarSampleCount);
             settings.Save<float>(m_FarMaxBlur);
             settings.Save<int>(m_Resolution);
-            settings.Save<bool>(m_HighQualityFiltering);
             settings.Save<bool>(m_PhysicallyBased);
             settings.Save<bool>(m_LimitManualRangeNearBlur);
 
@@ -224,7 +237,6 @@ namespace UnityEditor.Rendering.HighDefinition
             settings.TryLoad<int>(ref m_FarSampleCount);
             settings.TryLoad<float>(ref m_FarMaxBlur);
             settings.TryLoad<int>(ref m_Resolution);
-            settings.TryLoad<bool>(ref m_HighQualityFiltering);
             settings.TryLoad<bool>(ref m_PhysicallyBased);
             settings.TryLoad<bool>(ref m_LimitManualRangeNearBlur);
         }

@@ -253,6 +253,27 @@ namespace UnityEngine.Rendering.HighDefinition
         }
 
         /// <summary>
+        /// The adaptive sampling weight is a factor that modifies the number of samples in the depth of field depending
+        /// on the radius of the blur. Higher values will reduce the noise in the depth of field but increases its cost.
+        /// </summary>
+        public float adaptiveSamplingWeight
+        {
+            get
+            {
+                if (!UsesQualitySettings())
+                {
+                    return m_AdaptiveSamplingWeight.value;
+                }
+                else
+                {
+                    int qualityLevel = (int)quality.levelAndOverride.level;
+                    return GetPostProcessingQualitySettings().AdaptiveSamplingWeight[qualityLevel];
+                }
+            }
+            set { m_AdaptiveSamplingWeight.value = value; }
+        }
+
+        /// <summary>
         /// Adjust near blur CoC based on depth distance when manual, non-physical mode is used.
         /// </summary>
         public bool limitManualRangeNearBlur
@@ -290,7 +311,6 @@ namespace UnityEngine.Rendering.HighDefinition
                 m_Resolution.value = value;
             }
         }
-
 
         [Header("Near Blur")]
         [Tooltip("Sets the number of samples to use for the near field.")]
@@ -330,9 +350,23 @@ namespace UnityEngine.Rendering.HighDefinition
         BoolParameter m_PhysicallyBased = new BoolParameter(false);
 
         [AdditionalProperty]
+        [Tooltip("When enabled, HDRP uses a more accurate but slower physically based algorithm to compute the depth of field effect.")]
+        [SerializeField]
+        FloatParameter m_AdaptiveSamplingWeight = new ClampedFloatParameter(0.75f, 0.5f, 4f);
+
+        [AdditionalProperty]
         [Tooltip("Adjust near blur CoC based on depth distance when manual, non-physical mode is used.")]
         [SerializeField]
         BoolParameter m_LimitManualRangeNearBlur = new BoolParameter(false);
+
+        /// <summary>
+        /// Enables the Circle of Confusion Reprojection used when anti-aliasing or an upsampling technique requiring jittering (TAA, DLSS, STP, etc.) is enabled. Disabling this option can get rid of ghosting artifacts in the depth of field."
+        /// </summary>
+        [AdditionalProperty]
+        [Tooltip("Enables the CoC Reprojection used when anti-aliasing or an upsampling technique requiring jittering (TAA, DLSS, STP, etc.) is enabled. Disabling this option can get rid of ghosting artifacts in the depth of field.")]
+        [SerializeField]
+        [InspectorName("CoC Stabilization")]
+        public BoolParameter coCStabilization = new BoolParameter(true);
 
         /// <summary>
         /// Tells if the effect needs to be rendered or not.

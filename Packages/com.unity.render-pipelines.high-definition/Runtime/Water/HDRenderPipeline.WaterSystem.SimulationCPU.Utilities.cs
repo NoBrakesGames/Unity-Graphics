@@ -9,7 +9,7 @@ using static Unity.Mathematics.math;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
-    public partial class HDRenderPipeline
+    partial class WaterSystem
     {
         static int SignedMod(int x, int m)
         {
@@ -17,8 +17,16 @@ namespace UnityEngine.Rendering.HighDefinition
             return r < 0 ? r + m : r;
         }
 
+        static int HandleWrapMode(int coord, int resolution, TextureWrapMode wrapMode)
+        {
+            // Only handle repeat and clamp because heh
+            if (wrapMode == TextureWrapMode.Repeat)
+                return SignedMod(coord, resolution);
+            return Mathf.Clamp(coord, 0, resolution - 1);
+        }
+
         // This function does a "repeat" load
-        static float4 LoadTexture2DArray(NativeArray<float4> textureRawBuffer, int2 coord, int sliceIndex, int resolution)
+        static T LoadTexture2DArray<T>(NativeArray<T> textureRawBuffer, int2 coord, int sliceIndex, int resolution) where T : struct
         {
             int2 repeatCoord = coord;
             repeatCoord.x = SignedMod(repeatCoord.x, resolution);
@@ -27,11 +35,11 @@ namespace UnityEngine.Rendering.HighDefinition
             return textureRawBuffer[repeatCoord.x + repeatCoord.y * resolution + bandOffset];
         }
 
-        static float4 LoadTexture2D(NativeArray<uint> textureRawBuffer, int2 coord, int2 resolution)
+        static float4 LoadTexture2D(NativeArray<uint> textureRawBuffer, TextureWrapMode wrapModeU, TextureWrapMode wrapModeV, int2 coord, int2 resolution)
         {
             int2 repeatCoord = coord;
-            repeatCoord.x = SignedMod(repeatCoord.x, resolution.x);
-            repeatCoord.y = SignedMod(repeatCoord.y, resolution.y);
+            repeatCoord.x = HandleWrapMode(repeatCoord.x, resolution.x, wrapModeU);
+            repeatCoord.y = HandleWrapMode(repeatCoord.y, resolution.y, wrapModeV);
             int tapIndex = repeatCoord.x + repeatCoord.y * resolution.x;
             uint packedData = textureRawBuffer[tapIndex];
             return float4(packedData & 0xff, (packedData >> 8) & 0xff, (packedData >> 16) & 0xff, (packedData >> 24) & 0xff) / 255.0f;
@@ -45,6 +53,15 @@ namespace UnityEngine.Rendering.HighDefinition
             int tapIndex = repeatCoord.x + repeatCoord.y * resolution.x;
             short packedData = textureRawBuffer[tapIndex];
             return float2(packedData & 0xff, (packedData >> 8) & 0xff) / 255.0f;
+        }
+
+        static float LoadTexture2D(NativeArray<half> textureRawBuffer, TextureWrapMode wrapModeU, TextureWrapMode wrapModeV, int2 coord, int2 resolution)
+        {
+            int2 repeatCoord = coord;
+            repeatCoord.x = HandleWrapMode(repeatCoord.x, resolution.x, wrapModeU);
+            repeatCoord.y = HandleWrapMode(repeatCoord.y, resolution.y, wrapModeV);
+            int tapIndex = repeatCoord.x + repeatCoord.y * resolution.x;
+            return textureRawBuffer[tapIndex];
         }
 
         static float LoadTexture2D(NativeArray<half> textureRawBuffer, int2 coord, int2 resolution)
@@ -80,16 +97,33 @@ namespace UnityEngine.Rendering.HighDefinition
             return lerp(i0, i1, fract.y);
         }
 
-        static float4 SampleTexture2DBilinear(NativeArray<uint> textureBuffer, float2 uvCoord, int2 resolution)
+        static float4 SampleTexture2DArrayBilinear(NativeArray<half4> textureBuffer, float2 uvCoord, int sliceIndex, int resolution)
         {
             // Convert the position from uv to floating pixel coordinates (for the bilinear interpolation)
             PrepareCoordinates(uvCoord, resolution, out int2 currentTapCoord, out float2 fract);
 
             // Read the four samples we want
-            float4 p0 = LoadTexture2D(textureBuffer, currentTapCoord, resolution);
-            float4 p1 = LoadTexture2D(textureBuffer, currentTapCoord + new int2(1, 0), resolution);
-            float4 p2 = LoadTexture2D(textureBuffer, currentTapCoord + new int2(0, 1), resolution);
-            float4 p3 = LoadTexture2D(textureBuffer, currentTapCoord + new int2(1, 1), resolution);
+            float4 p0 = LoadTexture2DArray(textureBuffer, currentTapCoord, sliceIndex, resolution);
+            float4 p1 = LoadTexture2DArray(textureBuffer, currentTapCoord + new int2(1, 0), sliceIndex, resolution);
+            float4 p2 = LoadTexture2DArray(textureBuffer, currentTapCoord + new int2(0, 1), sliceIndex, resolution);
+            float4 p3 = LoadTexture2DArray(textureBuffer, currentTapCoord + new int2(1, 1), sliceIndex, resolution);
+
+            // Do the bilinear interpolation
+            float4 i0 = lerp(p0, p1, fract.x);
+            float4 i1 = lerp(p2, p3, fract.x);
+            return lerp(i0, i1, fract.y);
+        }
+
+        static float4 SampleTexture2DBilinear(NativeArray<uint> textureBuffer, float2 uvCoord, int2 resolution, TextureWrapMode wrapModeU, TextureWrapMode wrapModeV)
+        {
+            // Convert the position from uv to floating pixel coordinates (for the bilinear interpolation)
+            PrepareCoordinates(uvCoord, resolution, out int2 currentTapCoord, out float2 fract);
+
+            // Read the four samples we want
+            float4 p0 = LoadTexture2D(textureBuffer, wrapModeU, wrapModeV, currentTapCoord, resolution);
+            float4 p1 = LoadTexture2D(textureBuffer, wrapModeU, wrapModeV, currentTapCoord + new int2(1, 0), resolution);
+            float4 p2 = LoadTexture2D(textureBuffer, wrapModeU, wrapModeV, currentTapCoord + new int2(0, 1), resolution);
+            float4 p3 = LoadTexture2D(textureBuffer, wrapModeU, wrapModeV, currentTapCoord + new int2(1, 1), resolution);
 
             // Do the bilinear interpolation
             float4 i0 = lerp(p0, p1, fract.x);
@@ -133,11 +167,23 @@ namespace UnityEngine.Rendering.HighDefinition
 
         static float2 EvaluateWaterGroup0CurrentUV(in WaterSimSearchData wsd, float2 currentUV)
         {
+            if (wsd.decalWorkflow)
+            {
+                float3 positionAWS = mul(wsd.rendering.waterToWorldMatrix, float4(currentUV.x, 0, currentUV.y, 1.0f)).xyz;
+                return EvaluateDecalUV(wsd, positionAWS);
+            }
+
             return float2(currentUV.x - wsd.group0CurrentRegionOffset.x, currentUV.y + wsd.group0CurrentRegionOffset.y) * wsd.group0CurrentRegionScale + 0.5f;
         }
 
         static float2 EvaluateWaterGroup1CurrentUV(in WaterSimSearchData wsd, float2 currentUV)
         {
+            if (wsd.decalWorkflow)
+            {
+                float3 positionAWS = mul(wsd.rendering.waterToWorldMatrix, float4(currentUV.x, 0, currentUV.y, 1.0f)).xyz;
+                return EvaluateDecalUV(wsd, positionAWS);
+            }
+
             return float2(currentUV.x - wsd.group1CurrentRegionOffset.x, currentUV.y + wsd.group1CurrentRegionOffset.y) * wsd.group1CurrentRegionOffset + 0.5f;
         }
 
@@ -179,13 +225,13 @@ namespace UnityEngine.Rendering.HighDefinition
 
         static void EvaluateGroup0CurrentData(in WaterSimSearchData wsd, float2 currentUV, out CurrentData currentData)
         {
-            float3 largeDirection = SampleTexture2DBilinear(wsd.group0CurrentMap, EvaluateWaterGroup0CurrentUV(wsd, currentUV), wsd.group0CurrentMapResolution).xyz;
+            float3 largeDirection = SampleTexture2DBilinear(wsd.group0CurrentMap, EvaluateWaterGroup0CurrentUV(wsd, currentUV), wsd.group0CurrentMapResolution, wsd.group0CurrentMapWrapModeU, wsd.group0CurrentMapWrapModeV).xyz;
             DecompressDirection(wsd, largeDirection, wsd.spectrum.groupOrientation.x * Mathf.Deg2Rad, wsd.group0CurrentMapInfluence, out currentData);
         }
 
         static void EvaluateGroup1CurrentData(in WaterSimSearchData wsd, float2 currentUV, out CurrentData currentData)
         {
-            float3 ripplesDirection = SampleTexture2DBilinear(wsd.group1CurrentMap, EvaluateWaterGroup1CurrentUV(wsd, currentUV), wsd.group1CurrentMapResolution).xyz;
+            float3 ripplesDirection = SampleTexture2DBilinear(wsd.group1CurrentMap, EvaluateWaterGroup1CurrentUV(wsd, currentUV), wsd.group1CurrentMapResolution, wsd.group1CurrentMapWrapModeU, wsd.group1CurrentMapWrapModeV).xyz;
             DecompressDirection(wsd, ripplesDirection, wsd.spectrum.groupOrientation.y * Mathf.Deg2Rad, wsd.group1CurrentMapInfluence, out currentData);
         }
 
@@ -213,22 +259,18 @@ namespace UnityEngine.Rendering.HighDefinition
             public PatchSimData data2;
         }
 
+        static void ComputePatchSimData(in WaterSimSearchData wsd, float2 uv, int bandIdx, out PatchSimData simData)
+        {
+            simData.uv = (uv - OrientationToDirection(wsd.spectrum.patchOrientation[bandIdx]) * wsd.rendering.patchCurrentSpeed[bandIdx] * wsd.rendering.simulationTime) / wsd.spectrum.patchSizes[bandIdx];
+            simData.blend = 1.0f;
+            simData.swizzle = float4(1, 0, 0, 1);
+        }
+
         static void ComputeWaterUVs(in WaterSimSearchData wsd, float2 uv, out WaterSimCoord simCoord)
         {
-            // Band 0
-            simCoord.data0.uv = (uv - OrientationToDirection(wsd.spectrum.patchOrientation.x) * wsd.rendering.patchCurrentSpeed.x * wsd.rendering.simulationTime) / wsd.spectrum.patchSizes.x;
-            simCoord.data0.blend = 1.0f;
-            simCoord.data0.swizzle = float4(1, 0, 0, 1);
-
-            // Band 1
-            simCoord.data1.uv = (uv - OrientationToDirection(wsd.spectrum.patchOrientation.y) * wsd.rendering.patchCurrentSpeed.y * wsd.rendering.simulationTime) / wsd.spectrum.patchSizes.y;
-            simCoord.data1.blend = 1.0f;
-            simCoord.data1.swizzle = float4(1, 0, 0, 1);
-
-            // Band 2
-            simCoord.data2.uv = (uv - OrientationToDirection(wsd.spectrum.patchOrientation.z) * wsd.rendering.patchCurrentSpeed.z * wsd.rendering.simulationTime) / wsd.spectrum.patchSizes.z;
-            simCoord.data2.blend = 1.0f;
-            simCoord.data2.swizzle = float4(1, 0, 0, 1);
+            ComputePatchSimData(wsd, uv, 0, out simCoord.data0);
+            ComputePatchSimData(wsd, uv, 1, out simCoord.data1);
+            ComputePatchSimData(wsd, uv, 2, out simCoord.data2);
         }
 
         static void FillPatchData(int patchGroup,
@@ -270,38 +312,88 @@ namespace UnityEngine.Rendering.HighDefinition
             FillPatchData(wsd.spectrum.patchGroup[2], gr0SC.data2, gr1SC.data2, gr0CD, gr1CD, gr0SD, gr1SD, firstPass, out simCoord.data2);
         }
 
-        static void AddBandContribution(in WaterSimSearchData wsd, in PatchSimData data, int bandIdx, float3 waterMask, ref float3 totalDisplacement)
+        static void AddBandContribution(in WaterSimSearchData wsd, in PatchSimData data, int bandIdx, ref float2 horizontalDisplacement, ref float3 verticalDisplacements)
         {
-            float3 rawDisplacement = SampleTexture2DArrayBilinear(wsd.displacementData, data.uv, bandIdx, wsd.simulationRes).xyz;
-            rawDisplacement *= wsd.rendering.patchAmplitudeMultiplier[bandIdx] * waterMask[bandIdx] * data.blend;
-            totalDisplacement += float3(rawDisplacement.x, dot(rawDisplacement.yz, data.swizzle.xy), dot(rawDisplacement.yz, data.swizzle.zw));
+            float3 rawDisplacement = wsd.cpuSimulation ? SampleTexture2DArrayBilinear(wsd.displacementDataCPU, data.uv, bandIdx, wsd.simulationRes).xyz :
+                SampleTexture2DArrayBilinear(wsd.displacementDataGPU, data.uv, bandIdx, wsd.simulationRes).xyz;
+            rawDisplacement *= wsd.rendering.patchAmplitudeMultiplier[bandIdx] * data.blend;
+
+            horizontalDisplacement += float2(dot(rawDisplacement.yz, data.swizzle.xy), dot(rawDisplacement.yz, data.swizzle.zw));
+            verticalDisplacements[bandIdx] = rawDisplacement.x;
+
         }
 
-        static float3 EvaluateWaterSimulation(in WaterSimSearchData wsd, WaterSimCoord sc, float3 waterMask)
+        static void EvaluateWaterSimulation(in WaterSimSearchData wsd, WaterSimCoord sc, out float2 horizontalDisplacement, out float3 verticalDisplacements)
         {
-            float3 totalDisplacement = 0.0f;
+            horizontalDisplacement = 0.0f;
+            verticalDisplacements = 0.0f;
 
-            AddBandContribution(in wsd, in sc.data0, 0, waterMask, ref totalDisplacement);
+            AddBandContribution(in wsd, in sc.data0, 0, ref horizontalDisplacement, ref verticalDisplacements);
 
             if (wsd.activeBandCount > 1)
-                AddBandContribution(in wsd, in sc.data1, 1, waterMask, ref totalDisplacement);
+                AddBandContribution(in wsd, in sc.data1, 1, ref horizontalDisplacement, ref verticalDisplacements);
 
             if (wsd.activeBandCount > 2)
-                AddBandContribution(in wsd, in sc.data2, 2, waterMask, ref totalDisplacement);
-
-            return totalDisplacement;
+                AddBandContribution(in wsd, in sc.data2, 2, ref horizontalDisplacement, ref verticalDisplacements);
         }
 
-        static float3 EvaluateWaterMask(in WaterSimSearchData wsd, float2 uv)
+        static float2 EvaluateDecalUV(in WaterSimSearchData wsd, float3 positionAWS)
+        {
+            return (positionAWS.xz - wsd.decalRegionCenter) * wsd.decalRegionScale + 0.5f;
+        }
+
+        static float3 EvaluateWaterMask(in WaterSimSearchData wsd, float3 positionAWS)
         {
             float3 waterMask = 1.0f;
             if (wsd.activeMask)
             {
-                float2 waterMaskUV = float2(uv.x - wsd.maskOffset.x, uv.y + wsd.maskOffset.y) * wsd.maskScale + 0.5f;
-                waterMask = SampleTexture2DBilinear(wsd.maskBuffer, waterMaskUV, wsd.maskResolution).xyz;
-                waterMask = wsd.maskRemap.xxx + waterMask * wsd.maskRemap.yyy;
+                if (wsd.decalWorkflow)
+                {
+                    float2 maskUV = EvaluateDecalUV(wsd, positionAWS);
+                    waterMask = all(maskUV == saturate(maskUV)) ? SampleTexture2DBilinear(wsd.maskBuffer, maskUV, wsd.maskResolution, TextureWrapMode.Clamp, TextureWrapMode.Clamp).xyz : 1;
+                }
+                else
+                {
+                    float2 maskUV = RotateUV(wsd, positionAWS.xz - wsd.maskOffset) * wsd.maskScale + 0.5f;
+                    waterMask = SampleTexture2DBilinear(wsd.maskBuffer, maskUV, wsd.maskResolution, wsd.maskWrapModeU, wsd.maskWrapModeV).xyz;
+                    waterMask = wsd.maskRemap.xxx + waterMask * wsd.maskRemap.yyy;
+                }
             }
             return waterMask;
+        }
+
+        static float3 ShuffleDisplacement(float3 displacement)
+        {
+            return float3(-displacement.y, displacement.x, -displacement.z);
+        }
+
+        static void EvaluateDisplacedPoints(float3 displacementC, float3 displacementR, float3 displacementU,
+                                        float normalization, float pixelSize,
+                                        out float3 p0, out float3 p1, out float3 p2)
+        {
+            p0 = displacementC * normalization;
+            p1 = displacementR * normalization + float3(pixelSize, 0, 0);
+            p2 = displacementU * normalization + float3(0, 0, pixelSize);
+        }
+
+        static float3 SurfaceGradientFromPerturbedNormal(float3 nrmVertexNormal, float3 v)
+        {
+            float3 n = nrmVertexNormal;
+            float s = 1.0f / max(float.Epsilon, abs(dot(n, v)));
+            return s * (dot(n, v) * n - v);
+        }
+
+        static float2 EvaluateSurfaceGradients(float3 p0, float3 p1, float3 p2)
+        {
+            float3 v0 = normalize(p1 - p0);
+            float3 v1 = normalize(p2 - p0);
+            float3 geometryNormal = normalize(cross(v1, v0));
+            return SurfaceGradientFromPerturbedNormal(float3(0, 1, 0), geometryNormal).xz;
+        }
+
+        static float3 SurfaceGradientResolveNormal(float3 nrmVertexNormal, float3 surfGrad)
+        {
+            return normalize(nrmVertexNormal - surfGrad);
         }
     }
 }

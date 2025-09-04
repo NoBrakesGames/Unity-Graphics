@@ -60,9 +60,12 @@
 #define TEXTURECUBE_SHADOW(textureName)       TEXTURECUBE(textureName)
 #define TEXTURECUBE_ARRAY_SHADOW(textureName) TEXTURECUBE_ARRAY(textureName)
 
-#define RW_TEXTURE2D(type, textureName)       RWTexture2D<type> textureName
-#define RW_TEXTURE2D_ARRAY(type, textureName) RWTexture2DArray<type> textureName
-#define RW_TEXTURE3D(type, textureName)       RWTexture3D<type> textureName
+#define TYPED_TEXTURE2D(type, textureName)       Texture2D<type> textureName
+#define TYPED_TEXTURE2D_ARRAY(type, textureName) Texture2DArray<type> textureName
+#define TYPED_TEXTURE3D(type, textureName)       Texture3D<type> textureName
+#define RW_TEXTURE2D(type, textureName)          RWTexture2D<type> textureName
+#define RW_TEXTURE2D_ARRAY(type, textureName)    RWTexture2DArray<type> textureName
+#define RW_TEXTURE3D(type, textureName)          RWTexture3D<type> textureName
 
 #define SAMPLER(samplerName)                  SamplerState samplerName
 #define SAMPLER_CMP(samplerName)              SamplerComparisonState samplerName
@@ -136,6 +139,7 @@
 #define LOAD_TEXTURE2D_LOD(textureName, unCoord2, lod)              textureName.Load(int3(unCoord2, lod))
 #define LOAD_TEXTURE2D_MSAA(textureName, unCoord2, sampleIndex)     textureName.Load(unCoord2, sampleIndex)
 #define LOAD_TEXTURE2D_ARRAY(textureName, unCoord2, index)          textureName.Load(int4(unCoord2, index, 0))
+#define LOAD_TEXTURE2D_ARRAY_MSAA(textureName, unCoord2, index, sampleIndex)    textureName.Load(int3(unCoord2, index), sampleIndex)
 #define LOAD_TEXTURE2D_ARRAY_LOD(textureName, unCoord2, index, lod) textureName.Load(int4(unCoord2, index, lod))
 #define LOAD_TEXTURE3D(textureName, unCoord3)                       textureName.Load(int4(unCoord3, 0))
 #define LOAD_TEXTURE3D_LOD(textureName, unCoord3, lod)              textureName.Load(int4(unCoord3, lod))

@@ -3,7 +3,7 @@ using static Unity.Mathematics.math;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
-    public partial class HDRenderPipeline
+    partial class WaterSystem
     {
         static internal void GetFFTKernels(ComputeShader fourierTransformCS, WaterSimulationResolution resolution, out int rowKernel, out int columnKernel)
         {
@@ -36,6 +36,44 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
+        static internal int EvaluateBandCount(WaterSurfaceType surfaceType, bool ripplesOn)
+        {
+            switch (surfaceType)
+            {
+                case WaterSurfaceType.OceanSeaLake:
+                    return ripplesOn ? 3 : 2;
+                case WaterSurfaceType.River:
+                    return ripplesOn ? 2 : 1;
+                case WaterSurfaceType.Pool:
+                    return 1;
+            }
+            return 1;
+        }
+
+        static internal int EvaluateCPUBandCount(WaterSurfaceType surfaceType, bool ripplesOn, bool evaluateRipplesCPU)
+        {
+            return EvaluateBandCount(surfaceType, ripplesOn && evaluateRipplesCPU);
+        }
+
+        static float EvaluateCausticsMaxLOD(WaterSurface.WaterCausticsResolution resolution)
+        {
+            switch (resolution)
+            {
+                case WaterSurface.WaterCausticsResolution.Caustics256:
+                    return 2.0f;
+                case WaterSurface.WaterCausticsResolution.Caustics512:
+                    return 3.0f;
+                case WaterSurface.WaterCausticsResolution.Caustics1024:
+                    return 4.0f;
+            }
+            return 2.0f;
+        }
+
+        static internal int SanitizeCausticsBand(int band, int bandCount)
+        {
+            return Mathf.Min(band, bandCount - 1);
+        }
+
         static internal float EvaluateFrequencyOffset(WaterSimulationResolution resolution)
         {
             switch (resolution)
@@ -66,32 +104,31 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
-        static internal void BuildGridMesh(ref Mesh mesh)
+        static internal void BuildGridMeshes(ref Mesh grid, ref Mesh ring, ref Mesh ringLow)
         {
+            Vector3[] CreateNormals(int size)
+            {
+                Vector3[] normals = new Vector3[size];
+                for (int i = 0; i < size; ++i)
+                    normals[i] = Vector3.up;
+                return normals;
+            }
+
+            int i, y, ti, vi;
+
+            // Build central grid
             int meshResolution = WaterConsts.k_WaterTessellatedMeshResolution;
-            mesh = new Mesh();
             Vector3[] vertices = new Vector3[(meshResolution + 1) * (meshResolution + 1)];
-            for (int i = 0, y = 0; y <= meshResolution; y++)
+            for (i = 0, y = 0; y <= meshResolution; y++)
             {
                 for (int x = 0; x <= meshResolution; x++, i++)
                 {
                     vertices[i] = new Vector3(x / (float)meshResolution - 0.5f, 0.0f, y / (float)meshResolution - 0.5f);
                 }
             }
-            mesh.vertices = vertices;
-
-            Vector3[] normals = new Vector3[(meshResolution + 1) * (meshResolution + 1)];
-            for (int i = 0, y = 0; y <= meshResolution; y++)
-            {
-                for (int x = 0; x <= meshResolution; x++, i++)
-                {
-                    normals[i] = new Vector3(0, 1, 0);
-                }
-            }
-            mesh.normals = normals;
 
             int[] triangles = new int[meshResolution * meshResolution * 6];
-            for (int ti = 0, vi = 0, y = 0; y < meshResolution; y++, vi++)
+            for (ti = 0, vi = 0, y = 0; y < meshResolution; y++, vi++)
             {
                 for (int x = 0; x < meshResolution; x++, ti += 6, vi++)
                 {
@@ -101,7 +138,103 @@ namespace UnityEngine.Rendering.HighDefinition
                     triangles[ti + 5] = vi + meshResolution + 2;
                 }
             }
-            mesh.triangles = triangles;
+
+            grid = new Mesh()
+            {
+                vertices = vertices,
+                normals = CreateNormals(vertices.Length),
+                triangles = triangles,
+            };
+
+            // Build ring mesh with correct junctions
+            int resX = meshResolution - meshResolution / 4, resY = meshResolution / 4 - 1;
+            int subdivStart = meshResolution / 4, subdivCount = meshResolution;
+
+            int quadCount = 2 * ((meshResolution - meshResolution / 4) * (meshResolution / 4 - 1) + meshResolution / 4);
+            int triCount = quadCount + 3 * meshResolution / 2;
+
+            float offsetX = meshResolution / 4, scale = 2.0f / meshResolution;
+            vertices = new Vector3[(resY + 1) * (resX + 1) + (subdivStart + subdivCount + 1)];
+            for (i = 0, y = 0; y <= resY; y++)
+            {
+                for (int x = 0; x <= resX; x++, i++)
+                {
+                    vertices[i] = new Vector3((x - offsetX) * scale - 0.5f, 0.0f, (y - resY - 1) * scale - 0.5f);
+                }
+            }
+            for (int x = 0; x <= subdivStart; x++, i++)
+                vertices[i] = new Vector3((x - offsetX) * scale - 0.5f, 0.0f, -0.5f);
+            for (int x = 1; x <= subdivCount; x++, i++)
+                vertices[i] = new Vector3(x * scale * 0.5f - 0.5f, 0.0f, -0.5f);
+
+            triangles = new int[triCount * 3];
+            for (ti = 0, vi = 0, y = 0; y < resY; y++, vi++)
+            {
+                for (int x = 0; x < resX; x++, ti += 6, vi++)
+                {
+                    triangles[ti] = vi;
+                    triangles[ti + 1] = vi + resX + 1;
+                    triangles[ti + 2] = vi + 1;
+
+                    triangles[ti + 3] = vi + 1;
+                    triangles[ti + 4] = vi + resX + 1;
+                    triangles[ti + 5] = vi + resX + 2;
+                }
+            }
+            for (int x = 0; x < subdivStart; x++, ti += 6, vi++)
+            {
+                triangles[ti] = vi;
+                triangles[ti + 1] = vi + resX + 1;
+                triangles[ti + 2] = vi + 1;
+
+                triangles[ti + 3] = vi + 1;
+                triangles[ti + 4] = vi + resX + 1;
+                triangles[ti + 5] = vi + resX + 2;
+            }
+            for (int x = 0; x < subdivCount / 2; x++, ti += 9, vi++)
+            {
+                triangles[ti] = vi;
+                triangles[ti + 1] = vi + resX + x + 1;
+                triangles[ti + 2] = vi + resX + x + 2;
+
+                triangles[ti + 3] = vi;
+                triangles[ti + 4] = vi + resX + x + 2;
+                triangles[ti + 5] = vi + 1;
+
+                triangles[ti + 6] = vi + 1;
+                triangles[ti + 7] = vi + resX + x + 2;
+                triangles[ti + 8] = vi + resX + x + 3;
+            }
+
+            ring = new Mesh()
+            {
+                vertices = vertices,
+                normals = CreateNormals(vertices.Length),
+                triangles = triangles,
+            };
+
+            // Build flat outer ring mesh, no need to handle junctions
+            // Although we put the mesh at 0.999 instead of 1 to avoid missing pixels at junction when rasterizing
+            float close = 0.999f, far = 1000.0f;
+            ringLow = new Mesh();
+            ringLow.vertices = new Vector3[] {
+                new Vector3(-1f, 0f,  1f) * close,
+                new Vector3( 1f, 0f,  1f) * close,
+                new Vector3(-1f, 0f, -1f) * close,
+                new Vector3( 1f, 0f, -1f) * close,
+
+                new Vector3(-1f, 0f,  1f) * far,
+                new Vector3( 1f, 0f,  1f) * far,
+                new Vector3(-1f, 0f, -1f) * far,
+                new Vector3( 1f, 0f, -1f) * far,
+            };
+            ringLow.normals = CreateNormals(ringLow.vertexCount);
+            ringLow.triangles = new int[] {
+                0, 4, 1,  1, 4, 5,
+                1, 5, 3,  3, 5, 7,
+                2, 3, 7,  2, 7, 6,
+                0, 2, 6,  0, 6, 4,
+            };
         }
 
         // Converts an angle to a 2d direction
@@ -167,63 +300,14 @@ namespace UnityEngine.Rendering.HighDefinition
             return 0;
         }
 
-        static internal uint EvaluateNumberWaterPatches(uint numLOD)
+        static void SetupWaterShaderKeyword(CommandBuffer cmd, bool decalWorkflow, int bandCount, bool localCurrent)
         {
-            switch (numLOD)
-            {
-                case 1:
-                    return 1;
-                case 2:
-                    return 9;
-                case 3:
-                    return 25;
-                case 4:
-                    return 49;
-            }
-            return 1;
-        }
+            CoreUtils.SetKeyword(cmd, "WATER_DECAL_PARTIAL", !decalWorkflow);
+            CoreUtils.SetKeyword(cmd, "WATER_DECAL_COMPLETE", decalWorkflow);
 
-        uint4 ShiftUInt(uint4 val, int numBits)
-        {
-            return new uint4(val.x >> 16, val.y >> 16, val.z >> 16, val.w >> 16);
-        }
-
-        uint4 WaterHashFunctionUInt4(uint3 coord)
-        {
-            uint4 x = coord.xyzz;
-            x = (ShiftUInt(x, 16) ^ x.yzxy) * 0x45d9f3bu;
-            x = (ShiftUInt(x, 16) ^ x.yzxz) * 0x45d9f3bu;
-            x = (ShiftUInt(x, 16) ^ x.yzxx) * 0x45d9f3bu;
-            return x;
-        }
-
-        float4 WaterHashFunctionFloat4(uint3 p)
-        {
-            uint4 hashed = WaterHashFunctionUInt4(p);
-            return new float4(hashed.x, hashed.y, hashed.z, hashed.w) / (float)0xffffffffU;
-        }
-
-        static void SetupWaterShaderKeyword(CommandBuffer cmd, int bandCount, bool localCurrent)
-        {
-            if (bandCount == 1)
-            {
-                CoreUtils.SetKeyword(cmd, "WATER_ONE_BAND", true);
-                CoreUtils.SetKeyword(cmd, "WATER_TWO_BANDS", false);
-                CoreUtils.SetKeyword(cmd, "WATER_THREE_BANDS", false);
-            }
-            else if (bandCount == 2)
-            {
-                CoreUtils.SetKeyword(cmd, "WATER_ONE_BAND", false);
-                CoreUtils.SetKeyword(cmd, "WATER_TWO_BANDS", true);
-                CoreUtils.SetKeyword(cmd, "WATER_THREE_BANDS", false);
-            }
-            else
-            {
-                CoreUtils.SetKeyword(cmd, "WATER_ONE_BAND", false);
-                CoreUtils.SetKeyword(cmd, "WATER_TWO_BANDS", false);
-                CoreUtils.SetKeyword(cmd, "WATER_THREE_BANDS", true);
-            }
-
+            CoreUtils.SetKeyword(cmd, "WATER_ONE_BAND", bandCount == 1);
+            CoreUtils.SetKeyword(cmd, "WATER_TWO_BANDS", bandCount == 2);
+            CoreUtils.SetKeyword(cmd, "WATER_THREE_BANDS", bandCount == 3);
             CoreUtils.SetKeyword(cmd, "WATER_LOCAL_CURRENT", localCurrent);
         }
 
@@ -235,152 +319,101 @@ namespace UnityEngine.Rendering.HighDefinition
             CoreUtils.SetKeyword(cmd, "WATER_LOCAL_CURRENT", false);
         }
 
-        static internal int EvaluateBandCount(WaterSurfaceType surfaceType, bool ripplesOn)
+        static bool FindPassIndex(Material material, string passName, out int passIndex)
         {
-            switch (surfaceType)
+            passIndex = material.FindPass(passName);
+            #if UNITY_EDITOR
+            if (!UnityEditor.ShaderUtil.IsPassCompiled(material, passIndex))
             {
-                case WaterSurfaceType.OceanSeaLake:
-                    return ripplesOn ? 3 : 2;
-                case WaterSurfaceType.River:
-                    return ripplesOn ? 2 : 1;
-                case WaterSurfaceType.Pool:
-                    return 1;
+                UnityEditor.ShaderUtil.CompilePass(material, passIndex);
+                return false;
             }
-            return 1;
+            #endif
+            return true;
         }
 
-        static internal int EvaluateCPUBandCount(WaterSurfaceType surfaceType, bool ripplesOn, bool evaluateRipplesCPU)
+        static void DrawInstancedQuads(CommandBuffer cmd, WaterRenderingData parameters, ref WaterSurfaceGBufferData surfaceData, int passIndex, int lowResPassIndex)
         {
-            switch (surfaceType)
+            var cb = parameters.sharedPerCameraDataArray[surfaceData.surfaceIndex];
+
+            bool drawCentralPatch = true;
+            bool drawInfinitePatch = surfaceData.drawInfiniteMesh;
+            if (!surfaceData.infinite)
             {
-                case WaterSurfaceType.OceanSeaLake:
-                    return evaluateRipplesCPU ? (ripplesOn ? 3 : 2) : 2;
-                case WaterSurfaceType.River:
-                    return evaluateRipplesCPU ? (ripplesOn ? 1 : 1) : 1;
-                case WaterSurfaceType.Pool:
-                    return 1;
+                drawCentralPatch = all(abs(cb._PatchOffset) < cb._RegionExtent + cb._GridSize * 0.5f);
+
+                if (surfaceData.drawInfiniteMesh)
+                    drawInfinitePatch = all(abs(cb._PatchOffset) < abs(cb._RegionExtent - cb._GridSize * 0.5f));
             }
-            return 1;
-        }
 
-        internal static readonly float[] sizeMultiplier = new float[] {1.0f, 4.0f, 32.0f, 128.0f};
-        internal static readonly float[] offsets = new float[]{0.0f, 0.5f, 4.5f, 36.5f};
+            // Draw everything beyond distance fade with a single flat mesh
+            if (drawInfinitePatch)
+                cmd.DrawMesh(parameters.ringMeshLow, Matrix4x4.identity, surfaceData.waterMaterial, 0, lowResPassIndex, surfaceData.mpb);
 
-        // Function that evaluates the bounds of a given grid based on it's coordinates
-        static void ComputeGridBounds(int x, int y, float centerGridSize,
-                            out float2 center,
-                            out float2 size)
-        {
-            int absX = abs(x);
-            int absY = abs(y);
-            float signX = sign(x);
-            float signY = sign(y);
+            // Draw high res grid under the camera
+            if (drawCentralPatch)
+                cmd.DrawMesh(parameters.tessellableMesh, Matrix4x4.identity, surfaceData.waterMaterial, 0, passIndex, surfaceData.mpb);
 
-            // Size of the patch
-            size = float2(centerGridSize * sizeMultiplier[absX], centerGridSize * sizeMultiplier[absY]);
-
-            // Offset position of the patch
-            center = float2(signX * (offsets[absX] * centerGridSize + size.x * 0.5f), signY * (offsets[absY] * centerGridSize + size.y * 0.5f));
-        }
-
-        static bool ClampPatchToRegion(ref float2 center, ref float2 size, float2 regionCenter, float2 regionExtent)
-        {
-            // AABB of the region
-            float2 regionMin = regionCenter - regionExtent * 0.5f;
-            float2 regionMax = regionCenter + regionExtent * 0.5f;
-
-            // AABB of the patch
-            float2 patchMin = center - size * 0.5f;
-            float2 patchMax = center + size * 0.5f;
-
-            float2 intersectionMin = max(regionMin, patchMin);
-            float2 intersectionMax = min(regionMax, patchMax);
-
-            // Evaluate the new dimensions
-            center = (intersectionMax + intersectionMin) * 0.5f;
-            size = (intersectionMax - intersectionMin);
-
-            // Validate the patch
-            return all(intersectionMin < intersectionMax);
-        }
-
-        static void DrawInstancedQuadsCPU(CommandBuffer cmd, WaterRenderingParameters parameters, int passIndex)
-        {
-            int radius = (int)parameters.waterRenderingCB._WaterLODCount - 1;
-            float gridSize = parameters.waterRenderingCB._GridSize.x;
-            float maxWaveHeight = parameters.waterCB._MaxWaveHeight;
-            uint numWaterPatches = parameters.waterRenderingCB._NumWaterPatches;
-            float maxWaveDisplacement = parameters.waterCB._MaxWaveDisplacement;
-            Vector4 patchOffset = parameters.waterRenderingCB._PatchOffset;
-            float2 regionCenter = parameters.waterRenderingCB._RegionCenter;
-            float2 regionExtent = parameters.waterRenderingCB._RegionExtent;
-
-            for (int y = -radius; y <= radius; ++y)
+            // Draw the remaining patches
+            if (cb._MaxLOD > 0)
             {
-                for (int x = -radius; x <= radius; ++x)
+                int patchEvaluation = surfaceData.infinite ? parameters.patchEvaluationInfinite : parameters.patchEvaluation;
+
+                // Make sure both constant buffers are properly injected
+                BindPerSurfaceConstantBuffer(cmd, parameters.waterSimulation, parameters.perSurfaceCB[surfaceData.surfaceIndex]);
+
+                // Prepare the indirect parameters
+                cmd.SetComputeConstantBufferParam(parameters.waterSimulation, HDShaderIDs._ShaderVariablesWaterPerCamera, parameters.perCameraCB, 0, parameters.perCameraCB.stride);
+                cmd.SetComputeBufferParam(parameters.waterSimulation, patchEvaluation, HDShaderIDs._WaterPatchDataRW, parameters.patchDataBuffer);
+                cmd.SetComputeBufferParam(parameters.waterSimulation, patchEvaluation, HDShaderIDs._WaterInstanceDataRW, parameters.indirectBuffer);
+                cmd.DispatchCompute(parameters.waterSimulation, patchEvaluation, 1, 1, 1);
+
+                // Draw all the patches
+                cmd.DrawMeshInstancedIndirect(parameters.ringMesh, 0, surfaceData.waterMaterial, passIndex, parameters.indirectBuffer, 0, surfaceData.mpb);
+            }
+        }
+
+        static void DrawMeshRenderers(CommandBuffer cmd, ref WaterSurfaceGBufferData surfaceData, int passIndex)
+        {
+            int numMeshRenderers = surfaceData.meshRenderers.Count;
+            for (int meshRenderer = 0; meshRenderer < numMeshRenderers; ++meshRenderer)
+            {
+                MeshRenderer currentRenderer = surfaceData.meshRenderers[meshRenderer];
+                if (currentRenderer != null && currentRenderer.TryGetComponent(out MeshFilter filter))
                 {
-                    // Compute the grid center and size of this patch
-                    float2 center;
-                    float2 size;
-                    ComputeGridBounds(x, y, gridSize, out center, out size);
-
-                    // Frustum cull the patch while accounting for it's maximal deformation
-                    OrientedBBox obb;
-                    obb.right = new float3(1, 0, 0);
-                    obb.up = new float3(0, 1, 0);
-                    obb.extentX = size.x * 0.5f + maxWaveDisplacement;
-                    obb.extentY = maxWaveHeight;
-                    obb.extentZ = size.y * 0.5f + maxWaveDisplacement;
-                    obb.center = float3(patchOffset.x + center.x, patchOffset.y, patchOffset.z + center.y);
-
-                    if (ShaderConfig.s_CameraRelativeRendering != 0)
-                        obb.center -= parameters.cameraPosition;
-
-                    int currentPatch = (x + radius) + (y + radius) * (1 + radius * 2);
-                    bool patchIsVisible = currentPatch < numWaterPatches ? GeometryUtils.Overlap(obb, parameters.cameraFrustum, 6, 8) : false;
-
-                    if (!parameters.infinite)
-                    {
-                        float2 centerWS = new float2(center.x + patchOffset.x, center.y + patchOffset.z);
-                        patchIsVisible = patchIsVisible && ClampPatchToRegion(ref centerWS, ref size, regionCenter, regionExtent);
-                        center = new float2(centerWS.x - patchOffset.x, centerWS.y - patchOffset.z);
-                    }
-
-                    if (!patchIsVisible)
-                        continue;
-
-                    // Propagate the data to the constant buffer
-                    parameters.waterRenderingCB._GridSize.Set(size.x, size.y);
-                    parameters.waterRenderingCB._PatchOffset.Set(patchOffset.x + center.x, 0.0f, patchOffset.z + center.y, 0.0f);
-                    ConstantBuffer.Push(cmd, parameters.waterRenderingCB, parameters.waterMaterial, HDShaderIDs._ShaderVariablesWaterRendering);
-
-                    // Draw the target patch
-                    cmd.DrawMesh(parameters.tessellableMesh, Matrix4x4.identity, parameters.waterMaterial, 0, passIndex, parameters.mbp);
+                    Mesh mesh = filter.sharedMesh;
+                    int numSubMeshes = mesh.subMeshCount;
+                    for (int subMeshIdx = 0; subMeshIdx < numSubMeshes; ++subMeshIdx)
+                        cmd.DrawMesh(mesh, currentRenderer.transform.localToWorldMatrix, surfaceData.waterMaterial, subMeshIdx, passIndex, surfaceData.mpb);
                 }
             }
         }
 
-        static void DrawMeshRenderers(CommandBuffer cmd, WaterRenderingParameters parameters, int passIndex)
+        static void DrawWaterSurface(CommandBuffer cmd, string[] passNames, WaterRenderingData parameters, ref WaterSurfaceGBufferData surfaceData)
         {
-            int numMeshRenderers = parameters.meshRenderers.Count;
-            for (int meshRenderer = 0; meshRenderer < numMeshRenderers; ++meshRenderer)
-            {
-                MeshRenderer currentRenderer = parameters.meshRenderers[meshRenderer];
-                if (currentRenderer != null)
-                {
-                    parameters.waterRenderingCB._WaterCustomMeshTransform = currentRenderer.transform.localToWorldMatrix;
-                    parameters.waterRenderingCB._WaterCustomMeshTransform_Inverse = currentRenderer.transform.worldToLocalMatrix;
-                    ConstantBuffer.Push(cmd, parameters.waterRenderingCB, parameters.waterMaterial, HDShaderIDs._ShaderVariablesWaterRendering);
+            int lowResPassIndex = 0;
+            bool missingPass = !FindPassIndex(surfaceData.waterMaterial, passNames[0], out var passIndex);
+            if (surfaceData.instancedQuads)
+                missingPass |= !FindPassIndex(surfaceData.waterMaterial, passNames[1], out lowResPassIndex);
+            if (missingPass)
+                return;
 
-                    MeshFilter filter;
-                    currentRenderer.TryGetComponent(out filter);
-                    if (filter != null)
-                    {
-                        Mesh mesh = filter.sharedMesh;
-                        int numSubMeshes = mesh.subMeshCount;
-                        for (int subMeshIdx = 0; subMeshIdx < numSubMeshes; ++subMeshIdx)
-                            cmd.DrawMesh(mesh, Matrix4x4.identity, parameters.waterMaterial, subMeshIdx, passIndex, parameters.mbp);
-                    }
+            surfaceData.mpb.SetConstantBuffer(HDShaderIDs._ShaderVariablesWaterPerCamera, parameters.perCameraCB, 0, parameters.perCameraCB.stride);
+
+            if (surfaceData.instancedQuads)
+            {
+                DrawInstancedQuads(cmd, parameters, ref surfaceData, passIndex, lowResPassIndex);
+            }
+            else
+            {
+                // Based on if this is a custom mesh or not trigger the right geometry/geometries and shader pass
+                if (!surfaceData.customMesh)
+                {
+                    cmd.DrawMesh(parameters.tessellableMesh, Matrix4x4.identity, surfaceData.waterMaterial, 0, passIndex, surfaceData.mpb);
+                }
+                else
+                {
+                    DrawMeshRenderers(cmd, ref surfaceData, passIndex);
                 }
             }
         }

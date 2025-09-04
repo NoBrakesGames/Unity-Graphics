@@ -1,9 +1,9 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Arithmetic")]
+    [VFXHelpURL("Operator-Modulo")]
+    [VFXInfo(category = "Math/Arithmetic", synonyms = new[] { "%" })]
     class Modulo : VFXOperatorNumericUniform
     {
         public class InputProperties

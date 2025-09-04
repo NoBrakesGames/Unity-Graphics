@@ -48,7 +48,7 @@ To use DLSS in your scene:
 
     1. In the Hierarchy or Scene view, select a Camera and view it in the Inspector.
     2. Select **Allow Dynamic Resolution** to expose the DLSS settings. For more information see the [Dynamic Resolution](Dynamic-Resolution.md) guide.
-    3. Enable **Allow DLSS** to expose other properties that you can use to customize DLSS for the Camera. For information about these properties, see the [Camera](HDRP-Camera.md) documentation.
+    3. Enable **Allow DLSS** to expose other properties that you can use to customize DLSS for the Camera. For information about these properties, see the [Camera](hdrp-camera-component-reference.md) documentation.
 
 4. Set the DLSS quality mode. You can do this on a project level or a per-Camera level. For information about the available quality modes, see [Quality modes](https://docs.unity3d.com/Manual/deep-learning-super-sampling.html).
 
@@ -78,7 +78,11 @@ If you need a specific custom mip bias for a Texture, create a custom sampler th
 Out = SAMPLE_TEXTURE2D_BIAS(TextureInput, SamplerInput, UV, MipBias);
 ```
 
-![](Images/CustomMipSupportNode.png)
+![Example: The above script in the Node Settings Body field.](Images/CustomMipSupportNode.png)
 
+![Example: Custom Mip support node in a shader graph.](Images/CustomMipSupportNodeExample.png)
 
-![](Images/CustomMipSupportNodeExample.png)
+## Additional resources
+
+- [Introduction to changing resolution scale](https://docs.unity3d.com/6000.0/Documentation/Manual/resolution-scale-introduction.html)
+

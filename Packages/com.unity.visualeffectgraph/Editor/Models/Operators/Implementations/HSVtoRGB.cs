@@ -1,10 +1,10 @@
-using System;
 using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Color")]
+    [VFXHelpURL("Operator-HSVToRGB")]
+    [VFXInfo(name = "HSV to RGB", category = "Color", synonyms = new []{ "Hue", "Saturation", "Value", "Convert" })]
     class HSVtoRGB : VFXOperator
     {
         public class InputProperties

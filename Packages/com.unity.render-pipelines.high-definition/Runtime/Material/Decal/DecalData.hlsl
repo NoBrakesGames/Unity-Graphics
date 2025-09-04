@@ -32,9 +32,11 @@ void GetSurfaceData(FragInputs input, float3 V, PositionInputs posInput, float a
     surfaceData.emissive = _EmissiveColor.rgb * fadeFactor;
 #ifdef _EMISSIVEMAP
     #if (SHADERPASS == SHADERPASS_FORWARD_EMISSIVE_PROJECTOR)
-    // Fogbugzz 1359282. With projector emissive we can have issue with mips evaluation at the silhouette
-    // so perform the processing ourselve. But not all paltform support GetDimensions() so in case it is not
-    // supported we just used lof 0
+    // Fogbugzz 1359282. With emissive projector we can have an issue with automatic texture LOD calculation, where
+    // discontinuities in projector texture coordinates result sampling a low-LOD of the texture. To mitigate the
+    // issue we perform the LOD calculation ourselves and adjust the LOD with LOD calculated from depth derivatives.
+    // However, not all platforms support reguired GetDimensions(), in which case we always sample LOD 0, which results
+    // in some decal texture aliasing.
     #if defined(MIP_COUNT_SUPPORTED)
     float2 emissiveColorMapSize;
     float emissiveColorMapLODs;
@@ -133,7 +135,7 @@ void GetSurfaceData(FragInputs input, float3 V, PositionInputs posInput, float a
 #else // DECAL_SURFACE_GRADIENT
 
     #ifdef _NORMALMAP
-    float3 normalTS = UnpackNormalmapRGorAG(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, texCoords));
+    float3 normalTS = UnpackNormalMapRGorAG(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, texCoords));
     #else
     float3 normalTS = float3(0.0, 0.0, 1.0);
     #endif

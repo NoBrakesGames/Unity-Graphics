@@ -12,16 +12,13 @@
 #define instancingBatchSize    asuint(instancingConstants.z)
 
 // Current instance offset for rendering
-#define instancingRenderOffset   asuint(instancingConstants.w)
+#define instancingCurrentOffset   asuint(instancingConstants.w)
 
-// Data shared for all contexts (init, update, output)
-// Contains one entry for each ACTIVE instance
-struct ContextData
-{
-    uint maxParticleCount;
-    uint systemSeed;
-};
-StructuredBuffer<ContextData> instancingContextData;
+#define instancingActiveIndirectOffset instancingBufferOffsets.x
+
+#ifndef instancingPrefixSumOffset // Already defined in VFXInit.template because it is always 0 for Init.
+#define instancingPrefixSumOffset instancingBufferOffsets.y
+#endif
 
 #if VFX_INSTANCING_VARIABLE_SIZE
 // Prefix sum with particle counts for each active instance
@@ -29,22 +26,21 @@ StructuredBuffer<uint> instancingPrefixSum;
 #endif
 
 #if VFX_INSTANCING_BATCH_INDIRECTION
-// Indirection buffer, contains one entry for each active instance, holding the instance index in the batch
-StructuredBuffer<uint> instancingIndirect;
+// Indirection buffer, the first section contains the active -> batch index indirection. One entry for each active instance, holding the instance index in the batch
+// The next sections contains current -> active index indirection, for each split. One entry for each instance in current drawcall/dispatch, holding the index in the active instances
+StructuredBuffer<uint> instancingIndirectAndActiveIndirect;
 #endif
 
-#if VFX_INSTANCING_ACTIVE_INDIRECTION
-// Indirection buffer, contains one entry for each instance in current drawcall/dispatch, holding the index in the active instances
-StructuredBuffer<uint> instancingActiveIndirect;
-#endif
+#define DEAD_LIST_COUNT_COPY_OFFSET instancingBatchSize
+#define DEAD_LIST_OFFSET (2 * instancingBatchSize)
 
 #if defined(VFX_INSTANCING_VARIABLE_SIZE)
 // Get instance index in current drawcall/dispatch, for variable size instances
 uint VFXGetVariableSizeInstanceIndex(inout uint index)
 {
-    uint startIndex = 0u;
-    uint endIndex = instancingCurrentCount;
-    return BinarySearchPrefixSum(index, instancingPrefixSum, startIndex, endIndex, index);
+    uint startIndex = instancingCurrentOffset + instancingPrefixSumOffset;
+    uint endIndex = instancingCurrentCount + instancingCurrentOffset + instancingPrefixSumOffset;
+    return BinarySearchPrefixSum(index, instancingPrefixSum, startIndex, endIndex, index) - instancingPrefixSumOffset;
 }
 #elif defined(VFX_INSTANCING_FIXED_SIZE)
 // Get instance index in current drawcall/dispatch, for fixed size instances
@@ -53,7 +49,7 @@ uint VFXGetFixedSizeInstanceIndex(inout uint index)
     uint instanceIndex = index / VFX_INSTANCING_FIXED_SIZE;
     instanceIndex = min(instanceIndex, instancingCurrentCount - 1);
     index -= instanceIndex * VFX_INSTANCING_FIXED_SIZE;
-    return instanceIndex;
+    return instanceIndex + instancingCurrentOffset;
 }
 #endif
 
@@ -76,7 +72,7 @@ uint VFXGetInstanceActiveIndex(uint instanceCurrentIndex)
 #if VFX_INSTANCING_ACTIVE_INDIRECTION
     if (instancingCurrentCount < instancingActiveCount)
     {
-        instanceActiveIndex = instancingActiveIndirect[instanceActiveIndex];
+        instanceActiveIndex = instancingIndirectAndActiveIndirect[instancingActiveIndirectOffset + instanceActiveIndex];
     }
 #endif
     return instanceActiveIndex;
@@ -89,19 +85,20 @@ uint VFXGetInstanceBatchIndex(uint instanceActiveIndex)
 #if VFX_INSTANCING_BATCH_INDIRECTION
     if (instancingActiveCount < instancingBatchSize)
     {
-        instanceBatchIndex = instancingIndirect[instanceBatchIndex];
+        instanceBatchIndex = instancingIndirectAndActiveIndirect[instanceBatchIndex];
     }
 #endif
     return instanceBatchIndex;
 }
 
-uint VFXInitInstancing(uint index, out uint instanceIndex, out uint instanceActiveIndex)
+uint VFXInitInstancing(uint index, out uint instanceIndex, out uint instanceActiveIndex, out uint instanceCurrentIndex)
 {
+    instanceIndex = instanceActiveIndex = instanceCurrentIndex = 0;
 #if VFX_USE_INSTANCING
 
 #if SHADER_STAGE_COMPUTE // In compute shaders
 
-    uint instanceCurrentIndex = VFXGetInstanceCurrentIndex(index);
+    instanceCurrentIndex = VFXGetInstanceCurrentIndex(index);
     instanceActiveIndex = VFXGetInstanceActiveIndex(instanceCurrentIndex);
     instanceIndex = VFXGetInstanceBatchIndex(instanceActiveIndex);
 
@@ -109,7 +106,7 @@ uint VFXInitInstancing(uint index, out uint instanceIndex, out uint instanceActi
 
 #ifdef UNITY_INSTANCING_ENABLED
     {
-        uint instanceCurrentIndex = VFXGetInstanceCurrentIndex(index) + instancingRenderOffset;
+        instanceCurrentIndex = VFXGetInstanceCurrentIndex(index);
         unity_InstanceID = instanceCurrentIndex;
     }
 #endif
@@ -117,9 +114,6 @@ uint VFXInitInstancing(uint index, out uint instanceIndex, out uint instanceActi
     instanceActiveIndex = asuint(UNITY_ACCESS_INSTANCED_PROP(PerInstance, _InstanceActiveIndex));
     instanceIndex = asuint(UNITY_ACCESS_INSTANCED_PROP(PerInstance, _InstanceIndex));
 #endif
-
-#else
-    instanceIndex = instanceActiveIndex = 0;
 #endif
 
     return index;
@@ -167,8 +161,7 @@ void AppendEventTotalCount(RWStructuredBuffer<uint> outputBuffer, uint totalCoun
     instanceActiveIndex = 0u;
     localInstancingBatchSize = 1u;
 #endif
-    uint dummy;
-    InterlockedAdd(outputBuffer[localInstancingBatchSize + instanceActiveIndex], totalCount, dummy);
+    InterlockedAdd(outputBuffer[localInstancingBatchSize + instanceActiveIndex], totalCount);
 }
 
 void AppendEventBuffer(RWStructuredBuffer<uint> outputBuffer, uint sourceIndex, uint outputCapacity, uint instanceActiveIndex)

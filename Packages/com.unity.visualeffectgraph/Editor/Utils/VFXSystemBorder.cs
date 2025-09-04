@@ -10,12 +10,11 @@ using UnityObject = UnityEngine.Object;
 
 namespace UnityEditor.VFX.UI
 {
-    class VFXSystemBorderFactory : UxmlFactory<VFXSystemBorder>
-    { }
-
-
-    class VFXSystemBorder : GraphElement, IControlledElement<VFXSystemController>, IDisposable
+    [UxmlElement]
+    partial class VFXSystemBorder : GraphElement, IControlledElement<VFXSystemController>, IDisposable
     {
+        private const int kMaximumSystemNameLength = 128;
+
         class Content : ImmediateModeElement
         {
             VFXSystemBorder m_Border;
@@ -85,6 +84,7 @@ namespace UnityEditor.VFX.UI
 
             m_TitleField.Q("unity-text-input").RegisterCallback<FocusOutEvent>(OnTitleBlur, TrickleDown.TrickleDown);
             m_TitleField.RegisterCallback<ChangeEvent<string>>(OnTitleChange);
+            m_TitleField.maxLength = kMaximumSystemNameLength;
             m_Title.RegisterCallback<GeometryChangedEvent>(OnTitleRelayout);
 
             Content content = new Content(this);
@@ -124,7 +124,7 @@ namespace UnityEditor.VFX.UI
             {
                 OnRename();
                 e.StopPropagation();
-                e.PreventDefault();
+                focusController.IgnoreEvent(e);
             }
         }
 
@@ -260,13 +260,13 @@ namespace UnityEditor.VFX.UI
         }
 
         VFXContextUI[] m_Contexts;
-        private VFXContextUI[] contexts
+        internal VFXContextUI[] contexts
         {
             get
             {
                 return m_Contexts;
             }
-            set
+            private set
             {
                 if (m_Contexts != null)
                 {

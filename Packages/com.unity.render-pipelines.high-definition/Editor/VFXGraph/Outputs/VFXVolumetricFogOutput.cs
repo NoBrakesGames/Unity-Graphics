@@ -1,17 +1,16 @@
 using System.Collections.Generic;
 using System.Linq;
-using UnityEditor.VFX.Block;
+
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
-using UnityEngine.Serialization;
 using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.HDRP
 {
-    [VFXInfo(experimental = true)]
+    [VFXInfo(name = "Output Particle|HDRP Volumetric Fog", category = "#4Output Advanced", experimental = true)]
     class VFXVolumetricFogOutput : VFXAbstractParticleOutput
     {
-        public override string name => "Output Particle HDRP Volumetric Fog";
+        public override string name => "Output Particle".AppendLabel("HDRP Lit", false) + "\nVolumetric Fog";
         public override string codeGeneratorTemplate => RenderPipeTemplate("VFXVolumetricFogOutput");
         public override VFXTaskType taskType => VFXTaskType.ParticleQuadOutput;
 
@@ -208,7 +207,7 @@ namespace UnityEditor.VFX.HDRP
                 yield return nameof(sortMode);
                 yield return nameof(enableRayTracing);
                 yield return nameof(revertSorting);
-                yield return nameof(excludeFromTAA);
+                yield return nameof(excludeFromTUAndAA);
                 yield return nameof(computeCulling);
                 yield return nameof(vfxSystemSortPriority);
                 yield return nameof(sortingPriority);
@@ -282,12 +281,12 @@ namespace UnityEditor.VFX.HDRP
             }
         }
 
-        internal override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal override void GenerateErrors(VFXErrorReporter report)
         {
             if (!HDRenderPipeline.currentAsset?.currentPlatformRenderPipelineSettings.supportVolumetrics ?? false)
             {
-                manager.RegisterError("VolumetricFogDisabled", VFXErrorType.Warning,
-                    $"The current HDRP Asset does not support volumetric fog. To fix this error, go to the Lighting section of your HDRP asset and enable 'Volumetric Fog'.");
+                report.RegisterError("VolumetricFogDisabled", VFXErrorType.Warning,
+                    $"The current HDRP Asset does not support volumetric fog. To fix this error, go to the Lighting section of your HDRP asset and enable 'Volumetric Fog'.", this);
             }
 
             var data = GetData();
@@ -295,13 +294,13 @@ namespace UnityEditor.VFX.HDRP
             {
                 if (!data.IsCurrentAttributeWritten(VFXAttribute.Size) && !data.IsCurrentAttributeWritten(VFXAttribute.ScaleX))
                 {
-                    manager.RegisterError("SizeTooSmall", VFXErrorType.Warning,
-                        $"The size of the fog particle is not modified. This can make the volumetric fog effect invisible because the default size is too small. To fix this, add a size block in your system and increase it's value.");
+                    report.RegisterError("SizeTooSmall", VFXErrorType.Warning,
+                        $"The size of the fog particle is not modified. This can make the volumetric fog effect invisible because the default size is too small. To fix this, add a size block in your system and increase it's value.", this);
                 }
                 if (data.IsCurrentAttributeWritten(VFXAttribute.ScaleY) || data.IsCurrentAttributeWritten(VFXAttribute.ScaleZ))
                 {
-                    manager.RegisterError("ScaleYZIgnored", VFXErrorType.Warning,
-                        $"The scale on Y and Z axis are ignored by the volumetric fog. Configure your scale component to X only to remove this message.");
+                    report.RegisterError("ScaleYZIgnored", VFXErrorType.Warning,
+                        $"The scale on Y and Z axis are ignored by the volumetric fog. Configure your scale component to X only to remove this message.", this);
                 }
             }
         }
@@ -314,9 +313,6 @@ namespace UnityEditor.VFX.HDRP
             outputTask.bufferMappings.Add(VFXDataParticle.k_IndirectBufferName);
             outputTask.bufferMappings.Add("maxSliceCount");
 
-            // TODO: we shouldn't need to declare this buffer here to be able to bind it in the other tasks
-            outputTask.bufferMappings.Add("maxSliceTempBuffer");
-
             compiledData.AllocateIndirectBuffer();
 
             compiledData.buffers.Add(new VFXContextBufferDescriptor
@@ -324,49 +320,42 @@ namespace UnityEditor.VFX.HDRP
                 baseName = "maxSliceCount",
                 size = 1,
                 bufferSizeMode = VFXContextBufferSizeMode.FixedSize,
-                bufferType = ComputeBufferType.Structured,
+                bufferTarget = GraphicsBuffer.Target.Structured,
                 stride = sizeof(uint),
                 bufferCount = 1,
-            });
-
-            compiledData.buffers.Add(new VFXContextBufferDescriptor
-            {
-                baseName = "maxSliceTempBuffer",
-                bufferSizeMode = VFXContextBufferSizeMode.ScaleWithCapacity,
-                bufferType = ComputeBufferType.Structured,
-                stride = sizeof(uint),
-                bufferCount = 1,
-                capacityScaleMultiplier = 1.0f / VFXCodeGenerator.nbThreadsPerGroup,
             });
 
             // Volumetric output task need to be inserted before the output work
             compiledData.tasks.Insert(0, new VFXTask
             {
+                doesGenerateShader = true,
                 templatePath = VisualEffectGraphPackageInfo.assetPackagePath + "/Shaders/VFXVolumetricFogUpdate",
                 additionalDefines = new string[] { "VFX_VOLUMETRIC_FOG_PASS_CLEAR", "HAVE_VFX_MODIFICATION" },
                 type = VFXTaskType.PerCameraUpdate,
                 shaderType = VFXTaskShaderType.ComputeShader,
-                bufferMappings = new() { "maxSliceTempBuffer", "maxSliceCount" },
+                bufferMappings = new() { "maxSliceCount" },
                 name = "Clear",
             });
 
             compiledData.tasks.Insert(1, new VFXTask
             {
+                doesGenerateShader = true,
                 templatePath = VisualEffectGraphPackageInfo.assetPackagePath + "/Shaders/VFXVolumetricFogUpdate",
                 additionalDefines = new string[] { "VFX_VOLUMETRIC_FOG_PASS_0", "HAVE_VFX_MODIFICATION" },
                 type = VFXTaskType.PerCameraUpdate,
                 shaderType = VFXTaskShaderType.ComputeShader,
-                bufferMappings = new() { "maxSliceCount", "maxSliceTempBuffer" },
+                bufferMappings = new() { "maxSliceCount"},
                 name = "Count",
             });
 
             compiledData.tasks.Insert(2, new VFXTask
             {
+                doesGenerateShader = true,
                 templatePath = VisualEffectGraphPackageInfo.assetPackagePath + "/Shaders/VFXVolumetricFogUpdate",
                 additionalDefines = new string[] { "VFX_VOLUMETRIC_FOG_PASS_1", "HAVE_VFX_MODIFICATION" },
                 type = VFXTaskType.PerCameraUpdate,
                 shaderType = VFXTaskShaderType.ComputeShader,
-                bufferMappings = new() { "maxSliceCount", new VFXTask.BufferMapping(VFXDataParticle.k_IndirectBufferName, "outputBuffer"), "maxSliceTempBuffer"},
+                bufferMappings = new() { "maxSliceCount", new VFXTask.BufferMapping(VFXDataParticle.k_IndirectBufferName, "outputBuffer")},
                 name = "Fill",
             });
 

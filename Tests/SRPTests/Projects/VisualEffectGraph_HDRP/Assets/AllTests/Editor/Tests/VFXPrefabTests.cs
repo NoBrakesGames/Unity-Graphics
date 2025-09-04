@@ -14,57 +14,41 @@ using UnityEngine.TestTools;
 namespace UnityEditor.VFX.Test
 {
     [TestFixture]
-    public class VisualEffectPrefabTest : VFXPlayModeTest
+    public class VisualEffectPrefabTest
     {
-        GameObject m_mainCamera;
-        List<string> m_assetToDelete = new List<string>();
-        List<GameObject> m_gameObjectToDelete = new List<GameObject>();
+        List<GameObject> m_gameObjectToDelete = new ();
+        private EnterPlayModeOptions m_OriginalPlayModeOption;
 
         [OneTimeSetUp]
         public void Init()
         {
-            m_mainCamera = new GameObject();
-            var camera = m_mainCamera.AddComponent<Camera>();
+            var mainCamera = new GameObject();
+            mainCamera.tag = "MainCamera";
+            var camera = mainCamera.AddComponent<Camera>();
             camera.transform.localPosition = Vector3.one;
-            camera.transform.LookAt(m_mainCamera.transform);
+            camera.transform.LookAt(mainCamera.transform);
+
+            m_OriginalPlayModeOption = EditorSettings.enterPlayModeOptions;
+            EditorSettings.enterPlayModeOptions = EnterPlayModeOptions.DisableDomainReload;
         }
 
         [OneTimeTearDown]
         public void CleanUp()
         {
+            VFXTestCommon.DeleteAllTemporaryGraph();
+            EditorSettings.enterPlayModeOptions = m_OriginalPlayModeOption;
+
             foreach (var gameObject in m_gameObjectToDelete)
             {
-                try
-                {
-                    UnityEngine.Object.DestroyImmediate(gameObject, true);
-                }
-                catch (System.Exception)
-                {
-                }
+                UnityEngine.Object.DestroyImmediate(gameObject, true);
             }
-
-            foreach (var assetPath in m_assetToDelete)
-            {
-                try
-                {
-                    AssetDatabase.DeleteAsset(assetPath);
-                }
-                catch (System.Exception)
-                {
-                }
-            }
-
-            VFXTestCommon.DeleteAllTemporaryGraph();
         }
 
         static readonly string k_tempFileFormat = VFXTestCommon.tempBasePath + "vfx_prefab_{0}.{1}";
-        static int m_TempFileCounter = 0;
 
         string MakeTempFilePath(string extension)
         {
-            m_TempFileCounter++;
-            var tempFilePath = string.Format(k_tempFileFormat, m_TempFileCounter, extension);
-            m_assetToDelete.Add(tempFilePath);
+            var tempFilePath = string.Format(k_tempFileFormat, Guid.NewGuid(), extension);
             return tempFilePath;
         }
 
@@ -90,7 +74,7 @@ namespace UnityEditor.VFX.Test
         public IEnumerator Create_Prefab_Several_Override()
         {
             var graph = VFXTestCommon.MakeTemporaryGraph();
-            var parametersIntDesc = VFXLibrary.GetParameters().Where(o => o.model.type == typeof(int)).First();
+            var parametersIntDesc = VFXLibrary.GetParameters().Where(o => o.modelType == typeof(int)).First();
 
             Func<VisualEffect, string> dumpPropertySheetInteger = delegate(VisualEffect target)
             {
@@ -372,7 +356,7 @@ namespace UnityEditor.VFX.Test
         public IEnumerator Create_Prefab_Modify_And_Expect_No_Override()
         {
             var graph = VFXTestCommon.MakeTemporaryGraph();
-            var parametersVector3Desc = VFXLibrary.GetParameters().Where(o => o.model.type == typeof(Vector3)).First();
+            var parametersVector3Desc = VFXLibrary.GetParameters().Where(o => o.modelType == typeof(Vector3)).First();
 
             var exposedName = "ghjkl";
             var parameter = parametersVector3Desc.CreateInstance();
@@ -458,7 +442,7 @@ namespace UnityEditor.VFX.Test
         {
             //Cover case 1230230 : VFX parameters are not set when the gameobject is immediately deactivated and is not selected in the Hierarchy
             var graph = VFXTestCommon.MakeTemporaryGraph();
-            var parametersUintDesc = VFXLibrary.GetParameters().Where(o => o.model.type == typeof(uint)).First();
+            var parametersUintDesc = VFXLibrary.GetParameters().Where(o => o.modelType == typeof(uint)).First();
 
             var parameter = parametersUintDesc.CreateInstance();
             parameter.SetSettingValue("m_ExposedName", m_Exposed_name_CreatePrefab_And_Disable_Root_Then_Modify_Exposed_Finally_Renable);
@@ -476,7 +460,7 @@ namespace UnityEditor.VFX.Test
 
             m_Prefab_CreatePrefab_And_Disable_Root_Then_Modify_Exposed_Finally_Renable = prefabInstanceObject;
 
-            yield return new EnterPlayMode();
+            yield return new EnterPlayMode(false);
 
             var exposedExpectedValue = 43000u;
             var exposedName = m_Exposed_name_CreatePrefab_And_Disable_Root_Then_Modify_Exposed_Finally_Renable;
@@ -501,7 +485,6 @@ namespace UnityEditor.VFX.Test
             Assert.AreEqual(exposedExpectedValue, vfx.GetUInt(exposedName));
 
             yield return new ExitPlayMode();
-
             m_Prefab_CreatePrefab_And_Disable_Root_Then_Modify_Exposed_Finally_Renable = null;
         }
 
@@ -510,7 +493,7 @@ namespace UnityEditor.VFX.Test
         public IEnumerator Create_Prefab_And_Check_UndoRedo()
         {
             var graph = VFXTestCommon.MakeTemporaryGraph();
-            var parametersUintDesc = VFXLibrary.GetParameters().Where(o => o.model.type == typeof(uint)).First();
+            var parametersUintDesc = VFXLibrary.GetParameters().Where(o => o.modelType == typeof(uint)).First();
 
             var parameter = parametersUintDesc.CreateInstance();
             parameter.SetSettingValue("m_ExposedName", m_Exposed_name_Create_Prefab_And_Check_UndoRedo);

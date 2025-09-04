@@ -79,7 +79,11 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
         // SubTarget
         List<SubTarget> m_SubTargets;
         List<string> m_SubTargetNames;
+
         int activeSubTargetIndex => m_SubTargets.IndexOf(m_ActiveSubTarget);
+
+        [SerializeField]
+        List<JsonData<JsonObject>> m_Datas = new List<JsonData<JsonObject>>();
 
         // View
         PopupField<string> m_SubTargetField;
@@ -113,7 +117,7 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
         [SerializeField]
         string m_CustomEditorGUI;
 
-        internal override bool ignoreCustomInterpolators => false;
+        internal override bool ignoreCustomInterpolators => m_ActiveSubTarget.value is BuiltInCanvasSubTarget;
         internal override int padCustomInterpolatorLimit => 4;
 
         public BuiltInTarget()
@@ -122,6 +126,7 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
             m_SubTargets = TargetUtils.GetSubTargets(this);
             m_SubTargetNames = m_SubTargets.Select(x => x.displayName).ToList();
             TargetUtils.ProcessSubTargetList(ref m_ActiveSubTarget, ref m_SubTargets);
+            ProcessSubTargetDatas(m_ActiveSubTarget.value);
         }
 
         public string renderType
@@ -247,6 +252,7 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
             if (m_ActiveSubTarget.value == null)
                 return;
             m_ActiveSubTarget.value.target = this;
+            ProcessSubTargetDatas(m_ActiveSubTarget.value);
             m_ActiveSubTarget.value.Setup(ref context);
 
             // Override EditorGUI
@@ -274,11 +280,17 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
 
         public override void GetActiveBlocks(ref TargetActiveBlockContext context)
         {
+            bool useCoreBlocks = !(m_ActiveSubTarget.value is UnityEditor.Rendering.Canvas.ShaderGraph.CanvasSubTarget<BuiltInTarget>);
+
             // Core blocks
-            context.AddBlock(BlockFields.VertexDescription.Position);
-            context.AddBlock(BlockFields.VertexDescription.Normal);
-            context.AddBlock(BlockFields.VertexDescription.Tangent);
-            context.AddBlock(BlockFields.SurfaceDescription.BaseColor);
+            if (useCoreBlocks)
+            {
+                // Core blocks
+                context.AddBlock(BlockFields.VertexDescription.Position);
+                context.AddBlock(BlockFields.VertexDescription.Normal);
+                context.AddBlock(BlockFields.VertexDescription.Tangent);
+                context.AddBlock(BlockFields.SurfaceDescription.BaseColor);
+            }
 
             // SubTarget blocks
             m_ActiveSubTarget.value.GetActiveBlocks(ref context);
@@ -288,9 +300,6 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
         {
             base.CollectShaderProperties(collector, generationMode);
             activeSubTarget.CollectShaderProperties(collector, generationMode);
-            // collector.AddShaderProperty(LightmappingShaderProperties.kLightmapsArray);
-            // collector.AddShaderProperty(LightmappingShaderProperties.kLightmapsIndirectionArray);
-            // collector.AddShaderProperty(LightmappingShaderProperties.kShadowMasksArray);
         }
 
         public override void ProcessPreviewMaterial(Material material)
@@ -314,6 +323,7 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
 
                 registerUndo("Change Material");
                 m_ActiveSubTarget = m_SubTargets[m_SubTargetField.index];
+                ProcessSubTargetDatas(m_ActiveSubTarget.value);
                 onChange();
             });
 
@@ -423,6 +433,7 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
                 if (subTarget.GetType().Equals(subTargetType))
                 {
                     m_ActiveSubTarget = subTarget;
+                    ProcessSubTargetDatas(m_ActiveSubTarget);
                     return true;
                 }
             }
@@ -434,6 +445,70 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
         {
             return scriptableRenderPipeline == null;
         }
+
+
+        #region IRequiresDataSupport
+        void ProcessSubTargetDatas(SubTarget subTarget)
+        {
+            var typeCollection = TypeCache.GetTypesDerivedFrom<JsonObject>();
+            foreach (var type in typeCollection)
+            {
+                if (type.IsGenericType)
+                    continue;
+
+                // Data requirement interfaces need generic type arguments
+                // Therefore we need to use reflections to call the method
+                var methodInfo = typeof(BuiltInTarget).GetMethod(nameof(SetDataOnSubTarget));
+                var genericMethodInfo = methodInfo.MakeGenericMethod(type);
+                genericMethodInfo.Invoke(this, new object[] { subTarget });
+            }
+        }
+        void ClearUnusedData()
+        {
+            for (int i = 0; i < m_Datas.Count; i++)
+            {
+                var data = m_Datas[i];
+                var type = data.value.GetType();
+
+                // Data requirement interfaces need generic type arguments
+                // Therefore we need to use reflections to call the method
+                var methodInfo = typeof(BuiltInTarget).GetMethod(nameof(ValidateDataForSubTarget));
+                var genericMethodInfo = methodInfo.MakeGenericMethod(type);
+                genericMethodInfo.Invoke(this, new object[] { m_ActiveSubTarget.value, data.value });
+            }
+        }
+
+        public void SetDataOnSubTarget<T>(SubTarget subTarget) where T : JsonObject
+        {
+            if (!(subTarget is IRequiresData<T> requiresData))
+                return;
+
+            // Ensure data object exists in list
+            var data = m_Datas.SelectValue().FirstOrDefault(x => x.GetType().Equals(typeof(T))) as T;
+            if (data == null)
+            {
+                data = Activator.CreateInstance(typeof(T)) as T;
+                m_Datas.Add(data);
+            }
+
+            // Apply data object to SubTarget
+            requiresData.data = data;
+        }
+
+        public void ValidateDataForSubTarget<T>(SubTarget subTarget, T data) where T : JsonObject
+        {
+            if (!(subTarget is IRequiresData<T> requiresData))
+            {
+                m_Datas.Remove(data);
+            }
+        }
+
+        public override void OnBeforeSerialize()
+        {
+            ClearUnusedData();
+        }
+        #endregion
+
 
         public override void OnAfterDeserialize(string json)
         {

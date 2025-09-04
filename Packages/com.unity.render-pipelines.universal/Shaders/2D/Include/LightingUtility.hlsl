@@ -1,13 +1,11 @@
 // Must match: LightBatch.isBatchingSupported
-#if !defined(SHADER_API_GLES3) && !defined(SHADER_API_GLCORE) && !defined(SHADER_API_SWITCH)
-    #define USE_STRUCTURED_BUFFER_FOR_LIGHT2D_DATA  1
-#endif
+#define USE_STRUCTURED_BUFFER_FOR_LIGHT2D_DATA 0
 
 #if USE_NORMAL_MAP
     #if LIGHT_QUALITY_FAST
         #define NORMALS_LIGHTING_COORDS(TEXCOORDA, TEXCOORDB) \
             half4   lightDirection  : TEXCOORDA;\
-            half2   screenUV   : TEXCOORDB;
+            float2  screenUV   : TEXCOORDB;
 
         #define TRANSFER_NORMALS_LIGHTING(output, worldSpacePos, lightPosition, lightZDistance)\
             output.screenUV = ComputeNormalizedDeviceCoordinates(output.positionCS.xyz / output.positionCS.w);\
@@ -24,7 +22,7 @@
     #else
         #define NORMALS_LIGHTING_COORDS(TEXCOORDA, TEXCOORDB) \
             half4   positionWS : TEXCOORDA;\
-            half2   screenUV   : TEXCOORDB;
+            float2  screenUV   : TEXCOORDB;
 
         #define TRANSFER_NORMALS_LIGHTING(output, worldSpacePos, lightPosition, lightZDistance) \
             output.screenUV = ComputeNormalizedDeviceCoordinates(output.positionCS.xyz / output.positionCS.w); \
@@ -53,10 +51,6 @@
     float2  shadowUV    : TEXCOORDA;
 
 #define SHADOW_VARIABLES\
-    float  _ShadowIntensity;\
-    float  _ShadowVolumeIntensity;\
-    half4  _ShadowColor = 1;\
-    half4  _UnshadowColor = 1;\
     TEXTURE2D(_ShadowTex);\
     SAMPLER(sampler_ShadowTex);
 
@@ -65,12 +59,7 @@
     if(intensity < 1)\
     {\
         half4 shadowTex = SAMPLE_TEXTURE2D(_ShadowTex, sampler_ShadowTex, input.shadowUV); \
-        half  shadowFinalValue   = dot(half4(1,0,0,0), shadowTex.rgba);\
-        half  unshadowValue = dot(half4(0,1,0,0), shadowTex.rgba);\
-        half  unshadowGTEOne = unshadowValue > 1;\
-        half  spriteAlpha   = dot(half4(0,0,1,0), shadowTex.rgba);\
-        half  unshadowFinalValue = unshadowGTEOne * (unshadowValue - (1-spriteAlpha)) + (1-unshadowGTEOne) * (unshadowValue * spriteAlpha);\
-        half  shadowIntensity = 1-saturate(shadowFinalValue - unshadowFinalValue); \
+        half4 shadowIntensity = 1-max(shadowTex.r, shadowTex.g * 1-shadowTex.b);\
         color.rgb = (color.rgb * shadowIntensity) + (color.rgb * intensity*(1 - shadowIntensity));\
      }
 
@@ -84,18 +73,31 @@
     half4 _ShapeLightMaskFilter##index;\
     half4 _ShapeLightInvertedFilter##index;
 
+#if !defined(USE_SHAPE_LIGHT_TYPE_0) && !defined(USE_SHAPE_LIGHT_TYPE_1) && !defined(USE_SHAPE_LIGHT_TYPE_2) && !defined(USE_SHAPE_LIGHT_TYPE_3)
+#define USE_DEFAULT_LIGHT_TYPE 1
+#endif
+
 struct FragmentOutput
 {
-    half4 GLightBuffer0 : SV_Target0;
+#if USE_SHAPE_LIGHT_TYPE_0 || USE_DEFAULT_LIGHT_TYPE
+   half4 GLightBuffer0 : SV_Target0;
+#endif
+#if USE_SHAPE_LIGHT_TYPE_1
     half4 GLightBuffer1 : SV_Target1;
+#endif
+#if USE_SHAPE_LIGHT_TYPE_2
     half4 GLightBuffer2 : SV_Target2;
+#endif
+#if USE_SHAPE_LIGHT_TYPE_3
     half4 GLightBuffer3 : SV_Target3;
+#endif
 };
 
 FragmentOutput ToFragmentOutput(half4 finalColor)
 {
     FragmentOutput output;
-    #if USE_SHAPE_LIGHT_TYPE_0
+
+    #if USE_SHAPE_LIGHT_TYPE_0 || USE_DEFAULT_LIGHT_TYPE
     output.GLightBuffer0 = finalColor;
     #endif
     #if USE_SHAPE_LIGHT_TYPE_1
@@ -107,9 +109,7 @@ FragmentOutput ToFragmentOutput(half4 finalColor)
     #if USE_SHAPE_LIGHT_TYPE_3
     output.GLightBuffer3 = finalColor;
     #endif
-    #if !defined(USE_SHAPE_LIGHT_TYPE_0) && !defined(USE_SHAPE_LIGHT_TYPE_1) && !defined(USE_SHAPE_LIGHT_TYPE_2) && !defined(USE_SHAPE_LIGHT_TYPE_3)
-    output.GLightBuffer0 = finalColor;
-    #endif
+
     return output;
 }
 
@@ -142,7 +142,7 @@ struct PerLight2D
     int         LightType;
 };
 
-#if defined(USE_STRUCTURED_BUFFER_FOR_LIGHT2D_DATA)
+#if USE_STRUCTURED_BUFFER_FOR_LIGHT2D_DATA
 
     #define UNITY_LIGHT2D_DATA                  \
                                                 \
@@ -155,6 +155,18 @@ struct PerLight2D
             int idx = (int)(color.b * 64) + _BatchBufferOffset; \
             return _Light2DBuffer[idx];                         \
         }
+
+    #define _L2D_INVMATRIX          light.InvMatrix
+    #define _L2D_COLOR              light.Color
+    #define _L2D_POSITION           light.Position
+    #define _L2D_FALLOFF_INTENSITY  light.FalloffIntensity
+    #define _L2D_FALLOFF_DISTANCE   light.FalloffDistance
+    #define _L2D_OUTER_ANGLE        light.OuterAngle
+    #define _L2D_INNER_ANGLE        light.InnerAngle
+    #define _L2D_INNER_RADIUS_MULT  light.InnerRadiusMult
+    #define _L2D_VOLUME_OPACITY     light.VolumeOpacity
+    #define _L2D_SHADOW_INTENSITY   light.ShadowIntensity
+    #define _L2D_LIGHT_TYPE         light.LightType
 
 #else
 
@@ -171,22 +183,17 @@ struct PerLight2D
             float       L2DVolumeOpacity;       \
             float       L2DShadowIntensity;     \
             int         L2DLightType;           \
-                                                \
-            PerLight2D GetPerLight2D(float4 color)                  \
-            {                                                       \
-                PerLight2D light;                                   \
-                light.InvMatrix = L2DInvMatrix;                     \
-                light.Color = L2DColor;                             \
-                light.Position = L2DPosition;                       \
-                light.FalloffIntensity = L2DFalloffIntensity;       \
-                light.FalloffDistance = L2DFalloffDistance;         \
-                light.OuterAngle = L2DOuterAngle;                   \
-                light.InnerAngle = L2DInnerAngle;                   \
-                light.InnerRadiusMult = L2DInnerRadiusMult;         \
-                light.VolumeOpacity = L2DVolumeOpacity;             \
-                light.ShadowIntensity = L2DShadowIntensity;         \
-                light.LightType = L2DLightType;                     \
-                return light;                                       \
-            }
+
+    #define _L2D_INVMATRIX          L2DInvMatrix
+    #define _L2D_COLOR              L2DColor
+    #define _L2D_POSITION           L2DPosition
+    #define _L2D_FALLOFF_INTENSITY  L2DFalloffIntensity
+    #define _L2D_FALLOFF_DISTANCE   L2DFalloffDistance
+    #define _L2D_OUTER_ANGLE        L2DOuterAngle
+    #define _L2D_INNER_ANGLE        L2DInnerAngle
+    #define _L2D_INNER_RADIUS_MULT  L2DInnerRadiusMult
+    #define _L2D_VOLUME_OPACITY     L2DVolumeOpacity
+    #define _L2D_SHADOW_INTENSITY   L2DShadowIntensity
+    #define _L2D_LIGHT_TYPE         L2DLightType
 
 #endif

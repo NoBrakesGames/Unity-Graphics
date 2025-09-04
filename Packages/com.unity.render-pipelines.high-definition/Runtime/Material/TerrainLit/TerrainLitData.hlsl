@@ -112,14 +112,14 @@ AttributesMesh ApplyMeshModification(AttributesMesh input, float3 timeParameters
 #undef _AlbedoAffectEmissive
 #undef _EmissiveExposureWeight
 
-#ifndef SHADER_STAGE_RAY_TRACING
+#if !defined(SHADER_STAGE_RAY_TRACING) || defined(PATH_TRACING_CLUSTERED_DECALS)
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Decal/DecalUtilities.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitDecalData.hlsl"
 #endif
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/TerrainLit/TerrainLitSurfaceData.hlsl"
 
 void TerrainLitShade(float2 uv, inout TerrainLitSurfaceData surfaceData);
-void TerrainLitDebug(float2 uv, inout float3 baseColor);
+void TerrainLitDebug(float2 uv, uint2 screenSpaceCoords, out float3 baseColor);
 
 float3 ConvertToNormalTS(float3 normalData, float3 tangentWS, float3 bitangentWS)
 {
@@ -152,8 +152,10 @@ void GetSurfaceAndBuiltinData(inout FragInputs input, float3 V, inout PositionIn
     GENERIC_ALPHA_TEST(hole, 0.5);
 #endif
 
+#ifndef EDITOR_VISUALIZATION
     // terrain lightmap uvs are always taken from uv0
     input.texCoord1 = input.texCoord2 = input.texCoord0;
+#endif
 
     TerrainLitSurfaceData terrainLitSurfaceData;
     InitializeTerrainLitSurfaceData(terrainLitSurfaceData);
@@ -205,39 +207,27 @@ void GetSurfaceAndBuiltinData(inout FragInputs input, float3 V, inout PositionIn
     // This need to be init here to quiet the compiler in case of decal, but can be override later.
     surfaceData.specularOcclusion = 1.0;
 
-#if defined(DECAL_SURFACE_GRADIENT) && !defined(SHADER_STAGE_RAY_TRACING)
 #if !defined(ENABLE_TERRAIN_PERPIXEL_NORMAL) || !defined(TERRAIN_PERPIXEL_NORMAL_OVERRIDE)
     float3 normalTS = ConvertToNormalTS(terrainLitSurfaceData.normalData, input.tangentToWorld[0], input.tangentToWorld[1]);
+
+    #ifdef DECAL_NORMAL_BLENDING
+    if (_EnableDecals)
+    {
+        #ifndef SURFACE_GRADIENT
+        normalTS = SurfaceGradientFromTangentSpaceNormalAndFromTBN(normalTS,
+                input.tangentToWorld[0], input.tangentToWorld[1]);
+        #endif
+
+        float alpha = 1.0; // unused
+        DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
+        ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData, normalTS);
+    }
+
+    GetNormalWS_SG(input, normalTS, surfaceData.normalWS, float3(1.0, 1.0, 1.0));
+    #else
+    GetNormalWS(input, normalTS, surfaceData.normalWS, float3(1.0, 1.0, 1.0));
+
     #if HAVE_DECALS
-    if (_EnableDecals)
-    {
-        float alpha = 1.0; // unused
-        DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
-        ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData, normalTS);
-    }
-    #endif
-    GetNormalWS(input, normalTS, surfaceData.normalWS, float3(1.0, 1.0, 1.0));
-#elif HAVE_DECALS
-    if (_EnableDecals)
-    {
-        float3 normalTS = SurfaceGradientFromPerturbedNormal(input.tangentToWorld[2], surfaceData.normalWS);
-
-        float alpha = 1.0; // unused
-        DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
-        ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData, normalTS);
-
-        GetNormalWS(input, normalTS, surfaceData.normalWS, float3(1.0, 1.0, 1.0));
-    }
-#endif
-
-#else // defined(DECAL_SURFACE_GRADIENT) && !defined(SHADER_STAGE_RAY_TRACING)
-
-#if !defined(ENABLE_TERRAIN_PERPIXEL_NORMAL) || !defined(TERRAIN_PERPIXEL_NORMAL_OVERRIDE)
-    float3 normalTS = ConvertToNormalTS(terrainLitSurfaceData.normalData, input.tangentToWorld[0], input.tangentToWorld[1]);
-    GetNormalWS(input, normalTS, surfaceData.normalWS, float3(1.0, 1.0, 1.0));
-#endif
-
-#if HAVE_DECALS && !defined(SHADER_STAGE_RAY_TRACING)
     if (_EnableDecals)
     {
         float alpha = 1.0; // unused
@@ -245,19 +235,37 @@ void GetSurfaceAndBuiltinData(inout FragInputs input, float3 V, inout PositionIn
         DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
         ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData);
     }
-#endif
+    #endif
+    #endif
+#elif HAVE_DECALS
+    if (_EnableDecals)
+    {
+        float alpha = 1.0; // unused
+        DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
 
-#endif // DECAL_SURFACE_GRADIENT
+        #ifdef DECAL_NORMAL_BLENDING
+        float3 normalTS = SurfaceGradientFromPerturbedNormal(input.tangentToWorld[2], surfaceData.normalWS);
+        ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData, normalTS);
+        GetNormalWS_SG(input, normalTS, surfaceData.normalWS, float3(1.0, 1.0, 1.0));
+        #else
+        ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData);
+        #endif
+    }
+#endif
 
     float3 bentNormalWS = surfaceData.normalWS;
 
-#if defined(DEBUG_DISPLAY) && !defined(SHADER_STAGE_RAY_TRACING)
+#if defined(DEBUG_DISPLAY)
+#if !defined(SHADER_STAGE_RAY_TRACING)
+    // Mipmap mode debugging isn't supported with ray tracing as it relies on derivatives
     if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
     {
-        TerrainLitDebug(input.texCoord0.xy, surfaceData.baseColor);
+        TerrainLitDebug(input.texCoord0.xy, posInput.positionSS, surfaceData.baseColor);
         surfaceData.metallic = 0;
     }
-    // We need to call ApplyDebugToSurfaceData after filling the surfarcedata and before filling builtinData
+#endif
+
+    // We need to call ApplyDebugToSurfaceData after filling the surfaceData and before filling builtinData
     // as it can modify attribute use for static lighting
     ApplyDebugToSurfaceData(input.tangentToWorld, surfaceData);
 #endif

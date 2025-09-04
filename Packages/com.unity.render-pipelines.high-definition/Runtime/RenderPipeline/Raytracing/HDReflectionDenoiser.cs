@@ -1,5 +1,5 @@
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -19,10 +19,10 @@ namespace UnityEngine.Rendering.HighDefinition
         {
         }
 
-        public void Init(HDRenderPipelineRayTracingResources rpRTResources)
+        public void Init(HDRPRayTracingResources rpRTResources)
         {
             m_ReflectionDenoiserCS = rpRTResources.reflectionDenoiserCS;
-            m_ReflectionFilterMapping = rpRTResources.reflectionFilterMapping;
+            m_ReflectionFilterMapping = rpRTResources.reflectionFilterMappingTexture;
 
             // Fetch all the kernels we shall be using
             s_TemporalAccumulationFullResKernel = m_ReflectionDenoiserCS.FindKernel("TemporalAccumulationFullRes");
@@ -114,9 +114,9 @@ namespace UnityEngine.Rendering.HighDefinition
                 passData.historyDepth = depthT != null ? renderGraph.ImportTexture(hdCamera.GetCurrentFrameRT((int)HDCameraFrameHistoryType.Depth)) : renderGraph.defaultResources.blackTextureXR;
 
                 passData.intermediateBuffer0 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "IntermediateTexture0" });
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "IntermediateTexture0" });
                 passData.intermediateBuffer1 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "IntermediateTexture1" });
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "IntermediateTexture1" });
                 passData.historySignal = builder.ReadWriteTexture(renderGraph.ImportTexture(historyBuffer));
                 passData.noisyToOutputSignal = builder.ReadWriteTexture(lightingTexture);
 

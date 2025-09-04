@@ -23,11 +23,6 @@ float4 VFXApplyPreExposure(float4 color, VFX_VARYING_PS_INPUTS input)
 }
 #endif
 
-float4 VFXTransformFinalColor(float4 color)
-{
-    return color;
-}
-
 float2 VFXGetNormalizedScreenSpaceUV(float4 clipPos)
 {
     return GetNormalizedScreenSpaceUV(clipPos);
@@ -36,6 +31,26 @@ float2 VFXGetNormalizedScreenSpaceUV(float4 clipPos)
 void VFXEncodeMotionVector(float2 velocity, out float4 outBuffer)
 {
     outBuffer = float4(velocity.xy, 0, 0);
+}
+
+float4x4 VFXGetObjectToWorldMatrix()
+{
+    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_M)
+    #if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
+    return GetSGVFXUnityObjectToWorld();
+    #else
+    return GetObjectToWorldMatrix();
+    #endif
+}
+
+float4x4 VFXGetWorldToObjectMatrix()
+{
+    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_I_M)
+    #if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
+    return GetSGVFXUnityWorldToObject();
+    #else
+    return GetWorldToObjectMatrix();
+    #endif
 }
 
 float4 VFXTransformPositionWorldToClip(float3 posWS)
@@ -55,13 +70,13 @@ float4 VFXTransformPositionWorldToPreviousClip(float3 posWS)
 
 float4 VFXTransformPositionObjectToClip(float3 posOS)
 {
-    float3 posWS = TransformObjectToWorld(posOS);
+    float3 posWS = mul(VFXGetObjectToWorldMatrix(), float4(posOS,1)).xyz;
     return VFXTransformPositionWorldToClip(posWS);
 }
 
 float4 VFXTransformPositionObjectToNonJitteredClip(float3 posOS)
 {
-    float3 posWS = TransformObjectToWorld(posOS);
+    float3 posWS = mul(VFXGetObjectToWorldMatrix(), float4(posOS,1)).xyz;
     return VFXTransformPositionWorldToNonJitteredClip(posWS);
 }
 
@@ -99,26 +114,6 @@ float4x4 ApplyCameraTranslationToInverseMatrix(float4x4 inverseModelMatrix)
     return inverseModelMatrix;
 }
 //End of compatibility functions
-
-float4x4 VFXGetObjectToWorldMatrix()
-{
-    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_M)
-#if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
-    return GetSGVFXUnityObjectToWorld();
-#else
-    return GetObjectToWorldMatrix();
-#endif
-}
-
-float4x4 VFXGetWorldToObjectMatrix()
-{
-    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_I_M)
-#if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
-    return GetSGVFXUnityWorldToObject();
-#else
-    return GetWorldToObjectMatrix();
-#endif
-}
 
 float3x3 VFXGetWorldToViewRotMatrix()
 {
@@ -181,6 +176,17 @@ float4 VFXApplyAO(float4 color, float4 posCS)
     return color;
 }
 
+float4 VFXTransformFinalColor(float4 color, float4 posCS)
+{
+    if (IsOnlyAOLightingFeatureEnabled())
+    {
+        color.rgb = (float3)1.0f;
+        color = VFXApplyAO(color, posCS);
+    }
+
+    return color;
+}
+
 float4 VFXApplyFog(float4 color,float4 posCS,float3 posWS)
 {
    float4 fog = (float4)0;
@@ -204,14 +210,17 @@ float3 VFXGetCameraWorldDirection()
     return unity_CameraToWorld._m02_m12_m22;
 }
 
-void VFXComputePixelOutputToNormalBuffer(float3 normalWS, out float4 outNormalBuffer)
-{
 #if defined(_GBUFFER_NORMALS_OCT)
-    float2 octNormalWS = PackNormalOctQuadEncode(normalWS);           // values between [-1, +1], must use fp32 on some platforms
-    float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5);   // values between [ 0,  1]
-    half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);      // values between [ 0,  1]
-    outNormalBuffer = float4(packedNormalWS, 0.0);
-#else
-    outNormalBuffer = float4(normalWS, 0.0);
-#endif
+#define VFXComputePixelOutputToNormalBuffer(i,normalWS,uvData,outNormalBuffer) \
+{ \
+    float2 octNormalWS = PackNormalOctQuadEncode(normalWS);         /*values between [-1, +1], must use fp32 on some platforms*/ \
+    float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5); /*values between [ 0,  1]*/ \
+    half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);    /*values between [ 0,  1]*/ \
+	outNormalBuffer = float4(packedNormalWS, 0.0); \
 }
+#else
+#define VFXComputePixelOutputToNormalBuffer(i,normalWS,uvData,outNormalBuffer) \
+{ \
+    outNormalBuffer = float4(normalWS, 0.0); \
+}
+#endif

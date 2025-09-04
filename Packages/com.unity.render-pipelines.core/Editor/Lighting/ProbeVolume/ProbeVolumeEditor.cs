@@ -1,9 +1,13 @@
-using System.Collections.Generic;
+using System;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using UnityEngine;
-using UnityEditor;
-using UnityEditor.Rendering;
 using UnityEngine.Rendering;
 using UnityEditorInternal;
+
+using Object = UnityEngine.Object;
+
+[assembly: InternalsVisibleTo("SRPSmoke.Editor.Tests")]
 
 namespace UnityEditor.Rendering
 {
@@ -30,6 +34,99 @@ namespace UnityEditor.Rendering
             m_SerializedProbeVolume = new SerializedProbeVolume(serializedObject);
         }
 
+        internal static void APVDisabledHelpBox()
+        {
+            var renderPipelineAssetType = GraphicsSettings.currentRenderPipelineAssetType;
+            switch (renderPipelineAssetType)
+            {
+                case { Name: "HDRenderPipelineAsset" }:
+                {
+                    var lightingGroup = GetHDRPLightingGroup();
+                    var probeVolume = GetHDRPProbeVolumeEnum();
+                    var k_QualitySettingsHelpBox = GetHDRPQualitySettingsHelpBox();
+
+                    k_QualitySettingsHelpBox.Invoke(null, new []
+                    {
+                        "The current HDRP Asset does not support Adaptive Probe Volumes.", MessageType.Warning, lightingGroup, probeVolume, "m_RenderPipelineSettings.lightProbeSystem"
+                    });
+                    break;
+                }
+                case { Name: "UniversalRenderPipelineAsset" }:
+                {
+                    var k_QualitySettingsHelpBox = GetURPQualitySettingsHelpBox();
+                    var lightingValue = GetURPLightingGroup();
+
+                    k_QualitySettingsHelpBox.Invoke(null, new[]
+                    {
+                        "The current URP Asset does not support Adaptive Probe Volumes.", MessageType.Warning, lightingValue, "m_LightProbeSystem"
+                    });
+                    break;
+                }
+                default:
+                {
+                    EditorGUILayout.HelpBox("The current SRP does not support Adaptive Probe Volumes.", MessageType.Warning);
+                    break;
+                }
+            }
+        }
+
+        internal static object GetHDRPLightingGroup()
+        {
+            var k_ExpandableGroup = Type.GetType("UnityEditor.Rendering.HighDefinition.HDRenderPipelineUI+ExpandableGroup,Unity.RenderPipelines.HighDefinition.Editor");
+            return k_ExpandableGroup.GetEnumValues().GetValue(IndexOf(k_ExpandableGroup.GetEnumNames(), "Lighting"));
+        }
+
+        internal static object GetHDRPProbeVolumeEnum()
+        {
+            var k_LightingSection = Type.GetType("UnityEditor.Rendering.HighDefinition.HDRenderPipelineUI+ExpandableLighting,Unity.RenderPipelines.HighDefinition.Editor");
+            return k_LightingSection.GetEnumValues().GetValue(IndexOf(k_LightingSection.GetEnumNames(), "ProbeVolume"));
+        }
+
+        internal static MethodInfo GetHDRPQualitySettingsHelpBox()
+        {
+            return Type.GetType("UnityEditor.Rendering.HighDefinition.HDEditorUtils,Unity.RenderPipelines.HighDefinition.Editor")
+                .GetMethod("QualitySettingsHelpBoxForReflection", BindingFlags.Static | BindingFlags.NonPublic);
+        }
+
+        internal static MethodInfo GetURPQualitySettingsHelpBox()
+        {
+            return Type.GetType("UnityEditor.Rendering.Universal.EditorUtils,Unity.RenderPipelines.Universal.Editor")
+                .GetMethod("QualitySettingsHelpBox", BindingFlags.Static | BindingFlags.NonPublic);
+        }
+
+        internal static object GetURPLightingGroup()
+        {
+            var k_LightingSection = Type.GetType("UnityEditor.Rendering.Universal.UniversalRenderPipelineAssetUI+Expandable,Unity.RenderPipelines.Universal.Editor");
+            return k_LightingSection.GetEnumValues().GetValue(IndexOf(k_LightingSection.GetEnumNames(), "Lighting"));
+        }
+
+        internal static int IndexOf(string[] names, string name)
+        {
+            for (int i = 0; i < names.Length; i++)
+                if (name == names[i])
+                    return i;
+            return -1;
+        }
+
+        internal static void FrameSettingDisabledHelpBox()
+        {
+            var renderPipelineAssetType = GraphicsSettings.currentRenderPipelineAssetType;
+
+            // HDRP only
+            if (renderPipelineAssetType != null && renderPipelineAssetType.Name == "HDRenderPipelineAsset")
+            {
+                static int IndexOf(string[] names, string name) { for (int i = 0; i < names.Length; i++) { if (name == names[i]) return i; } return -1; }
+
+                var k_FrameSettingsField = Type.GetType("UnityEngine.Rendering.HighDefinition.FrameSettingsField,Unity.RenderPipelines.HighDefinition.Runtime");
+                var k_APVFrameSetting = k_FrameSettingsField.GetEnumValues().GetValue(IndexOf(k_FrameSettingsField.GetEnumNames(), "AdaptiveProbeVolume"));
+
+                var k_EnsureFrameSetting = Type.GetType("UnityEditor.Rendering.HighDefinition.HDEditorUtils,Unity.RenderPipelines.HighDefinition.Editor")
+                    .GetMethod("EnsureFrameSetting", BindingFlags.Static | BindingFlags.NonPublic);
+
+                k_EnsureFrameSetting.Invoke(null, new object[] { k_APVFrameSetting});
+            }
+        }
+
         public override void OnInspectorGUI()
         {
             ProbeVolume probeVolume = target as ProbeVolume;
@@ -49,37 +146,26 @@ namespace UnityEditor.Rendering
 
             bool drawInspector = true;
 
-            if (ProbeReferenceVolume._GetLightingSettingsOrDefaultsFallback.Invoke().realtimeGI)
+            if (ProbeVolumeLightingTab.GetLightingSettings().realtimeGI)
             {
-                EditorGUILayout.HelpBox("The Probe Volume feature is not supported when using Enlighten.", MessageType.Warning, wide: true);
+                EditorGUILayout.HelpBox("Adaptive Probe Volumes are not supported when using Realtime Global Illumination(Enlighten).", MessageType.Warning, wide: true);
                 drawInspector = false;
             }
 
-            if (!ProbeReferenceVolume.instance.isInitialized || !ProbeReferenceVolume.instance.enabledBySRP)
+            if (!ProbeVolumeGlobalSettingsStripper.ProbeVolumeSupportedForBuild())
             {
-                var renderPipelineAssetType = GraphicsSettings.currentRenderPipelineAssetType;
-                if (renderPipelineAssetType != null && (renderPipelineAssetType.Name == "HDRenderPipelineAsset" || renderPipelineAssetType.Name == "UniversalRenderPipelineAsset"))
-                {
-                    EditorGUILayout.HelpBox("Probe Volumes are not enabled within the current Render Pipeline.", MessageType.Error, wide: true);
-                }
-                else
-                {
-                    EditorGUILayout.HelpBox("The probe volumes feature is not available on current SRP.", MessageType.Warning, wide: true);
-                }
-
+                APVDisabledHelpBox();
                 drawInspector = false;
-
             }
 
             if (drawInspector)
             {
+                ProbeVolumeEditor.FrameSettingDisabledHelpBox();
+
                 serializedObject.Update();
-
                 ProbeVolumeUI.Inspector.Draw(m_SerializedProbeVolume, this);
+                m_SerializedProbeVolume.Apply();
             }
-
-
-            m_SerializedProbeVolume.Apply();
         }
 
         [DrawGizmo(GizmoType.InSelectionHierarchy)]
@@ -113,13 +199,19 @@ namespace UnityEditor.Rendering
                 s_ShapeBox.DrawHandle();
                 if (EditorGUI.EndChangeCheck())
                 {
-                    Undo.RecordObjects(new Object[] { probeVolume, probeVolume.transform }, "Change Probe Volume Bounding Box");
+                    Undo.RecordObjects(new Object[] { probeVolume, probeVolume.transform }, "Change Adaptive Probe Volume Bounding Box");
 
                     probeVolume.size = s_ShapeBox.size;
                     Vector3 delta = probeVolume.transform.rotation * s_ShapeBox.center - probeVolume.transform.position;
                     probeVolume.transform.position += delta; ;
                 }
             }
+        }
+
+        [MenuItem("CONTEXT/ProbeVolume/Rendering Debugger...")]
+        internal static void AddProbeVolumeContextMenu()
+        {
+            ProbeVolumeLightingTab.OpenProbeVolumeDebugPanel(null, null, 0);
         }
     }
 }

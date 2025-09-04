@@ -1,5 +1,5 @@
 using System;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Experimental.Rendering;
 
 namespace UnityEngine.Rendering.Universal.Internal
@@ -30,11 +30,13 @@ namespace UnityEngine.Rendering.Universal.Internal
         /// <param name="evt">The <c>RenderPassEvent</c> to use.</param>
         /// <param name="samplingMaterial">The <c>Material</c> to use for downsampling quarter-resolution image with box filtering.</param>
         /// <param name="copyColorMaterial">The <c>Material</c> to use for other downsampling options.</param>
+        /// <param name="customPassName">An optional custom profiling name to disambiguate multiple copy passes.</param>
         /// <seealso cref="RenderPassEvent"/>
         /// <seealso cref="Downsampling"/>
-        public CopyColorPass(RenderPassEvent evt, Material samplingMaterial, Material copyColorMaterial = null)
+        public CopyColorPass(RenderPassEvent evt, Material samplingMaterial, Material copyColorMaterial = null, string customPassName = null)
         {
-            base.profilingSampler = new ProfilingSampler(nameof(CopyColorPass));
+            profilingSampler = customPassName != null ? new ProfilingSampler(customPassName) : ProfilingSampler.Get(URPProfileId.CopyColor);
+
             m_PassData = new PassData();
 
             m_SamplingMaterial = samplingMaterial;
@@ -57,16 +59,16 @@ namespace UnityEngine.Rendering.Universal.Internal
         public static void ConfigureDescriptor(Downsampling downsamplingMethod, ref RenderTextureDescriptor descriptor, out FilterMode filterMode)
         {
             descriptor.msaaSamples = 1;
-            descriptor.depthBufferBits = 0;
+            descriptor.depthStencilFormat = GraphicsFormat.None;
             if (downsamplingMethod == Downsampling._2xBilinear)
             {
-                descriptor.width /= 2;
-                descriptor.height /= 2;
+                descriptor.width = Mathf.Max(1, descriptor.width / 2);
+                descriptor.height = Mathf.Max(1, descriptor.height / 2);
             }
             else if (downsamplingMethod == Downsampling._4xBox || downsamplingMethod == Downsampling._4xBilinear)
             {
-                descriptor.width /= 4;
-                descriptor.height /= 4;
+                descriptor.width = Mathf.Max(1, descriptor.width / 4);
+                descriptor.height = Mathf.Max(1, descriptor.height / 4);
             }
 
             filterMode = downsamplingMethod == Downsampling.None ? FilterMode.Point : FilterMode.Bilinear;
@@ -98,12 +100,14 @@ namespace UnityEngine.Rendering.Universal.Internal
         }
 
         /// <inheritdoc />
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             cmd.SetGlobalTexture(destination.name, destination.nameID);
         }
 
         /// <inheritdoc/>
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             m_PassData.samplingMaterial = m_SamplingMaterial;
@@ -120,23 +124,20 @@ namespace UnityEngine.Rendering.Universal.Internal
                 source = renderingData.cameraData.renderer.cameraColorTargetHandle;
             }
 
-            bool xrEnabled = renderingData.cameraData.xr.enabled;
-            bool disableFoveatedRenderingForPass = xrEnabled && renderingData.cameraData.xr.supportsFoveatedRendering;
+#if ENABLE_VR && ENABLE_XR_MODULE
+            if (renderingData.cameraData.xr.supportsFoveatedRendering)
+                cmd.SetFoveatedRenderingMode(FoveatedRenderingMode.Disabled);
+#endif
             ScriptableRenderer.SetRenderTarget(cmd, destination, k_CameraTarget, clearFlag, clearColor);
-            ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(cmd), m_PassData, source, renderingData.cameraData.xr.enabled, disableFoveatedRenderingForPass);
+            ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(cmd), m_PassData, source, renderingData.cameraData.xr.enabled);
         }
 
-        private static void ExecutePass(RasterCommandBuffer cmd, PassData passData, RTHandle source,  bool useDrawProceduralBlit,  bool disableFoveatedRenderingForPass)
+        private static void ExecutePass(RasterCommandBuffer cmd, PassData passData, RTHandle source,  bool useDrawProceduralBlit)
         {
             var samplingMaterial = passData.samplingMaterial;
             var copyColorMaterial = passData.copyColorMaterial;
             var downsamplingMethod = passData.downsamplingMethod;
             var sampleOffsetShaderHandle = passData.sampleOffsetShaderHandle;
-
-#if ENABLE_VR && ENABLE_XR_MODULE
-            if (disableFoveatedRenderingForPass)
-                cmd.SetFoveatedRenderingMode(FoveatedRenderingMode.Disabled);
-#endif
 
             if (samplingMaterial == null)
             {
@@ -175,44 +176,66 @@ namespace UnityEngine.Rendering.Universal.Internal
             internal TextureHandle destination;
             // internal RenderingData renderingData;
             internal bool useProceduralBlit;
-            internal bool disableFoveatedRenderingForPass;
             internal Material samplingMaterial;
             internal Material copyColorMaterial;
             internal Downsampling downsamplingMethod;
             internal int sampleOffsetShaderHandle;
         }
 
-        internal TextureHandle Render(RenderGraph renderGraph, out TextureHandle destination, in TextureHandle source, Downsampling downsampling, ref RenderingData renderingData)
+        internal TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, out TextureHandle destination, in TextureHandle source, Downsampling downsampling)
         {
             m_DownsamplingMethod = downsampling;
 
-            using (var builder = renderGraph.AddRasterRenderPass<PassData>("Copy Color", out var passData, base.profilingSampler))
-            {
-                RenderTextureDescriptor descriptor = renderingData.cameraData.cameraTargetDescriptor;
-                ConfigureDescriptor(downsampling, ref descriptor, out var filterMode);
+            UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+            RenderTextureDescriptor descriptor = cameraData.cameraTargetDescriptor;
+            ConfigureDescriptor(downsampling, ref descriptor, out var filterMode);
 
-                destination = UniversalRenderer.CreateRenderGraphTexture(renderGraph, descriptor, "_CameraOpaqueTexture", true, filterMode);
-                passData.destination = builder.UseTextureFragment(destination, 0, IBaseRenderGraphBuilder.AccessFlags.Write);
-                passData.source = builder.UseTexture(source, IBaseRenderGraphBuilder.AccessFlags.Read);
-                passData.useProceduralBlit = renderingData.cameraData.xr.enabled;
-                passData.disableFoveatedRenderingForPass = renderingData.cameraData.xr.enabled && renderingData.cameraData.xr.supportsFoveatedRendering;
+            destination = UniversalRenderer.CreateRenderGraphTexture(renderGraph, descriptor, "_CameraOpaqueTexture", true, filterMode);
+            
+            RenderInternal(renderGraph, destination, source, cameraData.xr.enabled);                    
+
+            return destination;
+        }
+
+
+
+        // This will not create a new texture, but will reuse an existing one as destination.
+        // Typical use case is a persistent texture imported to the render graph. For example history textures.
+        // Note that the amount of downsampling is determined by the destination size.
+        // Therefore, the downsampling param controls only the algorithm (shader) used for the downsampling, not size.
+        internal void RenderToExistingTexture(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle destination, in TextureHandle source, Downsampling downsampling = Downsampling.None)
+        {
+            m_DownsamplingMethod = downsampling;
+
+            UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+            RenderInternal(renderGraph, destination, source, cameraData.xr.enabled);
+        }
+
+        private void RenderInternal(RenderGraph renderGraph, in TextureHandle destination, in TextureHandle source, bool useProceduralBlit)
+        {
+            using (var builder = renderGraph.AddRasterRenderPass<PassData>(passName, out var passData, profilingSampler))
+            {
+                passData.destination = destination;
+                builder.SetRenderAttachment(destination, 0, AccessFlags.WriteAll);
+                passData.source = source;
+                builder.UseTexture(source, AccessFlags.Read);
+                passData.useProceduralBlit = useProceduralBlit;
                 passData.samplingMaterial = m_SamplingMaterial;
                 passData.copyColorMaterial = m_CopyColorMaterial;
                 passData.downsamplingMethod = m_DownsamplingMethod;
                 passData.sampleOffsetShaderHandle = m_SampleOffsetShaderHandle;
+
+                if (destination.IsValid())
+                    builder.SetGlobalTextureAfterPass(destination, Shader.PropertyToID("_CameraOpaqueTexture"));
 
                 // TODO RENDERGRAPH: culling? force culling off for testing
                 builder.AllowPassCulling(false);
 
                 builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
                 {
-                    ExecutePass(context.cmd, data, data.source, data.useProceduralBlit,  data.disableFoveatedRenderingForPass);
+                    ExecutePass(context.cmd, data, data.source, data.useProceduralBlit);
                 });
             }
-
-            RenderGraphUtils.SetGlobalTexture(renderGraph, "_CameraOpaqueTexture", destination, "Set Camera Opaque Texture");
-
-            return destination;
         }
     }
 }

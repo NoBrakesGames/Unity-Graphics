@@ -32,7 +32,7 @@
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingIntersection.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingSampling.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RayTracingCommon.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/Common/RaytracingHelpers.hlsl"
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/Common/RayTracingHelpers.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/ScreenSpaceLighting/ScreenSpaceLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/Common/AtmosphericScatteringRayTracing.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Debug/RayCountManager.cs.hlsl"
@@ -64,7 +64,14 @@ void MissShaderIndirectDiffuse(inout RayIntersection rayIntersection : SV_RayPay
     {
         // Read from the APV
         float3 backBakeDiffuseLighting = 0.0;
-        EvaluateAdaptiveProbeVolume(GetAbsolutePositionWS(rayOrigin), rayDirection, -rayDirection, 0.0, 0.0, rayIntersection.color, backBakeDiffuseLighting);
+        EvaluateAdaptiveProbeVolume(GetAbsolutePositionWS(rayOrigin),
+                                    rayDirection,
+                                    -rayDirection,
+                                    0.0,
+                                    0.0,
+                                    _RaytracingAPVLayerMask,
+                                    rayIntersection.color,
+                                    backBakeDiffuseLighting);
         weight = 1.0;
     }
 #endif

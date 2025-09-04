@@ -1,12 +1,13 @@
 using NUnit.Framework;
 using System;
+using System.Collections;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Pool;
 
 namespace UnityEditor.Rendering.Tests
 {
-    public class AnalyticsUtilsTests
+    class AnalyticsUtilsTests
     {
         private TestScriptableObject m_SO;
         private TestObject m_Current;
@@ -156,7 +157,12 @@ namespace UnityEditor.Rendering.Tests
         [Test]
         public void CheckEditorAnalyticsAreDisabledOnCI()
         {
-            Assert.IsFalse(EditorAnalytics.enabled, "Analytics must be only enabled for user projects not on CI") ;
+            var ci = Environment.GetEnvironmentVariable("CI");
+            if (!string.IsNullOrWhiteSpace(ci) && bool.TryParse(ci, out var result) && result)
+            {
+                Assert.IsFalse(EditorAnalytics.enabled, "Analytics must be only enabled for user projects not on CI");
+                Debug.Log("Assert for CheckEditorAnalyticsAreDisabledOnCI was executed.");
+            }
         }
 
 
@@ -249,6 +255,74 @@ namespace UnityEditor.Rendering.Tests
                 .GetSerializableFields(removeObsolete)
                 .Select(f => f.Name)
                 .ToArray();
+        }
+
+        private static IEnumerable ValueComparisonTestsCases
+        {
+            get
+            {
+                // String test cases
+                yield return new TestCaseData(typeof(string), "test", "test", true).SetName("StringEqual");
+                yield return new TestCaseData(typeof(string), "test1", "test2", false).SetName("StringNotEqual");
+
+                // Primitive and enum test cases
+                yield return new TestCaseData(typeof(int), 1, 1, true).SetName("IntEqual");
+                yield return new TestCaseData(typeof(int), 1, 2, false).SetName("IntNotEqual");
+                yield return new TestCaseData(typeof(DayOfWeek), DayOfWeek.Monday, DayOfWeek.Monday, true).SetName("EnumEqual");
+                yield return new TestCaseData(typeof(DayOfWeek), DayOfWeek.Monday, DayOfWeek.Tuesday, false).SetName("EnumNotEqual");
+
+                // Array test cases
+                yield return new TestCaseData(typeof(int[]), new int[] { 1, 2, 3 }, new int[] { 1, 2, 3 }, true).SetName("ArrayEqual");
+                yield return new TestCaseData(typeof(int[]), new int[] { 1, 2, 3 }, new int[] { 1, 2, 4 }, false).SetName("ArrayNotEqual");
+                yield return new TestCaseData(typeof(int[]), new int[] { 1, 2, 3 }, new int[] { 1, 2 }, false).SetName("ArrayDifferentLength");
+
+                // Null test cases
+                yield return new TestCaseData(typeof(object), null, null, true).SetName("BothNull");
+                yield return new TestCaseData(typeof(object), new object(), null, false).SetName("OneNull");
+                yield return new TestCaseData(typeof(object), null, new object(), false).SetName("OneNullOtherWay");
+            }
+        }
+
+        [Test, TestCaseSource(nameof(ValueComparisonTestsCases))]
+        public void TestAreValuesEqual(Type fieldType, object valueCurrent, object valueDefault, bool expected)
+        {
+            bool result = AnalyticsUtils.AreValuesEqual(fieldType, valueCurrent, valueDefault);
+            Assert.AreEqual(expected, result);
+        }
+
+        private class TestClass { }
+        private static IEnumerable TypeComplexityTestCases
+        {
+            get
+            {
+                // Primitive types test cases
+                yield return new TestCaseData(typeof(int), false).SetName("IntIsNotComplex");
+                yield return new TestCaseData(typeof(double), false).SetName("DoubleIsNotComplex");
+
+                // Enum test cases
+                yield return new TestCaseData(typeof(DayOfWeek), false).SetName("EnumIsNotComplex");
+
+                // String test cases
+                yield return new TestCaseData(typeof(string), false).SetName("StringIsNotComplex");
+
+                // Array test cases
+                yield return new TestCaseData(typeof(int[]), false).SetName("IntArrayIsNotComplex");
+                yield return new TestCaseData(typeof(string[]), false).SetName("StringArrayIsNotComplex");
+
+                // Struct test cases
+                yield return new TestCaseData(typeof(DateTime), true).SetName("DateTimeIsComplex");
+
+                // Class test cases
+                yield return new TestCaseData(typeof(object), true).SetName("ObjectIsComplex");
+                yield return new TestCaseData(typeof(TestClass), true).SetName("CustomClassIsComplex");
+            }
+        }
+
+        [Test, TestCaseSource(nameof(TypeComplexityTestCases))]
+        public void TestIsComplexType(Type fieldType, bool expected)
+        {
+            bool result = AnalyticsUtils.IsComplexType(fieldType);
+            Assert.AreEqual(expected, result);
         }
     }
 }

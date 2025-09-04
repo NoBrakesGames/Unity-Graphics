@@ -1,12 +1,14 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-
+using System.Reflection;
 using NUnit.Framework;
 
 using UnityEditor.VFX.UI;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Test
@@ -112,7 +114,7 @@ namespace UnityEditor.VFX.Test
 
             m_TestAssetRandomFileName = $"{VFXTestCommon.tempBasePath}random_{Guid.NewGuid()}.vfx";
             // Create default VFX Graph
-            var templateString = File.ReadAllText(VisualEffectGraphPackageInfo.assetPackagePath + "/Editor/Templates/SimpleParticleSystem.vfx");
+            var templateString = File.ReadAllText(VFXTestCommon.simpleParticleSystemPath);
             File.WriteAllText(m_TestAssetRandomFileName, templateString);
             AssetDatabase.ImportAsset(m_TestAssetRandomFileName);
 
@@ -125,10 +127,10 @@ namespace UnityEditor.VFX.Test
 
             // Act
             // Create a new system
-            var spawnerContext = viewController.AddVFXContext(new Vector2(0, 0), VFXLibrary.GetContexts().Single(o => o.name == "Spawn"));
-            var initializeContext = viewController.AddVFXContext(new Vector2(0, 200), VFXLibrary.GetContexts().Single(o => o.name == "Initialize Particle"));
-            var updateContext = viewController.AddVFXContext(new Vector2(0, 500), VFXLibrary.GetContexts().Single(o => o.name == "Update Particle"));
-            var outputContext = viewController.AddVFXContext(new Vector2(0, 700), VFXLibrary.GetContexts().Single(o => o.name == "Output Particle Quad"));
+            var spawnerContext = viewController.AddVFXContext(new Vector2(0, 0), VFXLibrary.GetContexts().Single(o => o.name == "Spawn").variant);
+            var initializeContext = viewController.AddVFXContext(new Vector2(0, 200), VFXLibrary.GetContexts().Single(o => o.name == "Initialize Particle").variant);
+            var updateContext = viewController.AddVFXContext(new Vector2(0, 500), VFXLibrary.GetContexts().Single(o => o.name == "Update Particle").variant);
+            var outputContext = viewController.AddVFXContext(new Vector2(0, 700), VFXLibrary.GetContexts().Single(o => o.name == "Output Particle".AppendLabel("Unlit").AppendLabel("Quad")).variant);
 
             spawnerContext.LinkTo(initializeContext);
             initializeContext.LinkTo(updateContext);
@@ -143,6 +145,33 @@ namespace UnityEditor.VFX.Test
             Assert.AreEqual("System (2)", systemNames.GetUniqueSystemName(initializeContext.GetData()));
             Assert.AreEqual("System (2)", systemNames.GetUniqueSystemName(updateContext.GetData()));
             Assert.AreEqual("System (2)", systemNames.GetUniqueSystemName(outputContext.GetData()));
+        }
+
+        [UnityTest]
+        public IEnumerator Overwrite_Opened_VFX()
+        {
+            VFXViewWindow.ShowWindow();
+            yield return null;
+            Assert.True(EditorWindow.HasOpenInstances<VFXViewWindow>());
+            var vfxViewWindow = EditorWindow.GetWindowDontShow<VFXViewWindow>();
+
+            // Create first VFX using template item number 5
+            var onCreateAssetMethod = vfxViewWindow.graphView.GetType().GetMethod("OnCreateAsset", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(onCreateAssetMethod);
+            onCreateAssetMethod.Invoke(vfxViewWindow.graphView, null);
+            yield return null;
+            var enumerator = VFXTemplateWindowTest.CheckNewVFXIsCreated(5);
+            while (enumerator.MoveNext())
+                yield return enumerator.Current;
+            vfxViewWindow.graphView.OnSave();
+
+            // Create a new VFX using the template item number 2
+            onCreateAssetMethod.Invoke(vfxViewWindow.graphView, null);
+            yield return null;
+
+            enumerator = VFXTemplateWindowTest.CheckNewVFXIsCreated(2);
+            while (enumerator.MoveNext())
+                yield return enumerator.Current;
         }
     }
 }

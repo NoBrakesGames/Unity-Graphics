@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using UnityEditor.Overlays;
 using UnityEditor.SceneManagement;
 using UnityEditorInternal;
 using UnityEngine;
@@ -13,10 +16,13 @@ namespace UnityEditor.Rendering.Universal
     [CustomEditor(typeof(Camera))]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
     [CanEditMultipleObjects]
-    class UniversalRenderPipelineCameraEditor : CameraEditor
+    class UniversalRenderPipelineCameraEditor : Editor
     {
         ReorderableList m_LayerList;
-
+        
+        CameraEditor.Settings m_Settings;
+        protected CameraEditor.Settings settings => m_Settings ??= new CameraEditor.Settings(serializedObject);
+        
         public Camera camera => target as Camera;
         static Camera selectedCameraInStack;
 
@@ -28,9 +34,8 @@ namespace UnityEditor.Rendering.Universal
 
         UniversalRenderPipelineSerializedCamera m_SerializedCamera;
 
-        public new void OnEnable()
+        public void OnEnable()
         {
-            base.OnEnable();
             settings.OnEnable();
             selectedCameraInStack = null;
             m_SerializedCamera = new UniversalRenderPipelineSerializedCamera(serializedObject, settings);
@@ -319,9 +324,8 @@ namespace UnityEditor.Rendering.Universal
             UpdateStackCameraOutput(overlayCamera.camera, overlayCamera.serializedCamera);
         }
 
-        public new void OnDisable()
+        public void OnDisable()
         {
-            base.OnDisable();
             Undo.undoRedoPerformed -= ReconstructReferenceToAdditionalDataSO;
         }
 

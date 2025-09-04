@@ -1,15 +1,13 @@
-﻿using System;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
-using UnityEngine.Rendering;
+using Unity.Graphics.Tests;
 using System.Collections;
-using System.Collections.Generic;
-using UnityEditor;
 using System.IO;
+using UnityEditor.SceneManagement;
+using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
-using System.Linq;
-using System.Text.RegularExpressions;
+using System;
 
 namespace UnityEditor.Previews
 {
@@ -75,7 +73,6 @@ namespace UnityEditor.Previews
         }
 
         [UnityTest]
-        [Ignore("Case https://jira.unity3d.com/browse/UUM-18048")]
         public IEnumerator CreatePreviewDoesNotLeakMemoryInWorkers()
         {
             var logEntryString = "There are remaining Allocations on the JobTempAlloc.";
@@ -106,6 +103,72 @@ namespace UnityEditor.Previews
             {
                 AssetDatabase.DeleteAsset($"Assets/{folderName}");
             }
+        }
+
+        // Test case for UUM-63257
+        [UnityTest]
+        public IEnumerator CreateMeshPreviewDoesNotLeakMemoryInWorkers()
+        {
+            var logEntryString = "There are remaining Allocations on the JobTempAlloc.";
+            int prevLogEntryCount = GetLogEntryCount(logEntryString);
+
+            var folderName = "Create_Mesh_Preview_Test";
+            try
+            {
+                AssetDatabase.CreateFolder("Assets", folderName);
+
+                for (int i = 0; i < 2; ++i)
+                {
+                    var meshPath = Path.Combine($"Assets/{folderName}", $"m{i}.mesh");
+                    var mesh = CreateUniqueMiniMesh();
+                    AssetDatabase.CreateAsset(mesh, meshPath);
+                    yield return new WaitForPreview(mesh, 90.0f);
+                }
+
+                //Here we catch any unexpected memory leak messages
+                int logEntryCountAfterTest = GetLogEntryCount(logEntryString);
+                Assert.AreEqual(prevLogEntryCount, logEntryCountAfterTest, "There were leaks in the test");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset($"Assets/{folderName}");
+            }
+        }
+
+        Mesh CreateUniqueMiniMesh()
+        {
+            // Use random value because the preview won't be regenerated if the mesh is already present in the library cache
+            float randomValue = (float)new System.Random(Guid.NewGuid().GetHashCode()).NextDouble();
+
+            Mesh mesh = new Mesh();
+            mesh.vertices = new Vector3[]
+            {
+                new Vector3(randomValue, 0, 0),
+                new Vector3(3.0f, 0, 0),
+                new Vector3(0, 1.0f, 0)
+            };
+
+            return mesh;
+        }
+
+
+        [UnityTest]
+        public IEnumerator AssetPreviewIsCorrect()
+        {
+            EditorSceneManager.OpenScene("Assets/GraphicTests/Scenes/1x_Materials/1101_Unlit.unity"); // Ensure the opened scene doesn't have any error.
+
+            EditorApplication.EnterPlaymode();
+            yield return new WaitForDomainReload(); // Avoid errors on domain reload
+            while (!EditorApplication.isPlaying)
+                yield return null;
+            var threshold = 0.0005f;
+
+            yield return AssetPreviewTesting.CompareAssetPreview<Material>(
+                "Assets/GraphicTests/Common/Materials/LitMetallicEmissive.mat",
+                "Assets/ReferenceImages/Preview/LitMetallicEmissive.png",
+                threshold);
+
+            EditorApplication.ExitPlaymode();
         }
 
         private int GetLogEntryCount(string entry)

@@ -1,53 +1,53 @@
 // Setup function used by no one
 void SetupInstanceID() {}
 
+#ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
+StructuredBuffer<float2> _WaterPatchData;
+#endif
+
+float3 WaterSimulationPosition(float3 objectPosition, uint instanceID = 0)
+{
+    // This branch is useless but it improves occupancy
+    if (_GridSize.x < 0)
+        return 0;
+
+    float3 simulationPos = objectPosition;
+
+    float2 gridSize = _GridSize;
+    #ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
+    // Grab the patch data for the current instance/patch
+    float2 patchData = _WaterPatchData[instanceID];
+    simulationPos.x = objectPosition.x * patchData.x - objectPosition.z * patchData.y;
+    simulationPos.z = objectPosition.x * patchData.y + objectPosition.z * patchData.x;
+    #elif !defined(WATER_DISPLACEMENT)
+    gridSize *= _GridSizeMultiplier;
+    #endif
+
+    // Scale and offset the position to where it should be
+    simulationPos.xz = simulationPos.xz * gridSize + _PatchOffset;
+
+    #ifndef WATER_DISPLACEMENT
+    // Clamp the mesh inside the region so that it's never empty
+    simulationPos.xz = max(simulationPos.xz, -_RegionExtent);
+    simulationPos.xz = min(simulationPos.xz,  _RegionExtent);
+    #endif
+
+    // Return the simulation position
+    return simulationPos;
+}
+
 /// VERTEX STAGE START
+
+#ifdef TESSELLATION_ON
+#define VaryingsType VaryingsToDS
+#define VaryingsMeshType VaryingsMeshToDS
+#define PackedVaryingsType PackedVaryingsToDS
+#define PackVaryingsType PackVaryingsToDS
+
 struct PackedVaryingsToDS
 {
     PackedVaryingsMeshToDS vmesh;
 };
-
-VaryingsMeshToDS VertMeshWater(AttributesMesh input)
-{
-    VaryingsMeshToDS output;
-    ZERO_INITIALIZE(VaryingsMeshToDS, output); // Only required with custom interpolator to quiet the shader compiler about not fully initialized struct
-
-    // Deduce the actual instance ID of the current instance (it is then stored in unity_InstanceID)
-    UNITY_SETUP_INSTANCE_ID(input);
-    // Transfer the unprocessed instance ID to the next stage
-    UNITY_TRANSFER_INSTANCE_ID(input, output);
-
-    // Scale the position by the size of the grid to get the position that will be used for sampling the simulation
-#ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
-    // WARNING: Here we can only use unity_InstanceID and not GET_UNITY_INSTANCE_ID because the later function
-    // does not return the expect value when we have both procedural and stereo instancing.
-    // This variables is guaranted to be defined and set to the right value as soon as we have at least
-    // one instancing technique.
-    input.positionOS = WaterSimulationPositionInstanced(input.positionOS, unity_InstanceID);
-#else
-    input.positionOS = WaterSimulationPosition(input.positionOS);
-#endif
-
-    // Due to the fact that a first clipping pass is done at the end of the vertex stage, we need to ensure that
-    // the base triangles that were outside the frustum and need to be visible. We then have to apply the displacement to them
-    input = ApplyMeshModification(input, _TimeParameters.xyz
-    #ifdef USE_CUSTOMINTERP_SUBSTRUCT
-        , output
-    #endif
-        );
-
-    // Export for the following stage
-    output.positionRWS =  mul(_WaterSurfaceTransformRWS, float4(input.positionOS, 1.0)).xyz;
-    #ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
-    output.normalWS = input.normalOS;
-    #else
-    output.normalWS = TransformCustomMeshNormal(input.normalOS);
-    #endif
-    output.texCoord0 = input.uv0;
-    output.texCoord1 = input.uv1;
-    output.tessellationFactor = _WaterMaxTessellationFactor;
-    return output;
-}
 
 struct VaryingsToDS
 {
@@ -61,15 +61,85 @@ PackedVaryingsToDS PackVaryingsToDS(VaryingsToDS input)
     return output;
 }
 
-PackedVaryingsToDS Vert(AttributesMesh inputMesh)
+#else
+#define VaryingsType VaryingsToPS
+#define VaryingsMeshType VaryingsMeshToPS
+#define PackedVaryingsType PackedVaryingsToPS
+#define PackVaryingsType PackVaryingsToPS
+#endif
+
+VaryingsMeshType VertMeshWater(AttributesMesh input)
 {
-    VaryingsToDS varyingsType;
-    varyingsType.vmesh = VertMeshWater(inputMesh);
-    return PackVaryingsToDS(varyingsType);
+    VaryingsMeshType output;
+    ZERO_INITIALIZE(VaryingsMeshType, output); // Only required with custom interpolator to quiet the shader compiler about not fully initialized struct
+
+    // Deduce the actual instance ID of the current instance (it is then stored in unity_InstanceID)
+    UNITY_SETUP_INSTANCE_ID(input);
+    // Transfer the unprocessed instance ID to the next stage
+    UNITY_TRANSFER_INSTANCE_ID(input, output);
+
+    // Scale the position by the size of the grid to get the position that will be used for sampling the simulation
+#ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
+    // WARNING: Here we can only use unity_InstanceID and not GET_UNITY_INSTANCE_ID because the later function
+    // does not return the expect value when we have both procedural and stereo instancing.
+    // This variables is guaranted to be defined and set to the right value as soon as we have at least
+    // one instancing technique.
+    input.positionOS = WaterSimulationPosition(input.positionOS, unity_InstanceID);
+#else
+    input.positionOS = WaterSimulationPosition(input.positionOS);
+    #if defined(WATER_DISPLACEMENT)
+    // In case we are using custom geometries, we need to apply the tranform of each custom geometry to ensure
+    // that they are correctly connected
+    input.positionOS = mul(_WaterCustomMeshTransform, float4(input.positionOS, 1.0f)).xyz;
+    input.normalOS = SafeNormalize(mul(input.normalOS, (float3x3)_WaterCustomMeshTransform_Inverse));
+    #endif
+#endif
+
+    float3 positionPredisplacementOS = input.positionOS;
+
+    VertexDescription vertex;
+    ApplyMeshModification(input, _TimeParameters.xyz, output, vertex);
+
+    // Export for the following stage
+    PackWaterVertexData(vertex, output.texCoord0, output.texCoord1);
+
+    output.normalWS = vertex.Normal;
+
+    #ifdef TESSELLATION_ON
+    output.tessellationFactor = _WaterMaxTessellationFactor;
+    output.positionRWS = TransformObjectToWorld(vertex.Position + vertex.Displacement);
+    #else
+    output.positionCS = TransformWorldToHClip(output.texCoord1.xyz);
+    #endif
+
+    #if defined(WATER_DISPLACEMENT)
+    // discard vertices outside of the region for non infinite surface
+    // 0.1 offset is to account for precision issue. Should be dependent on the grid size but this also works
+    if (any(abs(positionPredisplacementOS.xz) > _RegionExtent + 0.1f))
+    {
+        #ifdef TESSELLATION_ON
+        output.tessellationFactor = -1;
+        #else
+        output.positionCS.w = FLT_NAN;
+        #endif
+    }
+    #endif
+
+    return output;
 }
+
+PackedVaryingsType Vert(AttributesMesh inputMesh)
+{
+    VaryingsType varyingsType;
+    varyingsType.vmesh = VertMeshWater(inputMesh);
+    return PackVaryingsType(varyingsType);
+}
+
 // VERTEX STAGE END
 
+#ifdef TESSELLATION_ON
 // TESSELATION STAGE START
+
 VaryingsToDS UnpackVaryingsToDS(PackedVaryingsToDS input)
 {
     VaryingsToDS output;
@@ -94,23 +164,15 @@ VaryingsMeshToPS VertMeshTesselation(VaryingsMeshToDS input)
     // Transfer the unprocessed instance ID to the next stage
     UNITY_TRANSFER_INSTANCE_ID(input, output);
 
-    // Restore the pre-vertex value to apply the actual deformation
-    input.positionRWS = input.texCoord1.xyz;
-
-    // Apply the mesh modifications that come from the shader graph
-    input = ApplyTessellationModification(input, _TimeParameters.xyz);
+    VertexDescription vertex;
+    ApplyTessellationModification(input, _TimeParameters.xyz, output, vertex);
 
     // Export for the following stage
-    output.positionCS = TransformWorldToHClip(input.positionRWS);
-    output.positionRWS = input.positionRWS;
-    output.normalWS = input.normalWS;
-    output.texCoord0 = input.texCoord0;
-    output.texCoord1 = input.texCoord1;
+    PackWaterVertexData(vertex, output.texCoord0, output.texCoord1);
 
-#ifdef USE_CUSTOMINTERP_SUBSTRUCT
-    // If custom interpolators are in use, we need to write them to the shader graph generated VaryingsMesh
-    VertMeshTesselationCustomInterpolation(input, output);
-#endif
+    output.positionCS = TransformWorldToHClip(output.texCoord1.xyz);
+    output.normalWS = vertex.Normal;
+
 
     return output;
 }
@@ -230,6 +292,19 @@ PackedVaryingsToPS Domain(TessellationFactors tessFactors, const OutputPatch<Pac
 
     VaryingsToDS varying = InterpolateWithBaryCoordsToDS(varying0, varying1, varying2, baryCoords);
 
+    // Discard vertices outside of region
+    if (varying0.vmesh.tessellationFactor < 0 ||
+        varying1.vmesh.tessellationFactor < 0 ||
+        varying2.vmesh.tessellationFactor < 0)
+    {
+        PackedVaryingsToPS output;
+        ZERO_INITIALIZE(PackedVaryingsToPS, output);
+        output.vmesh.positionCS.w = FLT_NAN;
+        return output;
+    }
+
     return VertTesselation(varying);
 }
+
 // TESSELATION STAGE END
+#endif

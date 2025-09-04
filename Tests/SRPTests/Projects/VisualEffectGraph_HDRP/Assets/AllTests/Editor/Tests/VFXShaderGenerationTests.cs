@@ -39,7 +39,7 @@ namespace UnityEditor.VFX.Test
 
             var add = ScriptableObject.CreateInstance<Operator.Add>();
             var length = ScriptableObject.CreateInstance<Operator.Length>();
-            var float4 = VFXLibrary.GetParameters().First(o => o.name == "Vector4").CreateInstance();
+            var float4 = VFXLibrary.GetParameters().First(o => o.modelType == typeof(Vector4)).CreateInstance();
 
             graph.AddChild(updateContext);
             updateContext.AddChild(blockSetVelocity);
@@ -149,13 +149,14 @@ namespace UnityEditor.VFX.Test
             {
                 gpuMapper = new VFXExpressionMapper(),
                 uniformMapper = new VFXUniformMapper(new VFXExpressionMapper(), true, true),
-                graphicsBufferUsage = new ReadOnlyDictionary<VFXExpression, Type>(new Dictionary<VFXExpression, Type>()),
-                linkedEventOut = Array.Empty<(VFXSlot slot, VFXData data)>()
+                bufferUsage = new ReadOnlyDictionary<VFXExpression, BufferUsage>(new Dictionary<VFXExpression, BufferUsage>()),
+                linkedEventOut = Array.Empty<(VFXSlot slot, VFXData data)>(),
+                hlslCodeHolders = Array.Empty<IHLSLCodeHolder>()
             };
             var task = new VFXTask { templatePath = updateContext.codeGeneratorTemplate, type = updateContext.taskType };
             HashSet<string> dependencies = new HashSet<string>();
-            var stringBuilderNoDebugSymbols = VFXCodeGenerator.Build(updateContext, task, VFXCompilationMode.Runtime, contextCompiledData, dependencies, false);
-            var stringBuilderDebugSymbols = VFXCodeGenerator.Build(updateContext, task, VFXCompilationMode.Runtime, contextCompiledData, dependencies, true);
+            var stringBuilderNoDebugSymbols = VFXCodeGenerator.Build(updateContext, task, VFXCompilationMode.Runtime, contextCompiledData, dependencies, false, out var _);
+            var stringBuilderDebugSymbols = VFXCodeGenerator.Build(updateContext, task, VFXCompilationMode.Runtime, contextCompiledData, dependencies, true, out var _);
 
             const string debugSymbolStr = "#pragma enable_d3d11_debug_symbols";
             Assert.IsFalse(stringBuilderNoDebugSymbols.ToString().Contains(debugSymbolStr));
@@ -180,12 +181,14 @@ namespace UnityEditor.VFX.Test
             {
                 gpuMapper = new VFXExpressionMapper(),
                 uniformMapper = new VFXUniformMapper(new VFXExpressionMapper(), true, true),
-                graphicsBufferUsage = new ReadOnlyDictionary<VFXExpression, Type>(new Dictionary<VFXExpression, Type>()),
-                linkedEventOut = new (VFXSlot slot, VFXData data)[] { }
+                bufferUsage = new ReadOnlyDictionary<VFXExpression, BufferUsage>(new Dictionary<VFXExpression, BufferUsage>()),
+                linkedEventOut = new (VFXSlot slot, VFXData data)[] { },
+                hlslCodeHolders = Array.Empty<IHLSLCodeHolder>()
+
             };
             HashSet<string> dependencies = new HashSet<string>();
             var task = new VFXTask { templatePath = updateContext.codeGeneratorTemplate, type = updateContext.taskType };
-            var stringBuilder = VFXCodeGenerator.Build(updateContext, task, VFXCompilationMode.Runtime, contextCompiledData, dependencies, false);
+            var stringBuilder = VFXCodeGenerator.Build(updateContext, task, VFXCompilationMode.Runtime, contextCompiledData, dependencies, false, out var _);
 
             var code = stringBuilder.ToString();
             Assert.IsTrue(code.Contains(VFXBlockSourceVariantTest.sourceCodeVariant[0]));
@@ -319,7 +322,17 @@ namespace UnityEditor.VFX.Test
             var spawnerContext = ScriptableObject.CreateInstance<VFXBasicSpawner>();
             var initContext = ScriptableObject.CreateInstance<VFXBasicInitialize>();
             var updateContext = ScriptableObject.CreateInstance<VFXBasicUpdate>();
-            var outputContext = ScriptableObject.CreateInstance<VFXPlanarPrimitiveOutput>();
+
+            VFXAbstractParticleOutput outputContext = null;
+            if (shaderGraphPath != null)
+            {
+                outputContext = ScriptableObject.CreateInstance<VFXComposedParticleOutput>();
+                outputContext.SetSettingValue("m_Topology", new ParticleTopologyPlanarPrimitive());
+            }
+            else
+            {
+                outputContext = ScriptableObject.CreateInstance<VFXPlanarPrimitiveOutput>();
+            }
 
             var shaderGraph = string.IsNullOrEmpty(shaderGraphPath) ? null : GetShaderGraphFromTempFile(shaderGraphPath);
             outputContext.SetSettingValue("blendMode", blendMode);
@@ -345,7 +358,7 @@ namespace UnityEditor.VFX.Test
         void ShaderGraphSortingVerify(string vfxPath, bool expectingSorting)
         {
             var vfxAsset = AssetDatabase.LoadAssetAtPath<VisualEffectAsset>(vfxPath);
-            var outputContext = ((VFXGraph)vfxAsset.GetResource().graph).children.OfType<VFXPlanarPrimitiveOutput>().FirstOrDefault();
+            var outputContext = ((VFXGraph)vfxAsset.GetResource().graph).children.OfType<VFXAbstractParticleOutput>().FirstOrDefault();
             Assert.IsNotNull(outputContext);
 
             var generatedComputeShaders = AssetDatabase.LoadAllAssetsAtPath(vfxPath).OfType<ComputeShader>().ToArray();
@@ -406,7 +419,7 @@ namespace UnityEditor.VFX.Test
         [Test]
         public void ShaderGraph_Interpolators_Generation()
         {
-            string vfxPath = "Assets/AllTests/Editor/Tests/SGInterpolatorTest.vfx"; 
+            string vfxPath = "Assets/AllTests/Editor/Tests/SGInterpolatorTest.vfx";
             AssetDatabase.ImportAsset(vfxPath);
             var vfx = AssetDatabase.LoadAssetAtPath<VisualEffectAsset>(vfxPath).GetResource();
 
@@ -429,11 +442,15 @@ namespace UnityEditor.VFX.Test
                 Assert.IsTrue(varyingsFields.Any(f => f.name == "_FragPerElement_f2"));
             }
 
+            //Instancing is expected to be enabled for most of SG Output
+            Assert.IsTrue(quadOutputSrc.Contains("#pragma multi_compile_instancing"));
+            Assert.IsTrue(meshOutputSrc.Contains("#pragma multi_compile_instancing"));
+
             CheckShaderStructs(quadOutputSrc, new uint[] { 9, 5, 6, 6 });
             CheckShaderStructs(meshOutputSrc, new uint[] { 9, 5, 7, 6 });
         }
 
-public class WrapperWindow : EditorWindow
+        public class WrapperWindow : EditorWindow
         {
             public Action onGUIDelegate;
             public bool testRun;
@@ -458,7 +475,7 @@ public class WrapperWindow : EditorWindow
         {
             var vfxPath = ShaderGraphOutputPrepare("Assets/AllTests/VFXTests/GraphicsTests/Shadergraph/Unlit/sg-for-autotest-unlit-alphablend.shadergraph_1", VFXAbstractRenderedOutput.BlendMode.Alpha, VFXAbstractParticleOutput.SortActivationMode.On);
             var vfxAsset = AssetDatabase.LoadAssetAtPath<VisualEffectAsset>(vfxPath);
-            var outputContext = ((VFXGraph)vfxAsset.GetResource().graph).children.OfType<VFXPlanarPrimitiveOutput>().FirstOrDefault();
+            var outputContext = ((VFXGraph)vfxAsset.GetResource().graph).children.OfType<VFXAbstractParticleOutput>().FirstOrDefault();
 
             var window = ScriptableObject.CreateInstance<WrapperWindow>();
             window.position = new Rect(0, 0, 512, 512);

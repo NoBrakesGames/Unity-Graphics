@@ -1,6 +1,6 @@
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 using UnityEngine.VFX;
@@ -9,13 +9,12 @@ using UnityEngine.Profiling;
 
 using Type = System.Type;
 
-using PositionType = UnityEngine.UIElements.Position;
-
 namespace UnityEditor.VFX.UI
 {
     class VFXDataAnchor : Port, IControlledElement<VFXDataAnchorController>, IEdgeConnectorListener
     {
-        readonly Vector2 portPositionOffset = new Vector2(-4, -20);
+        static readonly Vector2 s_DragEdgeTolerance = new Vector2(3, 3);
+        static readonly Vector2 portPositionOffset = new Vector2(-4, -20);
 
         VFXDataAnchorController m_Controller;
         Controller IControlledElement.controller
@@ -56,11 +55,14 @@ namespace UnityEditor.VFX.UI
             this.AddStyleSheetPath("VFXTypeColor");
 
             m_Node = node;
+            this.Q<VisualElement>("cap").RemoveFromHierarchy();
 
-            RegisterCallback<MouseEnterEvent>(OnMouseEnter);
-            RegisterCallback<MouseLeaveEvent>(OnMouseLeave);
+            RegisterCallback<PointerEnterEvent>(OnPointerEnter);
+            RegisterCallback<PointerLeaveEvent>(OnPointerLeave);
 
             this.AddManipulator(new ContextualMenuManipulator(BuildContextualMenu));
+            RegisterCallback<CustomStyleResolvedEvent>(OneTimeCustomStyleResolved);
+
             Profiler.EndSample();
         }
 
@@ -108,22 +110,43 @@ namespace UnityEditor.VFX.UI
             highlight = true;
         }
 
-        void OnMouseEnter(MouseEnterEvent e)
+        protected override void HandleEventBubbleUp(EventBase evt)
         {
-            if (m_EdgeDragging && !highlight)
-                e.PreventDefault();
+            // Inflate the area to slightly increase sensitive area
+            var rect = this.connector.layout;
+            rect.min -= s_DragEdgeTolerance;
+            rect.max += s_DragEdgeTolerance;
+
+            // This is to prevent from initiating a link creation even when click outside the port's dot button
+            if (evt is PointerDownEvent pointerDownEvent && !rect.Contains(pointerDownEvent.localPosition))
+            {
+                evt.StopImmediatePropagation();
+            }
+            else
+            {
+                base.HandleEventBubbleUp(evt);
+            }
         }
 
-        void OnMouseLeave(MouseLeaveEvent e)
+        void OnPointerEnter(PointerEnterEvent e)
         {
+            // Prevent VisualElement from setting hover pseudo-state
             if (m_EdgeDragging && !highlight)
-                e.PreventDefault();
+                e.StopPropagation();
+
+            this.connector.style.backgroundColor = portColor;
         }
 
-        public override bool collapsed
+        void OnPointerLeave(PointerLeaveEvent e)
         {
-            get { return !controller.expandedInHierachy; }
+            if (m_EdgeDragging && !highlight)
+                e.StopPropagation();
+
+            if (!connected)
+                this.connector.style.backgroundColor = StyleKeyword.Null;
         }
+
+        public override bool collapsed => !controller.expandedInHierachy;
 
         IEnumerable<VFXDataEdge> GetAllEdges()
         {
@@ -197,13 +220,21 @@ namespace UnityEditor.VFX.UI
                 AddToClassList("hidden");
             }
 
-            UpdateCapColor();
+            UpdateCapColorCustom();
 
 
             if (controller.direction == Direction.Output)
                 m_ConnectorText.text = controller.name;
             else
                 m_ConnectorText.text = "";
+        }
+
+        private void UpdateCapColorCustom()
+        {
+            if (this.portCapLit || this.connected)
+                this.connector.style.backgroundColor = this.portColor;
+            else
+                this.connector.style.backgroundColor = StyleKeyword.Null;
         }
 
         void IEdgeConnectorListener.OnDrop(GraphView graphView, Edge edge)
@@ -215,10 +246,16 @@ namespace UnityEditor.VFX.UI
             view.controller.AddElement(edgeController);
         }
 
+        public override void Connect(Edge edge)
+        {
+            base.Connect(edge);
+            UpdateCapColorCustom();
+        }
+
         public override void Disconnect(Edge edge)
         {
             base.Disconnect(edge);
-            UpdateCapColor();
+            UpdateCapColorCustom();
         }
 
         void IEdgeConnectorListener.OnDropOutsidePort(Edge edge, Vector2 position)
@@ -257,7 +294,6 @@ namespace UnityEditor.VFX.UI
 
                 if (nodeController != null)
                 {
-                    IVFXSlotContainer slotContainer = nodeController.slotContainer;
                     if (controller.direction == Direction.Input)
                     {
                         foreach (var output in nodeController.outputPorts.Where(t => t.model == null || t.model.IsMasterSlot()))
@@ -278,6 +314,11 @@ namespace UnityEditor.VFX.UI
             }
             else if (controller.direction == Direction.Input && Event.current.modifiers == EventModifiers.Alt)
             {
+                if (startSlot == null)
+                {
+                    Debug.LogWarning("Creating a node with a shortcut is not supported for unspecified type ports. Instead, create it by dragging an edge and using node search.");
+                    return;
+                }
                 var targetType = controller.portType;
 
                 var attribute = VFXLibrary.GetAttributeFromSlotType(controller.portType);
@@ -286,9 +327,10 @@ namespace UnityEditor.VFX.UI
                 {
                     parameterDesc = VFXLibrary.GetParameters().FirstOrDefault(t =>
                     {
-                        if (!t.model.outputSlots[0].CanLink(controller.model))
+                        var model = t.model;
+                        if (!model.outputSlots[0].CanLink(controller.model))
                             return false;
-                        var attributeCandidate = VFXLibrary.GetAttributeFromSlotType(t.model.type);
+                        var attributeCandidate = VFXLibrary.GetAttributeFromSlotType(model.type);
                         return attributeCandidate == null || !attributeCandidate.usages.HasFlag(VFXTypeAttribute.Usage.ExcludeFromProperty);
                     });
                 }
@@ -296,7 +338,8 @@ namespace UnityEditor.VFX.UI
                 {
                     parameterDesc = VFXLibrary.GetParameters().FirstOrDefault(t =>
                     {
-                        return t.model.type == targetType;
+                        var model = t.model;
+                        return model.type == targetType;
                     });
                 }
 
@@ -304,23 +347,39 @@ namespace UnityEditor.VFX.UI
                 {
                     Vector2 pos = view.contentViewContainer.GlobalToBound(position) - new Vector2(140, 20);
                     view.UpdateSelectionWithNewNode();
-                    VFXParameter parameter = viewController.AddVFXParameter(pos, parameterDesc, false);
+                    VFXParameter parameter = viewController.AddVFXParameter(pos, parameterDesc.variant, false);
                     parameter.SetSettingValue("m_Exposed", true);
+                    var window = VFXViewWindow.GetWindow(view);
+                    var category = string.Empty;
+                    if (window.graphView.blackboard.selection != null)
+                    {
+                        category = window.graphView.blackboard.selection.OfType<VFXBlackboardCategory>().FirstOrDefault()?.category.title;
+                        if (string.IsNullOrEmpty(category))
+                        {
+                            category = window.graphView.blackboard.selection.OfType<VFXBlackboardField>().FirstOrDefault()?.controller.model.category;
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(category))
+                    {
+                        parameter.SetSettingValue("m_Category", category);
+                    }
                     startSlot.Link(parameter.outputSlots[0]);
 
                     CopyValueToParameter(parameter);
 
                     viewController.AddVFXModel(pos, parameter);
+
+                    // Update blackboard because the VFXParameterController will be added on next graph update
+                    EditorApplication.delayCall += () => view.blackboard.Update(true);
                 }
             }
             else if (!exists)
             {
-                var window = VFXViewWindow.GetWindow(view);
-
                 if (direction == Direction.Input || viewController.model.visualEffectObject is VisualEffectSubgraphOperator || viewController.model.visualEffectObject is VisualEffectSubgraphBlock) // no context for subgraph operators.
-                    VFXFilterWindow.Show(window, Event.current.mousePosition, view.ViewToScreenPosition(Event.current.mousePosition), BuildNodeProvider(viewController, new Type[] { typeof(VFXOperator), typeof(VFXParameter) }));
+                    VFXFilterWindow.Show( Event.current.mousePosition, view.ViewToScreenPosition(Event.current.mousePosition), BuildNodeProvider(viewController, new Type[] { typeof(VFXOperator), typeof(VFXParameter) }));
                 else
-                    VFXFilterWindow.Show(window, Event.current.mousePosition, view.ViewToScreenPosition(Event.current.mousePosition), BuildNodeProvider(viewController, new Type[] { typeof(VFXOperator), typeof(VFXParameter), typeof(VFXContext) }));
+                    VFXFilterWindow.Show(Event.current.mousePosition, view.ViewToScreenPosition(Event.current.mousePosition), BuildNodeProvider(viewController, new Type[] { typeof(VFXOperator), typeof(VFXParameter), typeof(VFXContext) }));
             }
         }
 
@@ -336,44 +395,29 @@ namespace UnityEditor.VFX.UI
             return new VFXNodeProvider(viewController, AddLinkedNode, ProviderFilter, acceptedType);
         }
 
-        bool ProviderFilter(VFXNodeProvider.Descriptor d)
+        bool ProviderFilter(IVFXModelDescriptor descriptor)
         {
             var mySlot = controller.model;
-            var parameterDescriptor = d.modelDescriptor as VFXParameterController;
-            IVFXSlotContainer container = null;
-            if (parameterDescriptor != null)
+            if (descriptor.modelType == typeof(VisualEffectSubgraphOperator))
             {
-                container = parameterDescriptor.model;
-            }
-            else
-            {
-                VFXModelDescriptor desc = d.modelDescriptor as VFXModelDescriptor;
-                if (desc == null)
+                var path = (string)descriptor.variant.settings.Single(x => x.Key == "path").Value;
+                if (!path.StartsWith(VisualEffectAssetEditorUtility.templatePath) && path.EndsWith(VisualEffectSubgraphOperator.Extension))
                 {
-                    string path = d.modelDescriptor as string;
-
-                    if (path != null && !path.StartsWith(VisualEffectAssetEditorUtility.templatePath))
-                    {
-                        if (Path.GetExtension(path) == VisualEffectSubgraphOperator.Extension)
-                        {
-                            var subGraph = AssetDatabase.LoadAssetAtPath<VisualEffectSubgraphOperator>(path);
-                            if (subGraph != null && (!controller.viewController.model.isSubgraph || !subGraph.GetResource().GetOrCreateGraph().subgraphDependencies.Contains(controller.viewController.model.subgraph) && subGraph.GetResource() != controller.viewController.model))
-                                return true;
-                        }
-                    }
-                    return false;
+                    var subGraph = AssetDatabase.LoadAssetAtPath<VisualEffectSubgraphOperator>(path);
+                    if (subGraph != null && (!controller.viewController.model.isSubgraph || !subGraph.GetResource().GetOrCreateGraph().subgraphDependencies.Contains(controller.viewController.model.subgraph) && subGraph.GetResource() != controller.viewController.model))
+                        return true;
                 }
-
-                container = desc.model as IVFXSlotContainer;
-                if (container == null)
-                    return false;
-
-                if (direction == Direction.Output
-                    && mySlot != null
-                    && container is VFXOperatorDynamicOperand
-                    && (container as VFXOperatorDynamicOperand).validTypes.Contains(mySlot.property.type))
-                    return true;
+                return false;
             }
+
+            if (descriptor.unTypedModel is not IVFXSlotContainer container)
+                return false;
+
+            if (direction == Direction.Output
+                && mySlot != null
+                && container is VFXOperatorDynamicOperand
+                && (container as VFXOperatorDynamicOperand).validTypes.Contains(mySlot.property.type))
+                return true;
 
             IEnumerable<Type> validTypes = null;
             if (mySlot == null)
@@ -405,7 +449,7 @@ namespace UnityEditor.VFX.UI
             return false;
         }
 
-        void AddLinkedNode(VFXNodeProvider.Descriptor d, Vector2 mPos)
+        void AddLinkedNode(Variant variant, Vector2 mPos)
         {
             var mySlot = controller.model;
 
@@ -413,7 +457,7 @@ namespace UnityEditor.VFX.UI
             VFXViewController viewController = controller.viewController;
             if (view == null) return;
 
-            var newNodeController = view.AddNode(d, mPos);
+            var newNodeController = view.AddNode(variant, mPos);
 
             if (newNodeController == null)
                 return;
@@ -427,7 +471,7 @@ namespace UnityEditor.VFX.UI
             }
 
             // If linking to a new parameter, copy the slot value and space
-            if (direction == Direction.Input && controller.model != null) //model will be null for upcomming which won't have a value
+            if (direction == Direction.Input && controller.model != null) //model will be null for upcoming which won't have a value
             {
                 if (newNodeController is VFXOperatorController)
                 {
@@ -492,6 +536,12 @@ namespace UnityEditor.VFX.UI
             {
                 parameter.value = convertedValue;
             }
+        }
+
+        private void OneTimeCustomStyleResolved(CustomStyleResolvedEvent evt)
+        {
+            UpdateCapColorCustom();
+            UnregisterCallback<CustomStyleResolvedEvent>(OneTimeCustomStyleResolved);
         }
     }
 }

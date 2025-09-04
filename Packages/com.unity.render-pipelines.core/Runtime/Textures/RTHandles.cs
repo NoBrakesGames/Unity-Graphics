@@ -1,3 +1,5 @@
+using System;
+using UnityEngine.Assertions;
 using UnityEngine.Experimental.Rendering;
 
 namespace UnityEngine.Rendering
@@ -23,6 +25,26 @@ namespace UnityEngine.Rendering
         public static RTHandleProperties rtHandleProperties { get { return s_DefaultInstance.rtHandleProperties; } }
 
         /// <summary>
+        /// Calculate the dimensions (in pixels) of the RTHandles given the scale factor.
+        /// </summary>
+        /// <param name="scaleFactor">The scale factor to use when calculating the dimensions. The base unscaled size used, is the sizes passed to the last ResetReferenceSize call.</param>
+        /// <returns>The calculated dimensions.</returns>
+        public static Vector2Int CalculateDimensions(Vector2 scaleFactor)
+        {
+            return s_DefaultInstance.CalculateDimensions(scaleFactor);
+        }
+
+        /// <summary>
+        /// Calculate the dimensions (in pixels) of the RTHandles given the scale function. The base unscaled size used, is the sizes passed to the last ResetReferenceSize call.
+        /// </summary>
+        /// <param name="scaleFunc">The scale function to use when calculating the dimensions.</param>
+        /// <returns>The calculated dimensions.</returns>
+        public static Vector2Int CalculateDimensions(ScaleFunc scaleFunc)
+        {
+            return s_DefaultInstance.CalculateDimensions(scaleFunc);
+        }
+
+        /// <summary>
         /// Allocate a new fixed sized RTHandle with the default RTHandle System.
         /// </summary>
         /// <param name="width">With of the RTHandle.</param>
@@ -41,11 +63,12 @@ namespace UnityEngine.Rendering
         /// <param name="mipMapBias">Bias applied to mipmaps during filtering.</param>
         /// <param name="msaaSamples">Number of MSAA samples for the RTHandle.</param>
         /// <param name="bindTextureMS">Set to true if the texture needs to be bound as a multisampled texture in the shader.</param>
-        /// <param name="useDynamicScale">Set to true to use hardware dynamic scaling.</param>
+        /// <param name="useDynamicScale">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="useDynamicScaleExplicit">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
         /// <param name="memoryless">Use this property to set the render texture memoryless modes.</param>
         /// <param name="vrUsage">Special treatment of the VR eye texture used in stereoscopic rendering.</param>
         /// <param name="name">Name of the RTHandle.</param>
-        /// <returns></returns>
+        /// <returns>A new RTHandle.</returns>
         public static RTHandle Alloc(
             int width,
             int height,
@@ -64,6 +87,7 @@ namespace UnityEngine.Rendering
             MSAASamples msaaSamples = MSAASamples.None,
             bool bindTextureMS = false,
             bool useDynamicScale = false,
+            bool useDynamicScaleExplicit = false,
             RenderTextureMemoryless memoryless = RenderTextureMemoryless.None,
             VRTextureUsage vrUsage = VRTextureUsage.None,
             string name = ""
@@ -87,6 +111,78 @@ namespace UnityEngine.Rendering
                 msaaSamples,
                 bindTextureMS,
                 useDynamicScale,
+                useDynamicScaleExplicit,
+                memoryless,
+                vrUsage,
+                name
+            );
+        }
+
+        /// <summary>
+        /// Allocate a new fixed sized RTHandle with the default RTHandle System.
+        /// </summary>
+        /// <param name="width">With of the RTHandle.</param>
+        /// <param name="height">Heigh of the RTHandle.</param>
+        /// <param name="format">GraphicsFormat of a color or depth stencil buffer.</param>
+        /// <param name="slices">Number of slices of the RTHandle.</param>       
+        /// <param name="filterMode">Filtering mode of the RTHandle.</param>
+        /// <param name="wrapMode">Addressing mode of the RTHandle.</param>
+        /// <param name="dimension">Texture dimension of the RTHandle.</param>
+        /// <param name="enableRandomWrite">Set to true to enable UAV random read writes on the texture.</param>
+        /// <param name="useMipMap">Set to true if the texture should have mipmaps.</param>
+        /// <param name="autoGenerateMips">Set to true to automatically generate mipmaps.</param>
+        /// <param name="isShadowMap">Set to true if the depth buffer should be used as a shadow map.</param>
+        /// <param name="anisoLevel">Anisotropic filtering level.</param>
+        /// <param name="mipMapBias">Bias applied to mipmaps during filtering.</param>
+        /// <param name="msaaSamples">Number of MSAA samples for the RTHandle.</param>
+        /// <param name="bindTextureMS">Set to true if the texture needs to be bound as a multisampled texture in the shader.</param>
+        /// <param name="useDynamicScale">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="useDynamicScaleExplicit">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="memoryless">Use this property to set the render texture memoryless modes.</param>
+        /// <param name="vrUsage">Special treatment of the VR eye texture used in stereoscopic rendering.</param>
+        /// <param name="name">Name of the RTHandle.</param>
+        /// <returns>A new RTHandle.</returns>
+        public static RTHandle Alloc(
+            int width,
+            int height,
+            GraphicsFormat format,
+            int slices = 1,            
+            FilterMode filterMode = FilterMode.Point,
+            TextureWrapMode wrapMode = TextureWrapMode.Repeat,
+            TextureDimension dimension = TextureDimension.Tex2D,
+            bool enableRandomWrite = false,
+            bool useMipMap = false,
+            bool autoGenerateMips = true,
+            bool isShadowMap = false,
+            int anisoLevel = 1,
+            float mipMapBias = 0,
+            MSAASamples msaaSamples = MSAASamples.None,
+            bool bindTextureMS = false,
+            bool useDynamicScale = false,
+            bool useDynamicScaleExplicit = false,
+            RenderTextureMemoryless memoryless = RenderTextureMemoryless.None,
+            VRTextureUsage vrUsage = VRTextureUsage.None,
+            string name = ""
+        )
+        {
+            return s_DefaultInstance.Alloc(
+                width,
+                height,
+                format,
+                slices, 
+                filterMode,
+                wrapMode,
+                dimension,
+                enableRandomWrite,
+                useMipMap,
+                autoGenerateMips,
+                isShadowMap,
+                anisoLevel,
+                mipMapBias,
+                msaaSamples,
+                bindTextureMS,
+                useDynamicScale,
+                useDynamicScaleExplicit,
                 memoryless,
                 vrUsage,
                 name
@@ -114,11 +210,12 @@ namespace UnityEngine.Rendering
         /// <param name="mipMapBias">Bias applied to mipmaps during filtering.</param>
         /// <param name="msaaSamples">Number of MSAA samples for the RTHandle.</param>
         /// <param name="bindTextureMS">Set to true if the texture needs to be bound as a multisampled texture in the shader.</param>
-        /// <param name="useDynamicScale">Set to true to use hardware dynamic scaling.</param>
+        /// <param name="useDynamicScale">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="useDynamicScaleExplicit">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
         /// <param name="memoryless">Use this property to set the render texture memoryless modes.</param>
         /// <param name="vrUsage">Special treatment of the VR eye texture used in stereoscopic rendering.</param>
         /// <param name="name">Name of the RTHandle.</param>
-        /// <returns></returns>
+        /// <returns>A new RTHandle.</returns>
         public static RTHandle Alloc(
             int width,
             int height,
@@ -139,6 +236,7 @@ namespace UnityEngine.Rendering
             MSAASamples msaaSamples = MSAASamples.None,
             bool bindTextureMS = false,
             bool useDynamicScale = false,
+            bool useDynamicScaleExplicit = false,
             RenderTextureMemoryless memoryless = RenderTextureMemoryless.None,
             VRTextureUsage vrUsage = VRTextureUsage.None,
             string name = ""
@@ -164,10 +262,23 @@ namespace UnityEngine.Rendering
                 msaaSamples,
                 bindTextureMS,
                 useDynamicScale,
+                useDynamicScaleExplicit,
                 memoryless,
                 vrUsage,
                 name
             );
+        }
+
+        /// <summary>
+        /// Allocate a new fixed sized RTHandle with the default RTHandle System.
+        /// </summary>
+        /// <param name="width">With of the RTHandle.</param>
+        /// <param name="height">Height of the RTHandle.</param>
+        /// <param name="info">Struct containing details of allocation</param>
+        /// <returns>A new RTHandle.</returns>
+        public static RTHandle Alloc(int width, int height, RTHandleAllocInfo info)
+        {
+            return s_DefaultInstance.Alloc(width, height, info);
         }
 
         /// <summary>
@@ -191,12 +302,13 @@ namespace UnityEngine.Rendering
             string name = ""
         )
         {
+            var format = GetFormat(descriptor.graphicsFormat, descriptor.depthStencilFormat);
+
             var result = s_DefaultInstance.Alloc(
                 descriptor.width,
                 descriptor.height,
+                format,
                 descriptor.volumeDepth,
-                (DepthBits)descriptor.depthBufferBits,
-                descriptor.graphicsFormat,
                 filterMode,
                 wrapMode,
                 descriptor.dimension,
@@ -209,6 +321,7 @@ namespace UnityEngine.Rendering
                 (MSAASamples)descriptor.msaaSamples,
                 descriptor.bindMS,
                 descriptor.useDynamicScale,
+                descriptor.useDynamicScaleExplicit,
                 descriptor.memoryless,
                 descriptor.vrUsage,
                 name
@@ -216,6 +329,11 @@ namespace UnityEngine.Rendering
             return result;
         }
 
+        static internal GraphicsFormat GetFormat(GraphicsFormat colorFormat, GraphicsFormat depthStencilFormat)
+        {
+            return (depthStencilFormat==GraphicsFormat.None) ? colorFormat : depthStencilFormat;
+        }
+
         /// <summary>
         /// Allocate a new automatically sized RTHandle for the default RTHandle System.
         /// </summary>
@@ -234,7 +352,8 @@ namespace UnityEngine.Rendering
         /// <param name="mipMapBias">Bias applied to mipmaps during filtering.</param>
         /// <param name="msaaSamples">Number of MSAA samples.</param>
         /// <param name="bindTextureMS">Set to true if the texture needs to be bound as a multisampled texture in the shader.</param>
-        /// <param name="useDynamicScale">Set to true to use hardware dynamic scaling.</param>
+        /// <param name="useDynamicScale">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="useDynamicScaleExplicit">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
         /// <param name="memoryless">Use this property to set the render texture memoryless modes.</param>
         /// <param name="vrUsage">Special treatment of the VR eye texture used in stereoscopic rendering.</param>
         /// <param name="name">Name of the RTHandle.</param>
@@ -256,6 +375,7 @@ namespace UnityEngine.Rendering
             MSAASamples msaaSamples = MSAASamples.None,
             bool bindTextureMS = false,
             bool useDynamicScale = false,
+            bool useDynamicScaleExplicit = false,
             RenderTextureMemoryless memoryless = RenderTextureMemoryless.None,
             VRTextureUsage vrUsage = VRTextureUsage.None,
             string name = ""
@@ -278,6 +398,75 @@ namespace UnityEngine.Rendering
                 msaaSamples,
                 bindTextureMS,
                 useDynamicScale,
+                useDynamicScaleExplicit,
+                memoryless,
+                vrUsage,
+                name
+            );
+        }
+
+        /// <summary>
+        /// Allocate a new automatically sized RTHandle for the default RTHandle System.
+        /// </summary>
+        /// <param name="scaleFactor">Constant scale for the RTHandle size computation.</param>
+        /// <param name="format">GraphicsFormat of a color or depth stencil buffer.</param>
+        /// <param name="slices">Number of slices of the RTHandle.</param>
+        /// <param name="filterMode">Filtering mode of the RTHandle.</param>
+        /// <param name="wrapMode">Addressing mode of the RTHandle.</param>
+        /// <param name="dimension">Texture dimension of the RTHandle.</param>
+        /// <param name="enableRandomWrite">Set to true to enable UAV random read writes on the texture.</param>
+        /// <param name="useMipMap">Set to true if the texture should have mipmaps.</param>
+        /// <param name="autoGenerateMips">Set to true to automatically generate mipmaps.</param>
+        /// <param name="isShadowMap">Set to true if the depth buffer should be used as a shadow map.</param>
+        /// <param name="anisoLevel">Anisotropic filtering level.</param>
+        /// <param name="mipMapBias">Bias applied to mipmaps during filtering.</param>
+        /// <param name="msaaSamples">Number of MSAA samples.</param>
+        /// <param name="bindTextureMS">Set to true if the texture needs to be bound as a multisampled texture in the shader.</param>
+        /// <param name="useDynamicScale">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="useDynamicScaleExplicit">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="memoryless">Use this property to set the render texture memoryless modes.</param>
+        /// <param name="vrUsage">Special treatment of the VR eye texture used in stereoscopic rendering.</param>
+        /// <param name="name">Name of the RTHandle.</param>
+        /// <returns>A new RTHandle.</returns>
+        public static RTHandle Alloc(
+            Vector2 scaleFactor,
+            GraphicsFormat format,
+            int slices = 1,            
+            FilterMode filterMode = FilterMode.Point,
+            TextureWrapMode wrapMode = TextureWrapMode.Repeat,
+            TextureDimension dimension = TextureDimension.Tex2D,
+            bool enableRandomWrite = false,
+            bool useMipMap = false,
+            bool autoGenerateMips = true,
+            bool isShadowMap = false,
+            int anisoLevel = 1,
+            float mipMapBias = 0,
+            MSAASamples msaaSamples = MSAASamples.None,
+            bool bindTextureMS = false,
+            bool useDynamicScale = false,
+            bool useDynamicScaleExplicit = false,
+            RenderTextureMemoryless memoryless = RenderTextureMemoryless.None,
+            VRTextureUsage vrUsage = VRTextureUsage.None,
+            string name = ""
+        )
+        {
+            return s_DefaultInstance.Alloc(
+                scaleFactor,
+                format,
+                slices,
+                filterMode,
+                wrapMode,
+                dimension,
+                enableRandomWrite,
+                useMipMap,
+                autoGenerateMips,
+                isShadowMap,
+                anisoLevel,
+                mipMapBias,
+                msaaSamples,
+                bindTextureMS,
+                useDynamicScale,
+                useDynamicScaleExplicit,
                 memoryless,
                 vrUsage,
                 name
@@ -307,11 +496,12 @@ namespace UnityEngine.Rendering
             string name = ""
         )
         {
+            var format = GetFormat(descriptor.graphicsFormat, descriptor.depthStencilFormat);
+
             return s_DefaultInstance.Alloc(
                 scaleFactor,
-                descriptor.volumeDepth,
-                (DepthBits)descriptor.depthBufferBits,
-                descriptor.graphicsFormat,
+                format,
+                descriptor.volumeDepth,    
                 filterMode,
                 wrapMode,
                 descriptor.dimension,
@@ -324,10 +514,22 @@ namespace UnityEngine.Rendering
                 (MSAASamples)descriptor.msaaSamples,
                 descriptor.bindMS,
                 descriptor.useDynamicScale,
+                descriptor.useDynamicScaleExplicit,
                 descriptor.memoryless,
                 descriptor.vrUsage,
                 name
             );
+        }
+
+        /// <summary>
+        /// Allocate a new automatically sized RTHandle for the default RTHandle System.
+        /// </summary>
+        /// <param name="scaleFactor">Constant scale for the RTHandle size computation.</param>
+        /// <param name="info">Struct containing details of allocation</param>
+        /// <returns>A new RTHandle.</returns>
+        public static RTHandle Alloc(Vector2 scaleFactor, RTHandleAllocInfo info)
+        {
+            return s_DefaultInstance.Alloc(scaleFactor, info);
         }
 
         /// <summary>
@@ -348,11 +550,12 @@ namespace UnityEngine.Rendering
         /// <param name="mipMapBias">Bias applied to mipmaps during filtering.</param>
         /// <param name="msaaSamples">Number of MSAA samples.</param>
         /// <param name="bindTextureMS">Set to true if the texture needs to be bound as a multisampled texture in the shader.</param>
-        /// <param name="useDynamicScale">Set to true to use hardware dynamic scaling.</param>
+        /// <param name="useDynamicScale">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="useDynamicScaleExplicit">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
         /// <param name="memoryless">Use this property to set the render texture memoryless modes.</param>
         /// <param name="vrUsage">Special treatment of the VR eye texture used in stereoscopic rendering.</param>
         /// <param name="name">Name of the RTHandle.</param>
-        /// <returns></returns>
+        /// <returns>A new RTHandle.</returns>
         public static RTHandle Alloc(
             ScaleFunc scaleFunc,
             int slices = 1,
@@ -370,6 +573,7 @@ namespace UnityEngine.Rendering
             MSAASamples msaaSamples = MSAASamples.None,
             bool bindTextureMS = false,
             bool useDynamicScale = false,
+            bool useDynamicScaleExplicit = false,
             RenderTextureMemoryless memoryless = RenderTextureMemoryless.None,
             VRTextureUsage vrUsage = VRTextureUsage.None,
             string name = ""
@@ -392,6 +596,75 @@ namespace UnityEngine.Rendering
                 msaaSamples,
                 bindTextureMS,
                 useDynamicScale,
+                useDynamicScaleExplicit,
+                memoryless,
+                vrUsage,
+                name
+            );
+        }
+
+        /// <summary>
+        /// Allocate a new automatically sized RTHandle for the default RTHandle System.
+        /// </summary>
+        /// <param name="scaleFunc">Function used for the RTHandle size computation.</param>
+        /// <param name="format">GraphicsFormat of a color or depth stencil buffer.</param>
+        /// <param name="slices">Number of slices of the RTHandle.</param>
+        /// <param name="filterMode">Filtering mode of the RTHandle.</param>
+        /// <param name="wrapMode">Addressing mode of the RTHandle.</param>
+        /// <param name="dimension">Texture dimension of the RTHandle.</param>
+        /// <param name="enableRandomWrite">Set to true to enable UAV random read writes on the texture.</param>
+        /// <param name="useMipMap">Set to true if the texture should have mipmaps.</param>
+        /// <param name="autoGenerateMips">Set to true to automatically generate mipmaps.</param>
+        /// <param name="isShadowMap">Set to true if the depth buffer should be used as a shadow map.</param>
+        /// <param name="anisoLevel">Anisotropic filtering level.</param>
+        /// <param name="mipMapBias">Bias applied to mipmaps during filtering.</param>
+        /// <param name="msaaSamples">Number of MSAA samples.</param>
+        /// <param name="bindTextureMS">Set to true if the texture needs to be bound as a multisampled texture in the shader.</param>
+        /// <param name="useDynamicScale">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="useDynamicScaleExplicit">[See Dynamic Resolution documentation](https://docs.unity3d.com/Manual/DynamicResolution.html)</param>
+        /// <param name="memoryless">Use this property to set the render texture memoryless modes.</param>
+        /// <param name="vrUsage">Special treatment of the VR eye texture used in stereoscopic rendering.</param>
+        /// <param name="name">Name of the RTHandle.</param>
+        /// <returns>A new RTHandle.</returns>
+        public static RTHandle Alloc(
+            ScaleFunc scaleFunc,
+            GraphicsFormat format,
+            int slices = 1,
+            FilterMode filterMode = FilterMode.Point,
+            TextureWrapMode wrapMode = TextureWrapMode.Repeat,
+            TextureDimension dimension = TextureDimension.Tex2D,
+            bool enableRandomWrite = false,
+            bool useMipMap = false,
+            bool autoGenerateMips = true,
+            bool isShadowMap = false,
+            int anisoLevel = 1,
+            float mipMapBias = 0,
+            MSAASamples msaaSamples = MSAASamples.None,
+            bool bindTextureMS = false,
+            bool useDynamicScale = false,
+            bool useDynamicScaleExplicit = false,
+            RenderTextureMemoryless memoryless = RenderTextureMemoryless.None,
+            VRTextureUsage vrUsage = VRTextureUsage.None,
+            string name = ""
+        )
+        {
+            return s_DefaultInstance.Alloc(
+                scaleFunc,
+                format,
+                slices,
+                filterMode,
+                wrapMode,
+                dimension,
+                enableRandomWrite,
+                useMipMap,
+                autoGenerateMips,
+                isShadowMap,
+                anisoLevel,
+                mipMapBias,
+                msaaSamples,
+                bindTextureMS,
+                useDynamicScale,
+                useDynamicScaleExplicit,
                 memoryless,
                 vrUsage,
                 name
@@ -421,11 +694,15 @@ namespace UnityEngine.Rendering
             string name = ""
         )
         {
+            Assert.IsFalse(descriptor.graphicsFormat != GraphicsFormat.None && descriptor.depthStencilFormat != GraphicsFormat.None,
+                "The RenderTextureDescriptor used to create RTHandle " + name + " contains both graphicsFormat and depthStencilFormat which is not allowed.");
+
+            var format = GetFormat( descriptor.graphicsFormat, descriptor.depthStencilFormat);
+
             return s_DefaultInstance.Alloc(
                 scaleFunc,
+                format,
                 descriptor.volumeDepth,
-                (DepthBits)descriptor.depthBufferBits,
-                descriptor.graphicsFormat,
                 filterMode,
                 wrapMode,
                 descriptor.dimension,
@@ -438,10 +715,22 @@ namespace UnityEngine.Rendering
                 (MSAASamples)descriptor.msaaSamples,
                 descriptor.bindMS,
                 descriptor.useDynamicScale,
+                descriptor.useDynamicScaleExplicit,
                 descriptor.memoryless,
                 descriptor.vrUsage,
                 name
             );
+        }
+
+        /// <summary>
+        /// Allocate a new automatically sized RTHandle for the default RTHandle System.
+        /// </summary>
+        /// <param name="scaleFunc">Function used for the RTHandle size computation.</param>
+        /// <param name="info">Struct containing details of allocation</param>
+        /// <returns>A new RTHandle.</returns>
+        public static RTHandle Alloc(ScaleFunc scaleFunc, RTHandleAllocInfo info)
+        {
+            return s_DefaultInstance.Alloc(scaleFunc, info);
         }
 
         /// <summary>
@@ -458,10 +747,11 @@ namespace UnityEngine.Rendering
         /// Allocate a RTHandle from a regular RenderTexture for the default RTHandle system.
         /// </summary>
         /// <param name="tex">Input texture</param>
+        /// <param name="transferOwnership">To transfer ownership of the RenderTexture to the default RTHandles system, false by default</param>
         /// <returns>A new RTHandle referencing the input texture.</returns>
-        public static RTHandle Alloc(RenderTexture tex)
+        public static RTHandle Alloc(RenderTexture tex, bool transferOwnership = false)
         {
-            return s_DefaultInstance.Alloc(tex);
+            return s_DefaultInstance.Alloc(tex, transferOwnership);
         }
 
         /// <summary>
@@ -499,6 +789,18 @@ namespace UnityEngine.Rendering
         public static void Initialize(int width, int height)
         {
             s_DefaultInstance.Initialize(width, height);
+        }
+
+        /// <summary>
+        /// Initialize the default RTHandle system.
+        /// </summary>
+        /// <param name="width">Initial reference rendering width.</param>
+        /// <param name="height">Initial reference rendering height.</param>
+        /// <param name="useLegacyDynamicResControl">Use legacy hardware DynamicResolution control in the default RTHandle system.</param>
+        [Obsolete("useLegacyDynamicResControl is deprecated. Please use SetHardwareDynamicResolutionState() instead.")]
+        public static void Initialize(int width, int height, bool useLegacyDynamicResControl = false)
+        {
+            s_DefaultInstance.Initialize(width, height, useLegacyDynamicResControl);
         }
 
         /// <summary>

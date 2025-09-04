@@ -93,21 +93,24 @@ namespace UnityEditor.Rendering.HighDefinition
             public static readonly GUIContent stepCount = EditorGUIUtility.TrTextContent("Step Count", "Number of steps to take along one signed direction during horizon search (this is the number of steps in positive and negative direction).");
             public static readonly GUIContent tempAccum = EditorGUIUtility.TrTextContent("Temporal Accumulation", "Whether the results are accumulated over time or not. This can get better results cheaper, but it can lead to temporal artifacts. Requires Motion Vectors to be enabled.");
             public static readonly GUIContent directionCount = EditorGUIUtility.TrTextContent("Direction Count", "Number of directions searched for occlusion at each each pixel.");
-            public static readonly GUIContent blurSharpness = EditorGUIUtility.TrTextContent("Blur sharpness", "Modify the non-temporal blur to change how sharp features are preserved. Lower values blurrier/softer, higher values sharper but with risk of noise.");
+            public static readonly GUIContent blurSharpness = EditorGUIUtility.TrTextContent("Blur Sharpness", "Modify the non-temporal blur to change how sharp features are preserved. Lower values blurrier/softer, higher values sharper but with risk of noise.");
             public static readonly GUIContent bilateralAggressiveness = EditorGUIUtility.TrTextContent("Bilateral Aggressiveness", "Higher this value, the less lenient with depth differences the spatial filter is. Increase if for example noticing white halos where AO should be.");
-            public static readonly GUIContent ghostingReduction = EditorGUIUtility.TrTextContent("Ghosting reduction", "Moving this factor closer to 0 will increase the amount of accepted samples during temporal accumulation, increasing the ghosting, but reducing the temporal noise.");
+            public static readonly GUIContent ghostingReduction = EditorGUIUtility.TrTextContent("Ghosting Reduction", "Moving this factor closer to 0 will increase the amount of accepted samples during temporal accumulation, increasing the ghosting, but reducing the temporal noise.");
             public static readonly GUIContent bilateralUpsample = EditorGUIUtility.TrTextContent("Bilateral Upsample", "This upsample method preserves sharp edges better, however can result in visible aliasing and it is slightly more expensive.");
         }
 
         public override void OnInspectorGUI()
         {
-            if (!HDRenderPipeline.currentAsset?.currentPlatformRenderPipelineSettings.supportSSAO ?? false)
+            HDEditorUtils.EnsureFrameSetting(FrameSettingsField.SSAO);
+            HDRenderPipelineAsset currentAsset = HDRenderPipeline.currentAsset;
+            bool notSupported = currentAsset != null && !currentAsset.currentPlatformRenderPipelineSettings.supportSSAO;
+            if (notSupported)
             {
                 EditorGUILayout.Space();
-                HDEditorUtils.QualitySettingsHelpBox(Styles.currentAssetDoesNotSupportSSAO, MessageType.Error,
+                HDEditorUtils.QualitySettingsHelpBox(Styles.currentAssetDoesNotSupportSSAO, MessageType.Warning,
                     HDRenderPipelineUI.ExpandableGroup.Lighting, "m_RenderPipelineSettings.supportSSAO");
-                return;
             }
+            using var disableScope = new EditorGUI.DisabledScope(notSupported);
 
             if (HDRenderPipeline.assetSupportsRayTracing)
             {
@@ -115,12 +118,10 @@ namespace UnityEditor.Rendering.HighDefinition
 
                 if (m_RayTracing.overrideState.boolValue && m_RayTracing.value.boolValue)
                 {
-                    using (new IndentLevelScope())
-                    {
-                        // If ray tracing is supported display the content of the volume component
-                        if (RenderPipelineManager.currentPipeline is not HDRenderPipeline { rayTracingSupported: true })
-                            HDRenderPipelineUI.DisplayRayTracingSupportBox();
-                    }
+                    HDEditorUtils.EnsureFrameSetting(FrameSettingsField.RayTracing);
+                    // If ray tracing is supported display the content of the volume component
+                    if (RenderPipelineManager.currentPipeline is not HDRenderPipeline { rayTracingSupported: true })
+                        HDRenderPipelineUI.DisplayRayTracingSupportBox();
                 }
             }
 

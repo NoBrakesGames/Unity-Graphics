@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEngine;
 using UnityEditor.Graphing;
 using UnityEditor.ShaderGraph.Internal;
+using UnityEngine.Rendering.ShaderGraph;
 
 namespace UnityEditor.ShaderGraph
 {
@@ -30,6 +31,7 @@ namespace UnityEditor.ShaderGraph
         , IMayRequireDepthTexture
         , IMayRequireVertexSkinning
         , IMayRequireVertexID
+        , IMayRequireInstanceID
         , IDisposable
     {
         [Serializable]
@@ -102,6 +104,15 @@ namespace UnityEditor.ShaderGraph
 
         [SerializeField]
         List<string> m_DropdownSelectedEntries = new List<string>();
+
+        public override string documentationURL {
+            get {
+                // TODO: There should be a way for unity authored and distributed subgraphs to provide custom doc links.
+                if (name.Contains("SpeedTree8"))
+                    return Documentation.GetPageLink("SpeedTree8-SubGraphAssets");
+                else return Documentation.GetPageLink("Sub-graph");
+            }
+        }
 
         public string subGraphGuid
         {
@@ -877,6 +888,14 @@ namespace UnityEditor.ShaderGraph
                 return false;
 
             return asset.requirements.requiresVertexID;
+        }
+
+        public bool RequiresInstanceID(ShaderStageCapability stageCapability)
+        {
+            if (asset == null)
+                return false;
+
+            return asset.requirements.requiresInstanceID;
         }
 
         public string GetDropdownEntryName(string referenceName)

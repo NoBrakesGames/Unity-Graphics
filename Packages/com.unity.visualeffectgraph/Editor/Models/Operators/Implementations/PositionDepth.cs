@@ -1,4 +1,3 @@
-using System;
 using System.Linq;
 using UnityEngine;
 using System.Collections.Generic;
@@ -7,7 +6,8 @@ using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Sampling")]
+    [VFXHelpURL("Operator-Position(Depth)")]
+    [VFXInfo(name = "Position (Depth)", category = "Sampling")]
     class PositionDepth : VFXOperator
     {
         public enum PositionMode
@@ -88,12 +88,6 @@ namespace UnityEditor.VFX.Operator
             }
         }
 
-        internal sealed override void GenerateErrors(VFXInvalidateErrorReporter manager)
-        {
-            if (camera == CameraMode.Main && (UnityEngine.Rendering.RenderPipelineManager.currentPipeline == null || !UnityEngine.Rendering.RenderPipelineManager.currentPipeline.ToString().Contains("HDRenderPipeline")))
-                manager.RegisterError("PositionDepthOperatorUnavailableWithoutHDRP", VFXErrorType.Warning, "Position (Depth) is currently only supported in the High Definition Render Pipeline (HDRP).");
-        }
-
         protected override IEnumerable<VFXPropertyWithValue> inputProperties
         {
             get
@@ -156,6 +150,7 @@ namespace UnityEditor.VFX.Operator
             Block.CameraMatricesExpressions camMatrices = Block.CameraHelper.GetMatricesExpressions(expressions, VFXSpace.World, VFXSpace.World);
 
             var Camera_depthBuffer = expressions.First(e => e.name == "Camera_depthBuffer").exp;
+            var ScaledCamPixDim = expressions.First(e => e.name == "Camera_scaledPixelDimensions").exp;
             var CamPixDim = expressions.First(e => e.name == "Camera_pixelDimensions").exp;
 
             // Set uvs
@@ -197,7 +192,7 @@ namespace UnityEditor.VFX.Operator
             }
 
             VFXExpression projpos = uv * VFXValue.Constant<Vector2>(new Vector2(2f, 2f)) - VFXValue.Constant<Vector2>(Vector2.one);
-            VFXExpression uvs = new VFXExpressionCombine(uv.x * CamPixDim.x, uv.y * CamPixDim.y);
+            VFXExpression uvs = new VFXExpressionCombine(uv.x * ScaledCamPixDim.x, uv.y * ScaledCamPixDim.y);
 
             // Get depth
             VFXExpression depth = new VFXExpressionExtractComponent(new VFXExpressionLoadCameraBuffer(Camera_depthBuffer, uvs), 0);

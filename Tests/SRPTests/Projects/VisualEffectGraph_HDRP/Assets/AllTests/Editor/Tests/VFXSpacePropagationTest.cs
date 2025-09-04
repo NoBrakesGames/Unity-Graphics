@@ -15,29 +15,9 @@ namespace UnityEditor.VFX.Test
     [TestFixture]
     internal class VFXSpacePropagationTest
     {
-        public static IEnumerable<VFXExpression> CollectParentExpression(VFXExpression expression, HashSet<VFXExpression> hashSet = null)
+        public static IEnumerable<VFXExpression> CollectParentExpression(VFXExpression expression)
         {
-            if (expression != null)
-            {
-                if (hashSet == null)
-                {
-                    hashSet = new HashSet<VFXExpression>();
-                }
-
-                if (!hashSet.Contains(expression))
-                {
-                    hashSet.Add(expression);
-                    yield return expression;
-                    foreach (var parent in expression.parents)
-                    {
-                        var parents = CollectParentExpression(parent, hashSet);
-                        foreach (var exp in parents)
-                        {
-                            yield return exp;
-                        }
-                    }
-                }
-            }
+            return VFXTestCommon.CollectParentExpression(expression);
         }
 
         [Test]
@@ -360,7 +340,8 @@ namespace UnityEditor.VFX.Test
         public void SpaceConversion_Conversion_Expected_Between_Slot_Block_And_Context()
         {
             var initializeContext = ScriptableObject.CreateInstance<VFXBasicInitialize>();
-            var positionSphere = ScriptableObject.CreateInstance<PositionSphere>();
+            var positionSphere = ScriptableObject.CreateInstance<PositionShape>();
+            positionSphere.SetSettingValue("shape", PositionShapeBase.Type.Sphere);
             initializeContext.AddChild(positionSphere);
 
             //Default is expected to be in same space between block & context
@@ -397,7 +378,7 @@ namespace UnityEditor.VFX.Test
             viewController.ApplyChanges();
             viewController.ForceReload();
 
-            var collision = ScriptableObject.CreateInstance<CollisionSphere>();
+            var collision = ScriptableObject.CreateInstance<CollisionShape>();
             var contextController = viewController.allChildren.OfType<VFXContextController>().First();
             contextController.AddBlock(0, collision, true);
 
@@ -573,7 +554,7 @@ namespace UnityEditor.VFX.Test
         public void Space_Slot_Sanitize_Still_Possible_Simple_Sphere()
         {
             var branch = ScriptableObject.CreateInstance<Operator.Branch>();
-            branch.SetOperandType(typeof(Sphere));
+            branch.SetSettingValue("m_Type", (SerializableType)typeof(Sphere));
 
             var slot = branch.inputSlots[1];
             Assert.AreEqual(typeof(Sphere), slot.property.type);
@@ -593,7 +574,7 @@ namespace UnityEditor.VFX.Test
         public void Space_Slot_Sanitize_Still_Possible_ArcSphere([ValueSource("trueOrFalse")] bool fromParentToChildSanitize, [ValueSource("trueOrFalse")] bool hackChildSphere)
         {
             var branch = ScriptableObject.CreateInstance<Operator.Branch>();
-            branch.SetOperandType(typeof(ArcSphere));
+            branch.SetSettingValue("m_Type", (SerializableType)typeof(ArcSphere));
 
             var slot = branch.inputSlots[1];
             Assert.AreEqual(typeof(ArcSphere), slot.property.type);

@@ -1,8 +1,6 @@
 ## NOTE: We have migrated reported issues to FogBugz. You can only log further issues via the Unity bug tracker. To see how, read [this](https://unity3d.com/unity/qa/bug-reporting).
 
-## NOTE 2: We are rolling out changes to how we develop the Graphics Packages. Development will move to an internal repo and changes will be mirrored to this public repo. You will continue to see changes at the PR level and pull in changes from this public repo. You can find more information and track our progress [here](https://forum.unity.com/threads/important-upcoming-changes-to-the-graphics-repository.1239826/).
-
-## NOTE 3: Some folders have been moved. Read more [here](./README-FOLDER-CHANGES.md) on how to merge your custom branches with the new folder layout.
+## NOTE 2: Development by Unity developers happens in an private repo. Changes are mirrored from that private repo to this public repo every few weeks. [This](https://forum.unity.com/threads/important-upcoming-changes-to-the-graphics-repository.1239826/) forum thread can be used to discuss the mirroring.
 
 # Unity Scriptable Render Pipeline
 The Scriptable Render Pipeline (SRP) is a Unity feature designed to give artists and developers the tools they need to create modern, high-fidelity graphics in Unity. Unity provides two pre-built Scriptable Render Pipelines:
@@ -81,6 +79,8 @@ Unity provides sample Scenes to use with SRP. You can find these Scenes in the [
 On Unity 2020.3 LTS and below, the packages in this repository were not Core packages. Instead they were regular packages and different versions could be installed to different versions of Unity.
 The compatibility of Unity versions and package versions were as follows:
 
+- **Unity 2023.3 is compatible with SRP versions 17.x.x**
+- **Unity 2023.2 is compatible with SRP versions 16.x.x**
 - **Unity 2023.1 is compatible with SRP versions 15.x.x**
 - **Unity 2022.2/3 is compatible with SRP versions 14.x.x**
 - **Unity 2022.1 is compatible with SRP versions 13.x.x**
@@ -90,7 +90,7 @@ The compatibility of Unity versions and package versions were as follows:
 - **Unity 2020.1 is compatible with SRP versions 8.x.x**
 - **Unity 2019.3 is compatible with SRP versions 7.x.x**
 - **Unity 2019.2 is compatible with SRP versions 6.x.x**
-- **Unity 2019.1 is compatible with SRP vertsios 5.x.x**
+- **Unity 2019.1 is compatible with SRP versions 5.x.x**
 
 The above list is a guideline for major versions of SRP, but there are often multiple minor versions that you can use for a certain version of Unity. To determine which minor versions of SRP you can use:
 

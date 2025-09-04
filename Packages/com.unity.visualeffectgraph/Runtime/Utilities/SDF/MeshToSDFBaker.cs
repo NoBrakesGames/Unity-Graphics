@@ -13,7 +13,7 @@ namespace UnityEngine.VFX.SDF
     /// </summary>
     public class MeshToSDFBaker : IDisposable
     {
-        private RenderTexture m_RayMap, m_SignMap, m_SignMapBis;
+        private RenderTexture[] m_RayMaps, m_SignMaps;
         private RenderTexture[] m_RenderTextureViews;
         private GraphicsBuffer m_CounterBuffer, m_AccumCounterBuffer, m_TrianglesInVoxels, m_TrianglesUV;
         private GraphicsBuffer
@@ -55,6 +55,8 @@ namespace UnityEngine.VFX.SDF
         private float[] m_MinBoundsExtended = new float[3];
         private float[] m_MaxBoundsExtended = new float[3];
 
+        private int m_RayMapUseCounter = 0;
+
         internal static uint kMaxRecommandedGridSize = 1 << 24;
         internal static uint kMaxAbsoluteGridSize = 1 << 27;
 
@@ -67,16 +69,12 @@ namespace UnityEngine.VFX.SDF
 
         internal VFXRuntimeResources m_RuntimeResources;
 
-        private struct Triangle
-        {
-            Vector3 a, b, c;
-        }
-
         /// <summary>
         /// Returns the texture containing the baked Signed Distance Field
         /// </summary>
         public RenderTexture SdfTexture => m_DistanceTexture;
-        private void InitMeshFromList(List<Mesh> meshes, List<Matrix4x4> transforms)
+
+        private static Mesh InitMeshFromList(List<Mesh> meshes, List<Matrix4x4> transforms)
         {
             int nMeshes = meshes.Count;
             if (nMeshes != transforms.Count)
@@ -94,9 +92,11 @@ namespace UnityEngine.VFX.SDF
                     combine.Add(comb);
                 }
             }
-            m_Mesh = new Mesh();
-            m_Mesh.indexFormat = IndexFormat.UInt32;
-            m_Mesh.CombineMeshes(combine.ToArray());
+
+            Mesh outMesh = new Mesh();
+            outMesh.indexFormat = IndexFormat.UInt32;
+            outMesh.CombineMeshes(combine.ToArray());
+            return outMesh;
         }
 
         private void InitCommandBuffer()
@@ -184,30 +184,23 @@ namespace UnityEngine.VFX.SDF
         /// <param name="threshold">The threshold controlling which voxels will be considered inside or outside of the surface.</param>
         /// <param name="sdfOffset">The Offset to add to the SDF. It can be used to make the SDF more bulky or skinny.</param>
         /// <param name="cmd">The CommandBuffer on which the baking process will be added.</param>
-        public MeshToSDFBaker(Vector3 sizeBox, Vector3 center, int maxRes, Mesh mesh, int signPassesCount = 1, float threshold = 0.5f, float sdfOffset = 0.0f, CommandBuffer cmd = null)
+        public MeshToSDFBaker(Vector3 sizeBox,
+            Vector3 center,
+            int maxRes,
+            Mesh mesh,
+            int signPassesCount = 1,
+            float threshold = 0.5f,
+            float sdfOffset = 0.0f,
+            CommandBuffer cmd = null)
         {
-            m_SignPassesCount = signPassesCount;
-            if (m_SignPassesCount >= 20)
-            {
-                throw new ArgumentException("The signPassCount argument should be smaller than 20.");
-            }
-            m_InOutThreshold = threshold;
-            m_RuntimeResources = VFXRuntimeResources.runtimeResources;
-            if (m_RuntimeResources == null)
-            {
-                throw new InvalidOperationException("VFX Runtime Resources could not be loaded.");
-            }
-
-            m_SdfOffset = sdfOffset;
-            m_Center = center;
-            m_SizeBox = sizeBox;
+            LoadRuntimeResources();
             m_Mesh = mesh;
-            m_maxResolution = maxRes;
             if (cmd != null)
             {
                 m_Cmd = cmd;
                 m_OwnsCommandBuffer = false;
             }
+            SetParameters(sizeBox, center, maxRes, signPassesCount, threshold, sdfOffset);
             Init();
         }
 
@@ -223,26 +216,17 @@ namespace UnityEngine.VFX.SDF
         /// <param name="threshold">The threshold controlling which voxels will be considered inside or outside of the surface.</param>
         /// <param name="sdfOffset">The Offset to add to the SDF. It can be used to make the SDF more bulky or skinny.</param>
         /// <param name="cmd">The CommandBuffer on which the baking process will be added.</param>
-        public MeshToSDFBaker(Vector3 sizeBox, Vector3 center, int maxRes, List<Mesh> meshes, List<Matrix4x4> transforms, int signPassesCount = 1, float threshold = 0.5f, float sdfOffset = 0.0f, CommandBuffer cmd = null)
+        public MeshToSDFBaker(Vector3 sizeBox,
+            Vector3 center,
+            int maxRes,
+            List<Mesh> meshes,
+            List<Matrix4x4> transforms,
+            int signPassesCount = 1,
+            float threshold = 0.5f,
+            float sdfOffset = 0.0f,
+            CommandBuffer cmd = null) :
+            this(sizeBox, center, maxRes, InitMeshFromList(meshes, transforms), signPassesCount, threshold, sdfOffset, cmd)
         {
-            m_RuntimeResources = VFXRuntimeResources.runtimeResources;
-            if (m_RuntimeResources == null)
-            {
-                throw new InvalidOperationException("VFX Runtime Resources could not be loaded.");
-            }
-            InitMeshFromList(meshes, transforms);
-            m_SdfOffset = sdfOffset;
-            m_Center = center;
-            m_SizeBox = sizeBox;
-            m_maxResolution = maxRes;
-            if (cmd != null)
-            {
-                m_Cmd = cmd;
-                m_OwnsCommandBuffer = false;
-            }
-            m_SignPassesCount = signPassesCount;
-            m_InOutThreshold = threshold;
-            Init();
         }
 
         /// <summary>
@@ -266,15 +250,16 @@ namespace UnityEngine.VFX.SDF
         /// <param name="signPassesCount">The number of refinement passes on the sign of the SDF. This should stay below 20.</param>
         /// <param name="threshold">The threshold controlling which voxels will be considered inside or outside of the surface.</param>
         /// <param name="sdfOffset">The Offset to add to the SDF. It can be used to make the SDF more bulky or skinny.</param>
-        public void Reinit(Vector3 sizeBox, Vector3 center, int maxRes, Mesh mesh, int signPassesCount = 1, float threshold = 0.5f, float sdfOffset = 0.0f)
+        public void Reinit(Vector3 sizeBox,
+            Vector3 center,
+            int maxRes,
+            Mesh mesh,
+            int signPassesCount = 1,
+            float threshold = 0.5f,
+            float sdfOffset = 0.0f)
         {
             m_Mesh = mesh;
-            m_Center = center;
-            m_SizeBox = sizeBox;
-            m_maxResolution = maxRes;
-            m_SignPassesCount = signPassesCount;
-            m_InOutThreshold = threshold;
-            m_SdfOffset = sdfOffset;
+            SetParameters(sizeBox, center, maxRes, signPassesCount, threshold, sdfOffset);
             Init();
         }
 
@@ -289,16 +274,43 @@ namespace UnityEngine.VFX.SDF
         /// <param name="signPassesCount">The number of refinement passes on the sign of the SDF. This should stay below 20.</param>
         /// <param name="threshold">The threshold controlling which voxels will be considered inside or outside of the surface.</param>
         /// <param name="sdfOffset">The Offset to add to the SDF. It can be used to make the SDF more bulky or skinny.</param>
-        public void Reinit(Vector3 sizeBox, Vector3 center, int maxRes, List<Mesh> meshes, List<Matrix4x4> transforms, int signPassesCount = 1, float threshold = 0.5f, float sdfOffset = 0.0f)
+        public void Reinit(Vector3 sizeBox,
+            Vector3 center,
+            int maxRes,
+            List<Mesh> meshes,
+            List<Matrix4x4> transforms,
+            int signPassesCount = 1,
+            float threshold = 0.5f,
+            float sdfOffset = 0.0f)
         {
-            InitMeshFromList(meshes, transforms);
-            m_Center = center;
-            m_SizeBox = sizeBox;
-            m_maxResolution = maxRes;
+            Reinit(sizeBox, center, maxRes, InitMeshFromList(meshes, transforms), signPassesCount, threshold, sdfOffset);
+        }
+
+        private void SetParameters(Vector3 sizeBox, Vector3 center, int maxRes, int signPassesCount, float threshold, float sdfOffset)
+        {
+            if (m_SignPassesCount >= 20)
+            {
+                throw new ArgumentException("The signPassCount argument should be smaller than 20.");
+            }
             m_SignPassesCount = signPassesCount;
             m_InOutThreshold = threshold;
             m_SdfOffset = sdfOffset;
-            Init();
+            m_Center = center;
+            m_SizeBox = sizeBox;
+            m_maxResolution = maxRes;
+        }
+        private void LoadRuntimeResources()
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3)
+            {
+                Debug.LogWarning("MeshToSDFBaker compute shaders are not supported on OpenGLES3");
+            }
+
+            m_RuntimeResources = VFXRuntimeResources.runtimeResources;
+            if (m_RuntimeResources == null)
+            {
+                throw new InvalidOperationException("VFX Runtime Resources could not be loaded.");
+            }
         }
 
         void InitTextures()
@@ -337,15 +349,20 @@ namespace UnityEngine.VFX.SDF
 
             CreateRenderTextureIfNeeded(ref m_textureVoxel, rtDesc4Channels);
             CreateRenderTextureIfNeeded(ref m_textureVoxelBis, rtDesc4Channels);
-            CreateRenderTextureIfNeeded(ref m_RayMap, rtDesc4Channels);
-            CreateRenderTextureIfNeeded(ref m_SignMap, rtDescSignMap);
-            CreateRenderTextureIfNeeded(ref m_SignMapBis, rtDescSignMap);
+
+            if(m_RayMaps == null)
+                m_RayMaps = new RenderTexture[2];
+            if(m_SignMaps == null)
+                m_SignMaps = new RenderTexture[2];
+
+            for (int i = 0; i < 2; i++)
+            {
+                CreateRenderTextureIfNeeded(ref m_RayMaps[i], rtDesc4Channels);
+                CreateRenderTextureIfNeeded(ref m_SignMaps[i], rtDescSignMap);
+            }
 
             CreateRenderTextureIfNeeded(ref m_DistanceTexture, rtDesc1Channel);
-
-            CreateGraphicsBufferIfNeeded(ref m_bufferVoxel, GetTotalVoxelCount(),
-                4 * sizeof(float));
-
+            CreateGraphicsBufferIfNeeded(ref m_bufferVoxel, GetTotalVoxelCount(), 4 * sizeof(float));
             InitPrefixSumBuffers();
         }
 
@@ -608,11 +625,11 @@ namespace UnityEngine.VFX.SDF
 
         void GenerateRayMap()
         {
+            m_RayMapUseCounter = 0;
             m_Cmd.BeginSample("BakeSDF.Raymap");
             m_Cmd.SetComputeBufferParam(m_computeShader, m_Kernels.generateRayMapLocal, ShaderProperties.accumCounter, m_AccumCounterBuffer);
             m_Cmd.SetComputeBufferParam(m_computeShader, m_Kernels.generateRayMapLocal, ShaderProperties.triangleIDs, m_TrianglesInVoxels);
             m_Cmd.SetComputeBufferParam(m_computeShader, m_Kernels.generateRayMapLocal, ShaderProperties.trianglesUV, m_TrianglesUV);
-            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.generateRayMapLocal, ShaderProperties.rayMap, m_RayMap);
 
             m_Cmd.BeginSample("BakeSDF.LocalRaymap");
 
@@ -621,28 +638,39 @@ namespace UnityEngine.VFX.SDF
                 m_OffsetRayMap[0] = i & 1;
                 m_OffsetRayMap[1] = (i & 2) >> 1;
                 m_OffsetRayMap[2] = (i & 4) >> 2;
+                m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.generateRayMapLocal, ShaderProperties.rayMap, GetRayMapPrincipal(m_RayMapUseCounter));
+                m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.generateRayMapLocal, ShaderProperties.rayMapTmp, GetRayMapBis(m_RayMapUseCounter));
                 m_Cmd.SetComputeIntParams(m_computeShader, ShaderProperties.offsetRayMap, m_OffsetRayMap);
                 m_Cmd.DispatchCompute(m_computeShader, m_Kernels.generateRayMapLocal,
-                    Mathf.CeilToInt(m_Dimensions[0] / (2.0f * 8.0f)),
-                    Mathf.CeilToInt(m_Dimensions[1] / (2.0f * 8.0f)),
-                    Mathf.CeilToInt(m_Dimensions[2] / (2.0f * 8.0f)));
+                    Mathf.CeilToInt(m_Dimensions[0] / (2.0f * 4.0f)),
+                    Mathf.CeilToInt(m_Dimensions[1] / (2.0f * 4.0f)),
+                    Mathf.CeilToInt(m_Dimensions[2] / (2.0f * 4.0f)));
+                m_RayMapUseCounter++;
             }
+
             m_Cmd.EndSample("BakeSDF.LocalRaymap");
 
             m_Cmd.BeginSample("BakeSDF.GlobalRaymap");
 
-            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.rayMapScanX, ShaderProperties.rayMap, m_RayMap);
-            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.rayMapScanY, ShaderProperties.rayMap, m_RayMap);
-            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.rayMapScanZ, ShaderProperties.rayMap, m_RayMap);
-
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.rayMapScanX, ShaderProperties.rayMap, GetRayMapPrincipal(m_RayMapUseCounter));
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.rayMapScanX, ShaderProperties.rayMapTmp, GetRayMapBis(m_RayMapUseCounter));
             m_Cmd.DispatchCompute(m_computeShader, m_Kernels.rayMapScanX,
                 1,
                 Mathf.CeilToInt(m_Dimensions[1] / 8.0f),
                 Mathf.CeilToInt(m_Dimensions[2] / 8.0f));
+            m_RayMapUseCounter++;
+
+
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.rayMapScanY, ShaderProperties.rayMap, GetRayMapPrincipal(m_RayMapUseCounter));
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.rayMapScanY, ShaderProperties.rayMapTmp, GetRayMapBis(m_RayMapUseCounter));
             m_Cmd.DispatchCompute(m_computeShader, m_Kernels.rayMapScanY,
                 Mathf.CeilToInt(m_Dimensions[0] / 8.0f),
                 1,
                 Mathf.CeilToInt(m_Dimensions[2] / 8.0f));
+            m_RayMapUseCounter++;
+
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.rayMapScanZ, ShaderProperties.rayMap, GetRayMapPrincipal(m_RayMapUseCounter));
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.rayMapScanZ, ShaderProperties.rayMapTmp, GetRayMapBis(m_RayMapUseCounter));
             m_Cmd.DispatchCompute(m_computeShader, m_Kernels.rayMapScanZ,
                 Mathf.CeilToInt(m_Dimensions[0] / 8.0f),
                 Mathf.CeilToInt(m_Dimensions[1] / 8.0f),
@@ -652,35 +680,20 @@ namespace UnityEngine.VFX.SDF
             m_Cmd.EndSample("BakeSDF.Raymap");
         }
 
-        RenderTexture GetSignMapPrincipal(int step)
-        {
-            if (step % 2 == 0)
-            {
-                return m_SignMap;
-            }
-
-            return m_SignMapBis;
-        }
-
-        RenderTexture GetSignMapBis(int step)
-        {
-            if (step % 2 == 0)
-            {
-                return m_SignMapBis;
-            }
-
-            return m_SignMap;
-        }
+        RenderTexture GetRayMapPrincipal(int step) { return m_RayMaps[step % 2]; }
+        RenderTexture GetRayMapBis(int step) { return m_RayMaps[(step+1) % 2]; }
+        RenderTexture GetSignMapPrincipal(int step) { return m_SignMaps[step % 2]; }
+        RenderTexture GetSignMapBis(int step) { return m_SignMaps[(step+1) % 2]; }
 
         void SignPass()
         {
             m_Cmd.BeginSample("BakeSDF.SignPass");
-            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.signPass6Rays, ShaderProperties.rayMap, m_RayMap);
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.signPass6Rays, ShaderProperties.rayMap, GetRayMapPrincipal(m_RayMapUseCounter));
             m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.signPass6Rays, ShaderProperties.signMap, GetSignMapPrincipal(0));
             m_Cmd.DispatchCompute(m_computeShader, m_Kernels.signPass6Rays, Mathf.CeilToInt(m_Dimensions[0] / 4.0f),
                 Mathf.CeilToInt(m_Dimensions[1] / 4.0f), Mathf.CeilToInt(m_Dimensions[2] / 4.0f));
 
-            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.signPassNeighbors, ShaderProperties.rayMap, m_RayMap);
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.signPassNeighbors, ShaderProperties.rayMap, GetRayMapPrincipal(m_RayMapUseCounter));
             int neighboursCount = 8;
             float normalizeFactor = 6.0f;
             m_Cmd.SetComputeFloatParam(m_computeShader, ShaderProperties.normalizeFactor, normalizeFactor);
@@ -707,6 +720,10 @@ namespace UnityEngine.VFX.SDF
         /// </summary>
         public void BakeSDF()
         {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3)
+            {
+                throw new NotSupportedException("MeshToSDFBaker compute shaders are not supported on OpenGLES3");
+            }
             m_Cmd.BeginSample("BakeSDF");
             UpdateCameras();
             m_Cmd.SetComputeIntParams(m_computeShader, ShaderProperties.size, m_Dimensions);
@@ -908,9 +925,10 @@ namespace UnityEngine.VFX.SDF
             m_Cmd.BeginSample("BakeSDF.ClearTexturesAndBuffers");
             m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.voxelsTexture, m_textureVoxel, 0);
             m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.voxelsTmpTexture, m_textureVoxelBis, 0);
-            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.rayMap, m_RayMap, 0);
-            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.signMap, m_SignMap, 0);
-            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.signMapTmp, m_SignMapBis);
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.rayMap, m_RayMaps[0], 0);
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.rw_rayMapTmp, m_RayMaps[1], 0);
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.signMap, m_SignMaps[0], 0);
+            m_Cmd.SetComputeTextureParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.signMapTmp, m_SignMaps[1]);
 
             m_Cmd.SetComputeBufferParam(m_computeShader, m_Kernels.clearTexturesAndBuffers, ShaderProperties.voxelsBuffer, m_bufferVoxel);
 
@@ -940,7 +958,6 @@ namespace UnityEngine.VFX.SDF
             m_Cmd.EndSample("BakeSDF.DistanceTransform");
         }
 
-        private RenderTexture RayMap => m_RayMap;
         private void ReleaseBuffersAndTextures()
         {
             //Release  textures.
@@ -950,11 +967,17 @@ namespace UnityEngine.VFX.SDF
             for (var i = 0; i < 3; i++)
             {
                 ReleaseRenderTexture(ref m_RenderTextureViews[i]);
-                Object.Destroy(m_Material[i]);
+                if(Application.isPlaying)
+                    Object.Destroy(m_Material[i]);
+                else
+                    Object.DestroyImmediate(m_Material[i]);
             }
-            ReleaseRenderTexture(ref m_SignMap);
-            ReleaseRenderTexture(ref m_SignMapBis);
-            ReleaseRenderTexture(ref m_RayMap);
+
+            for (int i = 0; i < 2; i++)
+            {
+                ReleaseRenderTexture(ref m_SignMaps[i]);
+                ReleaseRenderTexture(ref m_RayMaps[i]);
+            }
 
             //Release  buffers.
             ReleaseGraphicsBuffer(ref m_bufferVoxel);
@@ -1062,7 +1085,10 @@ namespace UnityEngine.VFX.SDF
             if (rt != null)
             {
                 rt.Release();
-                Object.DestroyImmediate(rt);
+                if(Application.isPlaying)
+                    Object.Destroy(rt);
+                else
+                    Object.DestroyImmediate(rt);
             }
             rt = null;
         }
@@ -1095,6 +1121,8 @@ namespace UnityEngine.VFX.SDF
             internal static int voxelsTexture = Shader.PropertyToID("voxels");
             internal static int voxelsTmpTexture = Shader.PropertyToID("voxelsTmp");
             internal static int rayMap = Shader.PropertyToID("rayMap");
+            internal static int rayMapTmp = Shader.PropertyToID("rayMapTmp");
+            internal static int rw_rayMapTmp = Shader.PropertyToID("rw_rayMapTmp");
             internal static int nTriangles = Shader.PropertyToID("nTriangles");
             internal static int minBoundsExtended = Shader.PropertyToID("minBoundsExtended");
             internal static int maxBoundsExtended = Shader.PropertyToID("maxBoundsExtended");

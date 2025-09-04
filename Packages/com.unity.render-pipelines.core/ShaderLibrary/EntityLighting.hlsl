@@ -1,7 +1,7 @@
 #ifndef UNITY_ENTITY_LIGHTING_INCLUDED
 #define UNITY_ENTITY_LIGHTING_INCLUDED
 
-#if SHADER_API_MOBILE || SHADER_API_GLES3
+#if SHADER_API_MOBILE || SHADER_API_GLES3 || SHADER_API_SWITCH || defined(UNITY_UNIFIED_SHADER_PRECISION_MODEL)
 #pragma warning (disable : 3205) // conversion of larger type to smaller
 #endif
 
@@ -199,13 +199,19 @@ real3 DecodeHDREnvironment(real4 encodedIrradiance, real4 decodeInstructions)
     return (decodeInstructions.x * PositivePow(alpha, decodeInstructions.y)) * encodedIrradiance.rgb;
 }
 
-#if defined(UNITY_DOTS_INSTANCING_ENABLED)
+#if defined(UNITY_DOTS_INSTANCING_ENABLED) && !defined(USE_LEGACY_LIGHTMAPS)
+// ^ GPU-driven rendering is enabled, and we haven't opted-out from lightmap
+// texture arrays. This minimizes batch breakages, but texture arrays aren't
+// supported in a performant way on all GPUs.
 #define TEXTURE2D_LIGHTMAP_PARAM TEXTURE2D_ARRAY_PARAM
 #define TEXTURE2D_LIGHTMAP_ARGS TEXTURE2D_ARRAY_ARGS
 #define SAMPLE_TEXTURE2D_LIGHTMAP SAMPLE_TEXTURE2D_ARRAY
 #define LIGHTMAP_EXTRA_ARGS float2 uv, float slice
 #define LIGHTMAP_EXTRA_ARGS_USE uv, slice
 #else
+// ^ Lightmaps are not bound as texture arrays, but as individual textures. The
+// batch is broken every time lightmaps are changed, but this is well-supported
+// on all GPUs.
 #define TEXTURE2D_LIGHTMAP_PARAM TEXTURE2D_PARAM
 #define TEXTURE2D_LIGHTMAP_ARGS TEXTURE2D_ARGS
 #define SAMPLE_TEXTURE2D_LIGHTMAP SAMPLE_TEXTURE2D
@@ -230,26 +236,28 @@ real3 DecodeHDREnvironment(real4 encodedIrradiance, real4 decodeInstructions)
 #define SAMPLE_TEXTURE2D_LIGHTMAP SAMPLE_TEXTURE2D
 #endif
 
-real3 SampleSingleLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSampler), LIGHTMAP_EXTRA_ARGS, float4 transform, bool encodedLightmap, real4 decodeInstructions)
+// isStaticLightmap mean it is not an Enlighten map
+real3 SampleSingleLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSampler), LIGHTMAP_EXTRA_ARGS, float4 transform, bool isStaticLightmap)
 {
+    real4 decodeInstructions = real4(LIGHTMAP_HDR_MULTIPLIER, LIGHTMAP_HDR_EXPONENT, 0.0, 0.0);
+
     // transform is scale and bias
     uv = uv * transform.xy + transform.zw;
-    real3 illuminance = real3(0.0, 0.0, 0.0);
-    // Remark: baked lightmap is RGBM for now, dynamic lightmap is RGB9E5
-    if (encodedLightmap)
-    {
-        real4 encodedIlluminance = SAMPLE_TEXTURE2D_LIGHTMAP(lightmapTex, lightmapSampler, LIGHTMAP_EXTRA_ARGS_USE).rgba;
-        illuminance = DecodeLightmap(encodedIlluminance, decodeInstructions);
-    }
-    else
-    {
-        illuminance = SAMPLE_TEXTURE2D_LIGHTMAP(lightmapTex, lightmapSampler, LIGHTMAP_EXTRA_ARGS_USE).rgb;
-    }
+    real4 encodedIlluminance = SAMPLE_TEXTURE2D_LIGHTMAP(lightmapTex, lightmapSampler, LIGHTMAP_EXTRA_ARGS_USE).rgba;
+    // Remark: static lightmap is RGBM for now, dynamic lightmap is RGB9E5
+    real3 illuminance = isStaticLightmap ? DecodeLightmap(encodedIlluminance, decodeInstructions) : encodedIlluminance.rgb;
+
     return illuminance;
 }
 
+// deprecated
+real3 SampleSingleLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSampler), LIGHTMAP_EXTRA_ARGS, float4 transform, bool isStaticLightmap, real4 ignore)
+{
+    return SampleSingleLightmap(TEXTURE2D_LIGHTMAP_ARGS(lightmapTex, lightmapSampler), LIGHTMAP_EXTRA_ARGS_USE, transform, isStaticLightmap);
+}
+
 void SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSampler), TEXTURE2D_LIGHTMAP_PARAM(lightmapDirTex, lightmapDirSampler), LIGHTMAP_EXTRA_ARGS, float4 transform,
-    float3 normalWS, float3 backNormalWS, bool encodedLightmap, real4 decodeInstructions, inout real3 bakeDiffuseLighting, inout real3 backBakeDiffuseLighting)
+    float3 normalWS, float3 backNormalWS, bool isStaticLightmap, inout real3 bakeDiffuseLighting, inout real3 backBakeDiffuseLighting)
 {
      // In directional mode Enlighten bakes dominant light direction
     // in a way, that using it for half Lambert and then dividing by a "rebalancing coefficient"
@@ -258,21 +266,12 @@ void SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSam
     // Note that dir is not unit length on purpose. Its length is "directionality", like
     // for the directional specular lightmaps.
 
+    real3 illuminance = SampleSingleLightmap(TEXTURE2D_LIGHTMAP_ARGS(lightmapTex, lightmapSampler), LIGHTMAP_EXTRA_ARGS_USE, transform, isStaticLightmap);
+
     // transform is scale and bias
     uv = uv * transform.xy + transform.zw;
 
     real4 direction = SAMPLE_TEXTURE2D_LIGHTMAP(lightmapDirTex, lightmapDirSampler, LIGHTMAP_EXTRA_ARGS_USE);
-    // Remark: baked lightmap is RGBM for now, dynamic lightmap is RGB9E5
-    real3 illuminance = real3(0.0, 0.0, 0.0);
-    if (encodedLightmap)
-    {
-        real4 encodedIlluminance = SAMPLE_TEXTURE2D_LIGHTMAP(lightmapTex, lightmapSampler, LIGHTMAP_EXTRA_ARGS_USE).rgba;
-        illuminance = DecodeLightmap(encodedIlluminance, decodeInstructions);
-    }
-    else
-    {
-        illuminance = SAMPLE_TEXTURE2D_LIGHTMAP(lightmapTex, lightmapSampler, LIGHTMAP_EXTRA_ARGS_USE).rgb;
-    }
 
     real halfLambert = dot(normalWS, direction.xyz - 0.5) + 0.5;
     bakeDiffuseLighting += illuminance * halfLambert / max(1e-4, direction.w);
@@ -281,20 +280,34 @@ void SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSam
     backBakeDiffuseLighting += illuminance * backHalfLambert / max(1e-4, direction.w);
 }
 
+// deprecated
+void SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSampler), TEXTURE2D_LIGHTMAP_PARAM(lightmapDirTex, lightmapDirSampler), LIGHTMAP_EXTRA_ARGS, float4 transform,
+    float3 normalWS, float3 backNormalWS, bool isStaticLightmap, real4 ignore, inout real3 bakeDiffuseLighting, inout real3 backBakeDiffuseLighting)
+{
+    SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_ARGS(lightmapTex, lightmapSampler), TEXTURE2D_LIGHTMAP_ARGS(lightmapDirTex, lightmapDirSampler), LIGHTMAP_EXTRA_ARGS_USE,
+        transform, normalWS, backNormalWS, isStaticLightmap, bakeDiffuseLighting, backBakeDiffuseLighting);
+}
+
 // Just a shortcut that call function above
-real3 SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSampler), TEXTURE2D_LIGHTMAP_PARAM(lightmapDirTex, lightmapDirSampler), LIGHTMAP_EXTRA_ARGS, float4 transform,
-    float3 normalWS, bool encodedLightmap, real4 decodeInstructions)
+real3 SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSampler), TEXTURE2D_LIGHTMAP_PARAM(lightmapDirTex, lightmapDirSampler), LIGHTMAP_EXTRA_ARGS, float4 transform, float3 normalWS, bool isStaticLightmap)
 {
     float3 backNormalWSUnused = 0.0;
     real3 bakeDiffuseLighting = 0.0;
     real3 backBakeDiffuseLightingUnused = 0.0;
     SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_ARGS(lightmapTex, lightmapSampler), TEXTURE2D_LIGHTMAP_ARGS(lightmapDirTex, lightmapDirSampler), LIGHTMAP_EXTRA_ARGS_USE, transform,
-                                normalWS, backNormalWSUnused, encodedLightmap, decodeInstructions, bakeDiffuseLighting, backBakeDiffuseLightingUnused);
+                                normalWS, backNormalWSUnused, isStaticLightmap, bakeDiffuseLighting, backBakeDiffuseLightingUnused);
 
     return bakeDiffuseLighting;
 }
 
-#if SHADER_API_MOBILE || SHADER_API_GLES3
+// deprecated
+real3 SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_PARAM(lightmapTex, lightmapSampler), TEXTURE2D_LIGHTMAP_PARAM(lightmapDirTex, lightmapDirSampler), LIGHTMAP_EXTRA_ARGS, float4 transform, float3 normalWS,
+    bool isStaticLightmap, real4 ignore)
+{
+    return SampleDirectionalLightmap(TEXTURE2D_LIGHTMAP_ARGS(lightmapTex, lightmapSampler), TEXTURE2D_LIGHTMAP_ARGS(lightmapDirTex, lightmapDirSampler), LIGHTMAP_EXTRA_ARGS_USE, transform, normalWS, isStaticLightmap);
+}
+
+#if SHADER_API_MOBILE || SHADER_API_GLES3 || SHADER_API_SWITCH
 #pragma warning (enable : 3205) // conversion of larger type to smaller
 #endif
 

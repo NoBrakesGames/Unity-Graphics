@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using UnityEditor.Rendering;
 using UnityEngine.Rendering.HighDefinition.Attributes;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Experimental.Rendering;
 using NameAndTooltip = UnityEngine.Rendering.DebugUI.Widget.NameAndTooltip;
 
@@ -29,6 +30,11 @@ namespace UnityEngine.Rendering.HighDefinition
         public int _DebugMipMapModeTerrainTexture; // Match enum DebugMipMapModeTerrainTexture
         public int _ColorPickerMode; // Match enum ColorPickerDebugMode
 
+        public float _DebugMipMapOpacity;
+        public int _DebugMipMapStatusMode;
+        public int _DebugMipMapShowStatusCode;
+        public float _DebugMipMapRecentlyUpdatedCooldown;
+
         public Vector4 _DebugViewportSize; //Frame viewport size used during rendering.
         public Vector4 _DebugLightingAlbedo; // x == bool override, yzw = albedo for diffuse
         public Vector4 _DebugLightingSmoothness; // x == bool override, y == override value
@@ -47,10 +53,10 @@ namespace UnityEngine.Rendering.HighDefinition
         public int _DebugSingleShadowIndex;
         public int _DebugIsLitShaderModeDeferred;
 
+        public float _DebugCurrentRealTime; // current time since start of editor/game
         public int _DebugAOVOutput;
         public float _ShaderVariablesDebugDisplayPad0;
         public float _ShaderVariablesDebugDisplayPad1;
-        public float _ShaderVariablesDebugDisplayPad2;
     }
 
     /// <summary>
@@ -106,7 +112,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>Display the volumetric clouds shadow at ground level.</summary>
         VolumetricCloudsShadow,
 
-        /// <summary>Display the volumetric fog applied on to of opaque geometry.</summary>
+        /// <summary>Display atmospheric scattering applied on opaque geometry.</summary>
         VolumetricFog,
 
         /// <summary>Display the ray tracing acceleration structure</summary>
@@ -122,12 +128,16 @@ namespace UnityEngine.Rendering.HighDefinition
         MotionVectors,
         /// <summary>Display Motion Vectors Intensity.</summary>
         MotionVectorsIntensity,
+        /// <summary>Display the world space positions.</summary>
+        WorldSpacePosition,
         /// <summary>Display NaNs.</summary>
         NanTracker,
         /// <summary>Display Log of the color buffer.</summary>
         ColorLog,
         /// <summary>Display Depth of Field circle of confusion.</summary>
         DepthOfFieldCoc,
+        /// <summary>Display Depth of Field tile classification. Red is slow in-focus, green is fast de-focus and blue is fast in-focus.</summary>
+        DepthOfFieldTileClassification,
         /// <summary>Display Transparency Overdraw.</summary>
         TransparencyOverdraw,
         /// <summary>Display Quad Overdraw.</summary>
@@ -146,6 +156,8 @@ namespace UnityEngine.Rendering.HighDefinition
         ComputeThickness,
         /// <summary>Display Line Renderer Debug Modes.</summary>
         HighQualityLines,
+        /// <summary>Display STP Debug Modes.</summary>
+        STP,
         /// <summary>Maximum Full Screen Rendering debug mode value (used internally).</summary>
         MaxRenderingFullScreenDebug,
 
@@ -158,9 +170,6 @@ namespace UnityEngine.Rendering.HighDefinition
         ValidateSpecularColor,
         /// <summary>Maximum Full Screen Material debug mode value (used internally).</summary>
         MaxMaterialFullScreenDebug,
-
-        /// <summary>Display the world space position.</summary>
-        WorldSpacePosition,
     }
 
     /// <summary>
@@ -225,6 +234,21 @@ namespace UnityEngine.Rendering.HighDefinition
     }
 
     /// <summary>
+    /// List of Depth Pyramid Full Screen Debug views.
+    /// </summary>
+    public enum DepthPyramidDebugView
+    {
+        /// <summary>
+        /// Closest depth.
+        /// </summary>
+        ClosestDepth,
+        /// <summary>
+        /// Checkerboard of minimum and maximum depth.
+        /// </summary>
+        CheckerboardDepth,
+    }
+
+    /// <summary>
     /// Class managing debug display in HDRP.
     /// </summary>
     public partial class DebugDisplaySettings : IDebugData
@@ -243,8 +267,12 @@ namespace UnityEngine.Rendering.HighDefinition
         static int[] s_RenderingFullScreenDebugValues = null;
         static GUIContent[] s_MaterialFullScreenDebugStrings = null;
         static int[] s_MaterialFullScreenDebugValues = null;
+        static GUIContent[] s_RenderingHistoryBuffersStrings = null;
+        static int[] s_RenderingHistoryBuffersValues = null;
+        static GUIContent[] s_RenderingMipmapDebugMaterialTextureSlotStrings = null;
+        static int[] s_RenderingMipmapDebugMaterialTextureSlotValues = null;
 
-        static List<GUIContent> s_CameraNames = new List<GUIContent>();
+        static List<GUIContent> s_CameraNames = new List<GUIContent>() { new("None") };
         static GUIContent[] s_CameraNamesStrings = { new ("No Visible Camera") };
         static int[] s_CameraNamesValues = { 0 };
 
@@ -269,6 +297,8 @@ namespace UnityEngine.Rendering.HighDefinition
             public Vector4 fullScreenDebugDepthRemap = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
             /// <summary>Current full screen debug mode mip level (when applicable).</summary>
             public float fullscreenDebugMip = 0.0f;
+            /// <summary>Enable to show checkerboard depths instead of closest depths (when applicable).</summary>
+            public DepthPyramidDebugView depthPyramidView = DepthPyramidDebugView.ClosestDepth;
             /// <summary>Index of the light used for contact shadows display.</summary>
             public int fullScreenContactShadowLightIndex = 0;
             /// <summary>XR single pass test mode.</summary>
@@ -276,6 +306,8 @@ namespace UnityEngine.Rendering.HighDefinition
             public bool xrSinglePassTestMode = false;
             /// <summary>Whether to display the average timings every second.</summary>
             public bool averageProfilerTimingsOverASecond = false;
+            /// <summary>Current history buffers view.</summary>
+            public int historyBuffersView = -1;
 
             /// <summary>Current material debug settings.</summary>
             public MaterialDebugSettings materialDebugSettings = new MaterialDebugSettings();
@@ -326,8 +358,12 @@ namespace UnityEngine.Rendering.HighDefinition
             public float motionVecVisualizationScale = 40.0f;
             /// <summary>Whether to visualize motion vector intensity as heat map or greyscale (if off).</summary>
             public bool motionVecIntensityHeat = false;
+            /// <summary>Whether to apply exposure to certain fullscreen debug outputs.</summary>
+            public bool applyExposure = false;
             /// <summary>The debug mode used for high quality line rendering.</summary>
             public LineRendering.DebugMode lineRenderingDebugMode = LineRendering.DebugMode.SegmentsPerTile;
+            /// <summary>The debug view index used for STP.</summary>
+            internal int stpDebugViewIndex = 0;
 
             // TODO: The only reason this exist is because of Material/Engine debug enums
             // They have repeating values, which caused issues when iterating through the enum, thus the need for explicit indices
@@ -347,6 +383,7 @@ namespace UnityEngine.Rendering.HighDefinition
             internal int clusterDebugModeEnumIndex;
             internal int lightVolumeDebugTypeEnumIndex;
             internal int renderingFulscreenDebugModeEnumIndex;
+            internal int renderingHistoryBuffersViewEnumIndex;
             internal int terrainTextureEnumIndex;
             internal int colorPickerDebugModeEnumIndex;
             internal int exposureDebugModeEnumIndex;
@@ -357,6 +394,10 @@ namespace UnityEngine.Rendering.HighDefinition
             internal int rtasDebugModeEnumIndex;
             internal int volumetricCloudsDebugModeEnumIndex;
             internal int lineRenderingDebugModeEnumIndex;
+            internal int lightClusterCategoryDebug;
+            internal int historyBufferFrameIndex = 0;
+            internal int stpDebugModeEnumIndex;
+            internal int depthPyramidViewEnumIndex;
 
             private float m_DebugGlobalMipBiasOverride = 0.0f;
 
@@ -390,6 +431,14 @@ namespace UnityEngine.Rendering.HighDefinition
                 m_UseDebugGlobalMipBiasOverride = value;
             }
 
+            internal bool SupportsExposure()
+            {
+                return historyBuffersView == (int)HDCameraFrameHistoryType.PathTracingOutput ||
+                       historyBuffersView == (int)HDCameraFrameHistoryType.PathTracingDenoised ||
+                       historyBuffersView == (int)HDCameraFrameHistoryType.PathTracingVolumetricFogDenoised ||
+                       historyBuffersView == (int)HDCameraFrameHistoryType.PathTracingVolumetricFog;
+            }
+
             // When settings mutually exclusives enum values, we need to reset the other ones.
             internal void ResetExclusiveEnumIndices()
             {
@@ -402,6 +451,8 @@ namespace UnityEngine.Rendering.HighDefinition
                 gBufferEnumIndex = 0;
                 lightingFulscreenDebugModeEnumIndex = 0;
                 renderingFulscreenDebugModeEnumIndex = 0;
+                materialValidatorDebugModeEnumIndex = 0;
+                renderingHistoryBuffersViewEnumIndex = -1;
             }
         }
         DebugData m_Data;
@@ -428,6 +479,8 @@ namespace UnityEngine.Rendering.HighDefinition
             FillFullScreenDebugEnum(ref s_RenderingFullScreenDebugStrings, ref s_RenderingFullScreenDebugValues, FullScreenDebugMode.MinRenderingFullScreenDebug, FullScreenDebugMode.MaxRenderingFullScreenDebug);
             FillFullScreenDebugEnum(ref s_MaterialFullScreenDebugStrings, ref s_MaterialFullScreenDebugValues, FullScreenDebugMode.MinMaterialFullScreenDebug, FullScreenDebugMode.MaxMaterialFullScreenDebug);
 
+            FillMipmapDebugMaterialTextureSlotArrays(ref s_RenderingMipmapDebugMaterialTextureSlotStrings, ref s_RenderingMipmapDebugMaterialTextureSlotValues);
+
             var device = SystemInfo.graphicsDeviceType;
             if (device == GraphicsDeviceType.Metal || device == GraphicsDeviceType.PlayStation4 || device == GraphicsDeviceType.PlayStation5 || device == GraphicsDeviceType.PlayStation5NGGC)
             {
@@ -436,6 +489,8 @@ namespace UnityEngine.Rendering.HighDefinition
                 s_RenderingFullScreenDebugStrings = s_RenderingFullScreenDebugStrings.Where((val, idx) => (idx + FullScreenDebugMode.MinRenderingFullScreenDebug) != FullScreenDebugMode.QuadOverdraw).ToArray();
                 s_RenderingFullScreenDebugValues = s_RenderingFullScreenDebugValues.Where((val, idx) => (idx + FullScreenDebugMode.MinRenderingFullScreenDebug) != FullScreenDebugMode.QuadOverdraw).ToArray();
             }
+
+            FillHistoryBuffersEnum(ref s_RenderingHistoryBuffersStrings, ref s_RenderingHistoryBuffersValues);
 
             s_MaterialFullScreenDebugStrings[(int)FullScreenDebugMode.ValidateDiffuseColor - ((int)FullScreenDebugMode.MinMaterialFullScreenDebug)] = new GUIContent("Diffuse Color");
             s_MaterialFullScreenDebugStrings[(int)FullScreenDebugMode.ValidateSpecularColor - ((int)FullScreenDebugMode.MinMaterialFullScreenDebug)] = new GUIContent("Metal or SpecularColor");
@@ -447,7 +502,15 @@ namespace UnityEngine.Rendering.HighDefinition
         /// Get Reset action.
         /// </summary>
         /// <returns></returns>
-        Action IDebugData.GetReset() => () => m_Data = new DebugData();
+        Action IDebugData.GetReset() => () =>
+        {
+            m_Data = new DebugData();
+
+            // This is not a debug property owned by `DebugData`, it is a static property on `Texture`.
+            // When the user hits reset, we want to make sure texture mip caching is enabled again (regardless of whether the
+            // user toggled this in the Rendering Debugger UI or changed it using the scripting API).
+            Texture.streamingTextureDiscardUnusedMips = false;
+        };
 
         internal float[] GetDebugMaterialIndexes()
         {
@@ -540,18 +603,63 @@ namespace UnityEngine.Rendering.HighDefinition
         }
 
         /// <summary>
-        /// Returns the current Mip Map Debug Mode.
+        /// Returns the current Debug Mode for texture mipmap streaming.
         /// </summary>
-        /// <returns>Current Mip Map Debug Mode.</returns>
+        /// <returns>Current Debug Mode for texture mipmap streaming.</returns>
         public DebugMipMapMode GetDebugMipMapMode()
         {
             return data.mipMapDebugSettings.debugMipMapMode;
         }
 
         /// <summary>
-        /// Returns the current Terrain Texture Mip Map Debug Mode.
+        /// Returns the current Material Texture Slot for texture mipmap streaming.
         /// </summary>
-        /// <returns>Current Terrain Texture Mip Map Debug Mode.</returns>
+        /// <returns>Current Material Texture Slot for texture mipmap streaming.</returns>
+        public int GetDebugMipMapMaterialTextureSlot()
+        {
+            return data.mipMapDebugSettings.materialTextureSlot;
+        }
+
+        /// <summary>
+        /// Returns the current aggregation mode when debug information can be aggregated per material.
+        /// </summary>
+        /// <returns>Current aggregation mode when debug information can be aggregated per material</returns>
+        public DebugMipMapStatusMode GetDebugMipMapStatusMode()
+        {
+            return data.mipMapDebugSettings.statusMode;
+        }
+
+        /// <summary>
+        /// Returns whether the status codes are rendered when the Texture Streaming Status debug mode is enabled.
+        /// </summary>
+        /// <returns>True if the status codes are rendered when the Texture Streaming Status debug mode is enabled.</returns>
+        public bool GetDebugMipMapShowStatusCode()
+        {
+            return data.mipMapDebugSettings.showStatusCode;
+        }
+
+        /// <summary>
+        /// Returns the opacity for texture mipmap streaming debugging colors.
+        /// </summary>
+        /// <returns>Opacity for texture mipmap streaming debugging colors.</returns>
+        public float GetDebugMipMapOpacity()
+        {
+            return data.mipMapDebugSettings.mipmapOpacity;
+        }
+
+        /// <summary>
+        /// Returns the amount of time (in seconds) that a texture should be considered recently updated.
+        /// </summary>
+        /// <returns>The amount of time (in seconds) that a texture should be considered recently updated.</returns>
+        public float GetDebugMipMapRecentlyUpdatedCooldown()
+        {
+            return data.mipMapDebugSettings.recentlyUpdatedCooldown;
+        }
+
+        /// <summary>
+        /// Returns the current Terrain Layer for texture mipmap streaming.
+        /// </summary>
+        /// <returns>Current Terrain Layer for texture mipmap streaming.</returns>
         public DebugMipMapModeTerrainTexture GetDebugMipMapModeTerrainTexture()
         {
             return data.mipMapDebugSettings.terrainTexture;
@@ -751,14 +859,38 @@ namespace UnityEngine.Rendering.HighDefinition
             if (data.lightingDebugSettings.shadowDebugMode == ShadowMapDebugMode.SingleShadow)
                 value = 0;
 
+            if (data.mipMapDebugSettings.debugMipMapMode != DebugMipMapMode.None)
+                value = 0;
+
             if (value != FullScreenDebugMode.None)
             {
                 data.lightingDebugSettings.debugLightingMode = DebugLightingMode.None;
                 data.materialDebugSettings.DisableMaterialDebug();
                 data.mipMapDebugSettings.debugMipMapMode = DebugMipMapMode.None;
+                data.historyBuffersView = -1;
             }
 
             data.fullScreenDebugMode = value;
+        }
+
+        /// <summary>
+        /// Set the current History Buffers View.
+        /// </summary>
+        /// <param name="value">Desired History Buffer to view.</param>
+        public void SetHistoryBufferView(int value)
+        {
+            if (data.lightingDebugSettings.shadowDebugMode == ShadowMapDebugMode.SingleShadow)
+                value = 0;
+
+            if (value != -1)
+            {
+                data.lightingDebugSettings.debugLightingMode = DebugLightingMode.None;
+                data.materialDebugSettings.DisableMaterialDebug();
+                data.mipMapDebugSettings.debugMipMapMode = DebugMipMapMode.None;
+                data.fullScreenDebugMode = FullScreenDebugMode.None;
+            }
+
+            data.historyBuffersView = value;
         }
 
         /// <summary>
@@ -862,27 +994,62 @@ namespace UnityEngine.Rendering.HighDefinition
             data.mipMapDebugSettings.debugMipMapMode = value;
         }
 
-        void EnableProfilingRecordersRT()
+        /// <summary>
+        /// Set the current Mip Map Debug Material Texture Slot.
+        /// </summary>
+        /// <param name="value">Desired Mip Map debug Material Texture Slot.</param>
+        public void SetDebugMipMapMaterialTextureSlot(int value)
         {
+            data.mipMapDebugSettings.materialTextureSlot = value;
         }
 
-        DebugUI.Widget CreateMissingDebugShadersWarning()
+        /// <summary>
+        /// Sets the current Status Code Mode when the Status Debug Mode is enabled.
+        /// </summary>
+        /// <param name="value">Desired Mip Map Status Code Mode.</param>
+        public void SetDebugMipMapStatusMode(DebugMipMapStatusMode value)
         {
-            return new DebugUI.MessageBox
-            {
-                displayName = "Warning: the debug shader variants are missing. Ensure that the \"Runtime Debug Shaders\" option is enabled in HDRP Global Settings.",
-                style = DebugUI.MessageBox.Style.Warning,
-                isHiddenCallback = () =>
-                {
-#if UNITY_EDITOR
-                    return true;
-#else
-                    if (HDRenderPipelineGlobalSettings.instance != null)
-                        return !HDRenderPipelineGlobalSettings.instance.stripDebugVariants;
-                    return true;
-#endif
-                }
-            };
+            data.mipMapDebugSettings.statusMode = value;
+        }
+
+        /// <summary>
+        /// Sets whether the Status Code is rendered when the Status Debug Mode is enabled.
+        /// </summary>
+        /// <param name="value">Desired Status Code Visibility.</param>
+        public void SetDebugMipMapShowStatusCode(bool value)
+        {
+            data.mipMapDebugSettings.showStatusCode = value;
+        }
+
+        /// <summary>
+        /// Set the current opacity for Mip Map debugging.
+        /// </summary>
+        /// <param name="value">Desired Mip Map debug opacity.</param>
+        public void SetDebugMipMapOpacity(float value)
+        {
+            data.mipMapDebugSettings.mipmapOpacity = value;
+        }
+
+        /// <summary>
+        /// Set the amount of time that a texture should be considered "recently updated".
+        /// </summary>
+        /// <param name="value">Desired amount of time to consider a texture to be "recently updated".</param>
+        public void SetDebugMipMapRecentlyUpdatedCooldown(float value)
+        {
+            data.mipMapDebugSettings.recentlyUpdatedCooldown = value;
+        }
+
+        /// <summary>
+        /// Set the current Terrain Texture Mip Map Debug Mode.
+        /// </summary>
+        /// <param name="value">Desired Terrain Texture Mip Map Debug Mode.</param>
+        public void SetDebugMipMapModeTerrainTexture(DebugMipMapModeTerrainTexture value)
+        {
+            data.mipMapDebugSettings.terrainTexture = value;
+        }
+
+        void EnableProfilingRecordersRT()
+        {
         }
 
         static class MaterialStrings
@@ -905,12 +1072,13 @@ namespace UnityEngine.Rendering.HighDefinition
         void RegisterMaterialDebug()
         {
             var list = new List<DebugUI.Widget>();
-            list.Add(CreateMissingDebugShadersWarning());
+            list.Add(new DebugUI.RuntimeDebugShadersMessageBox());
             list.Add(new DebugUI.EnumField { nameAndTooltip = MaterialStrings.CommonMaterialProperties, getter = () => (int)data.materialDebugSettings.debugViewMaterialCommonValue, setter = value => SetDebugViewCommonMaterialProperty((MaterialSharedProperty)value), autoEnum = typeof(MaterialSharedProperty), getIndex = () => (int)data.materialDebugSettings.debugViewMaterialCommonValue, setIndex = value => { data.ResetExclusiveEnumIndices(); data.materialDebugSettings.debugViewMaterialCommonValue = (MaterialSharedProperty)value; } });
             list.Add(new DebugUI.EnumField { nameAndTooltip = MaterialStrings.Material, getter = () => (data.materialDebugSettings.debugViewMaterial[0]) == 0 ? 0 : data.materialDebugSettings.debugViewMaterial[1], setter = value => SetDebugViewMaterial(value), enumNames = MaterialDebugSettings.debugViewMaterialStrings, enumValues = MaterialDebugSettings.debugViewMaterialValues, getIndex = () => data.materialDebugSettings.materialEnumIndex, setIndex = value => { data.ResetExclusiveEnumIndices(); data.materialDebugSettings.materialEnumIndex = value; } });
             {
                 var container = new DebugUI.Container()
                 {
+                    displayName = "#MaterialRenderingLayers",
                     isHiddenCallback = () => !IsDebuggingRenderingLayers(),
                     children =
                     {
@@ -932,35 +1100,17 @@ namespace UnityEngine.Rendering.HighDefinition
                     }
                 };
 
+                var renderingLayersField = new DebugUI.RenderingLayerField()
                 {
-                    var field = new DebugUI.BitField
-                    {
-                        nameAndTooltip = LightingStrings.LightLayersFilterLayers,
-                        getter = () => data.lightingDebugSettings.debugLightLayersFilterMask,
-                        setter = value => data.lightingDebugSettings.debugLightLayersFilterMask = (RenderingLayerMask)value,
-                        enumType = typeof(RenderingLayerMask),
-                        isHiddenCallback = () => data.lightingDebugSettings.debugSelectionLightLayers
-                    };
+                    nameAndTooltip = LightingStrings.LightLayersFilterLayers,
+                    getter = () => (uint)data.lightingDebugSettings.debugLightLayersFilterMask,
+                    setter = value => data.lightingDebugSettings.debugLightLayersFilterMask = (RenderingLayerMask)(uint)value,
+                    getRenderingLayerColor = index => data.lightingDebugSettings.debugRenderingLayersColors[index],
+                    setRenderingLayerColor = (value, index) => data.lightingDebugSettings.debugRenderingLayersColors[index] = value,
+                    isHiddenCallback = () => data.lightingDebugSettings.debugSelectionLightLayers,
+                };
 
-                    for (int i = 0; i < HDRenderPipelineGlobalSettings.instance.prefixedRenderingLayerNames.Length; i++)
-                        field.enumNames[i + 1].text = HDRenderPipelineGlobalSettings.instance.prefixedRenderingLayerNames[i];
-                    container.children.Add(field);
-                }
-
-                var layersColor = new DebugUI.Foldout() { nameAndTooltip = LightingStrings.LightLayersColor, flags = DebugUI.Flags.EditorOnly };
-                for (int i = 0; i < HDRenderPipelineGlobalSettings.instance.prefixedRenderingLayerNames.Length; i++)
-                {
-                    int index = i;
-                    layersColor.children.Add(new DebugUI.ColorField
-                    {
-                        displayName = HDRenderPipelineGlobalSettings.instance.prefixedRenderingLayerNames[i],
-                        flags = DebugUI.Flags.EditorOnly,
-                        getter = () => data.lightingDebugSettings.debugRenderingLayersColors[index],
-                        setter = value => data.lightingDebugSettings.debugRenderingLayersColors[index] = value
-                    });
-                }
-
-                container.children.Add(layersColor);
+                container.children.Add(renderingLayersField);
                 list.Add(container);
             }
 
@@ -1047,6 +1197,11 @@ namespace UnityEngine.Rendering.HighDefinition
             public static readonly NameAndTooltip AreaLights = new() { name = "Area Lights", tooltip = "Temporarily enables or disables Area Lights in your Scene." };
             public static readonly NameAndTooltip ReflectionProbes = new() { name = "Reflection Probes", tooltip = "Temporarily enables or disables Reflection Probes in your Scene." };
 
+            // Lighting - Mat Cap
+            public static readonly NameAndTooltip MatCapHeader = new() { name = "Mat Cap Mode", tooltip = "Settings for Scene View MatCap" };
+            public static readonly NameAndTooltip MatCapViewMixAlbedoLabel = new() { name = "Mix Albedo", tooltip = "Enable to make HDRP mix the albedo of the Material with its material capture." };
+            public static readonly NameAndTooltip MatCapIntensityScaleLabel = new() { name = "Intensity scale", tooltip = "Set the intensity of the material capture. This increases the brightness of the Scene. This is useful if the albedo darkens the Scene considerably." };
+
             public static readonly NameAndTooltip Exposure = new() { name = "Exposure", tooltip = "Allows the selection of an Exposure debug mode to use." };
             public static readonly NameAndTooltip HDROutput = new() { name = "HDR", tooltip = "Allows the selection of an HDR debug mode to use." };
             public static readonly NameAndTooltip HDROutputDebugMode = new() { name = "DebugMode", tooltip = "Use the drop-down to select a debug mode for HDR Output." };
@@ -1062,10 +1217,9 @@ namespace UnityEngine.Rendering.HighDefinition
             public static readonly NameAndTooltip LightHierarchyDebugMode = new() { name = "Light Hierarchy Debug Mode", tooltip = "Use the drop-down to select a light type to show the direct lighting for or a Reflection Probe type to show the indirect lighting for." };
             public static readonly NameAndTooltip LightLayersVisualization = new() { name = "Light Layers Visualization", tooltip = "Visualize the light layers of GameObjects in your Scene." };
 
-            public static readonly NameAndTooltip LightLayersUseSelectedLight = new() { name = "Filter with Light Layers from Selected Light", tooltip = "Highlight Renderers affected by the selected light." };
+            public static readonly NameAndTooltip LightLayersUseSelectedLight = new() { name = "Filter Light Layers by Light", tooltip = "Highlight Renderers affected by the selected light." };
             public static readonly NameAndTooltip LightLayersSwitchToLightShadowLayers = new() { name = "Use Light's Shadow Layer Mask", tooltip = "Highlight Renderers that cast shadows for the selected light." };
             public static readonly NameAndTooltip LightLayersFilterLayers = new() { name = "Filter Layers", tooltip = "Use the drop-down to filter light layers that you want to visialize." };
-            public static readonly NameAndTooltip LightLayersColor = new() { name = "Layers Color", tooltip = "Select the display color of each light layer." };
 
             // Material Overrides
             public static readonly NameAndTooltip OverrideSmoothness = new() { name = "Override Smoothness", tooltip = "Enable the checkbox to override the smoothness for the entire Scene." };
@@ -1084,6 +1238,7 @@ namespace UnityEngine.Rendering.HighDefinition
             public static readonly NameAndTooltip FullscreenDebugMode = new() { name = "Fullscreen Debug Mode", tooltip = "Use the drop-down to select a rendering mode to display as an overlay on the screen." };
             public static readonly NameAndTooltip ScreenSpaceShadowIndex = new() { name = "Screen Space Shadow Index", tooltip = "Select the index of the screen space shadows to view with the slider. There must be a Light in the scene that uses Screen Space Shadows." };
             public static readonly NameAndTooltip DepthPyramidDebugMip = new() { name = "Debug Mip", tooltip = "Enable to view a lower-resolution mipmap." };
+            public static readonly NameAndTooltip DepthPyramidDebugView = new() { name = "Debug View", tooltip = "Use the down-down to select which depth pyramid data to show in this view." };
             public static readonly NameAndTooltip DepthPyramidEnableRemap = new() { name = "Enable Depth Remap", tooltip = "Enable remapping of displayed depth values for better vizualization." };
             public static readonly NameAndTooltip DepthPyramidRangeMin = new() { name = "Depth Range Min Value", tooltip = "Distance at which depth values remap starts (0 is near plane, 1 is far plane)" };
             public static readonly NameAndTooltip DepthPyramidRangeMax = new() { name = "Depth Range Max Value", tooltip = "Distance at which depth values remap ends (0 is near plane, 1 is far plane)" };
@@ -1091,6 +1246,7 @@ namespace UnityEngine.Rendering.HighDefinition
             public static readonly NameAndTooltip RTASDebugView = new() { name = "Ray Tracing Acceleration Structure View", tooltip = "Use the drop-down to select a rendering view to display the ray tracing acceleration structure." };
             public static readonly NameAndTooltip RTASDebugMode = new() { name = "Ray Tracing Acceleration Structure Mode", tooltip = "Use the drop-down to select a rendering mode to display the ray tracing acceleration structure." };
             public static readonly NameAndTooltip VolumetricCloudsTooltip = new() { name = "Volumetric Clouds Debug Mode", tooltip = "Use the drop-down to select a rendering mode to display the volumemtric clouds." };
+            public static readonly NameAndTooltip ClusterCategoryDebug = new() { name = "Light Category", tooltip = "Use the drop-down to select the light type in the cluster." };
 
             // Tile/Cluster debug
             public static readonly NameAndTooltip TileClusterDebug = new() { name = "Tile/Cluster Debug", tooltip = "Use the drop-down to select the Light type that you want to show the Tile/Cluster debug information for." };
@@ -1125,7 +1281,7 @@ namespace UnityEngine.Rendering.HighDefinition
         void RegisterLightingDebug()
         {
             var list = new List<DebugUI.Widget>();
-            list.Add(CreateMissingDebugShadersWarning());
+            list.Add(new DebugUI.RuntimeDebugShadersMessageBox());
             {
                 var shadows = new DebugUI.Container() { displayName = "Shadows" };
 
@@ -1137,7 +1293,7 @@ namespace UnityEngine.Rendering.HighDefinition
                         children =
                         {
                             new DebugUI.BoolField { nameAndTooltip = LightingStrings.ShadowDebugUseSelection, getter = () => data.lightingDebugSettings.shadowDebugUseSelection, setter = value => data.lightingDebugSettings.shadowDebugUseSelection = value, flags = DebugUI.Flags.EditorOnly },
-                            new DebugUI.UIntField { nameAndTooltip = LightingStrings.ShadowDebugShadowMapIndex, getter = () => data.lightingDebugSettings.shadowMapIndex, setter = value => data.lightingDebugSettings.shadowMapIndex = value, min = () => 0u, max = () => (uint)(Math.Max(0, (RenderPipelineManager.currentPipeline as HDRenderPipeline).GetCurrentShadowCount() - 1u)), isHiddenCallback = () => !data.lightingDebugSettings.shadowDebugUseSelection }
+                            new DebugUI.UIntField { nameAndTooltip = LightingStrings.ShadowDebugShadowMapIndex, getter = () => data.lightingDebugSettings.shadowMapIndex, setter = value => data.lightingDebugSettings.shadowMapIndex = value, min = () => 0u, max = () => (uint)(Math.Max(0, (RenderPipelineManager.currentPipeline as HDRenderPipeline).GetCurrentShadowCount() - 1u)), isHiddenCallback = () => data.lightingDebugSettings.shadowDebugUseSelection }
                         }
                     });
                 }
@@ -1253,13 +1409,13 @@ namespace UnityEngine.Rendering.HighDefinition
                         {
                             displayName = "No HDR monitor detected.",
                             style = DebugUI.MessageBox.Style.Warning,
-                            isHiddenCallback = () => HDRenderPipeline.HDROutputIsActive()
+                            isHiddenCallback = () => HDRenderPipeline.HDROutputForMainDisplayIsActive()
                         },
                         new DebugUI.MessageBox
                         {
                             displayName = "To display the Gamut View, Gamut Clip, Paper White modes without affecting them, the overlay will be hidden.",
                             style = DebugUI.MessageBox.Style.Info,
-                            isHiddenCallback = () => !HDRenderPipeline.HDROutputIsActive()
+                            isHiddenCallback = () => !HDRenderPipeline.HDROutputForMainDisplayIsActive()
                         },
                         new DebugUI.EnumField
                         {
@@ -1276,6 +1432,29 @@ namespace UnityEngine.Rendering.HighDefinition
                 lighting.children.Add(hdrFoldout);
 
                 lighting.children.Add(new DebugUI.EnumField { nameAndTooltip = LightingStrings.LightingDebugMode, getter = () => (int)data.lightingDebugSettings.debugLightingMode, setter = value => SetDebugLightingMode((DebugLightingMode)value), autoEnum = typeof(DebugLightingMode), getIndex = () => data.lightingDebugModeEnumIndex, setIndex = value => { data.ResetExclusiveEnumIndices(); data.lightingDebugModeEnumIndex = value; } });
+
+                lighting.children.Add(new DebugUI.Container()
+                {
+                    children =
+                    {
+                        new DebugUI.BoolField
+                        {
+                            nameAndTooltip = LightingStrings.MatCapViewMixAlbedoLabel,
+                            getter = () => data.lightingDebugSettings.matCapMixAlbedo,
+                            setter = value => data.lightingDebugSettings.matCapMixAlbedo = value
+                        },
+                        new DebugUI.FloatField
+                        {
+                            nameAndTooltip = LightingStrings.MatCapIntensityScaleLabel,
+                            getter = () => data.lightingDebugSettings.matCapMixScale,
+                            setter = value => data.lightingDebugSettings.matCapMixScale = value,
+                            isHiddenCallback = () => !data.lightingDebugSettings.matCapMixAlbedo
+                        },
+                    },
+                    isHiddenCallback = () => data.lightingDebugSettings.debugLightingMode != DebugLightingMode.MatcapView
+                });
+
+
                 lighting.children.Add(new DebugUI.BitField { nameAndTooltip = LightingStrings.LightHierarchyDebugMode, getter = () => data.lightingDebugSettings.debugLightFilterMode, setter = value => SetDebugLightFilterMode((DebugLightFilterMode)value), enumType = typeof(DebugLightFilterMode)});
 
                 list.Add(lighting);
@@ -1407,6 +1586,16 @@ namespace UnityEngine.Rendering.HighDefinition
                 children =
                 {
                     new DebugUI.FloatField { nameAndTooltip = LightingStrings.DepthPyramidDebugMip, getter = () => data.fullscreenDebugMip, setter = value => data.fullscreenDebugMip = value, min = () => 0f, max = () => 1f, incStep = 0.05f },
+                    new DebugUI.EnumField()
+                    {
+                        isHiddenCallback = () => data.fullScreenDebugMode != FullScreenDebugMode.DepthPyramid,
+                        nameAndTooltip = LightingStrings.DepthPyramidDebugView,
+                        getter = () => (int)data.depthPyramidView,
+                        setter = value => { data.depthPyramidView = (DepthPyramidDebugView)value; },
+                        autoEnum = typeof(DepthPyramidDebugView),
+                        getIndex = () => data.depthPyramidViewEnumIndex,
+                        setIndex = value => { data.depthPyramidViewEnumIndex = value; },
+                    },
                     new DebugUI.BoolField { nameAndTooltip = LightingStrings.DepthPyramidEnableRemap, getter = () => data.enableDebugDepthRemap, setter = value => data.enableDebugDepthRemap = value },
                     new DebugUI.Container()
                     {
@@ -1434,6 +1623,16 @@ namespace UnityEngine.Rendering.HighDefinition
                     },
                 }
             });
+
+            list.Add(new DebugUI.Container
+            {
+                isHiddenCallback = () => data.fullScreenDebugMode != FullScreenDebugMode.LightCluster,
+                children =
+                {
+                    new DebugUI.EnumField { nameAndTooltip = LightingStrings.ClusterCategoryDebug, getter = () => (int)data.lightingDebugSettings.clusterLightCategory, setter = value => data.lightingDebugSettings.clusterLightCategory = (ClusterLightCategoryDebug)value, autoEnum = typeof(ClusterLightCategoryDebug), getIndex = () => data.lightClusterCategoryDebug, setIndex = value => data.lightClusterCategoryDebug = value },
+                }
+            });
+
 
             list.Add(new DebugUI.EnumField { nameAndTooltip = LightingStrings.TileClusterDebug, getter = () => (int)data.lightingDebugSettings.tileClusterDebug, setter = value => data.lightingDebugSettings.tileClusterDebug = (TileClusterDebug)value, autoEnum = typeof(TileClusterDebug), getIndex = () => data.tileClusterDebugEnumIndex, setIndex = value => data.tileClusterDebugEnumIndex = value });
             {
@@ -1533,8 +1732,14 @@ namespace UnityEngine.Rendering.HighDefinition
             public static readonly NameAndTooltip ComputeThicknessScale = new() { name = "Thickness Scale", tooltip = "Thickness Scale for visualization." };
 
             // Mipmaps
-            public static readonly NameAndTooltip MipMaps = new() { name = "Mip Maps", tooltip = "Use the drop-down to select a mipmap property to debug." };
-            public static readonly NameAndTooltip TerrainTexture = new() { name = "Terrain Texture", tooltip = "Use the drop-down to select the terrain Texture to debug the mipmap for." };
+            public static readonly NameAndTooltip MipMapDisableMipCaching = new() {name = "Disable Mip Caching", tooltip = "By disabling mip caching, the data on GPU accurately reflects what the TextureStreamer calculates. While this can significantly increase CPU-to-GPU traffic, it can be an invaluable tool to validate that the Streamer behaves as expected."};
+            public static readonly NameAndTooltip MipMapDebugView = new() { name = "Debug View", tooltip = "Use the drop-down to select a mipmap property to debug." };
+            public static readonly NameAndTooltip MipMapDebugOpacity = new() { name = "Debug Opacity", tooltip = "Opacity of texture mipmap streaming debug colors." };
+            public static readonly NameAndTooltip MipMapMaterialTextureSlot = new() { name = "Material Texture Slot", tooltip = "Use the drop-down to select the material texture slot to debug (does not affect terrain).\n\nThe slot indices follow the default order by which texture properties appear in the Material Inspector.\nThe default order is itself defined by the order in which (non-hidden) texture properties appear in the shader's \"Properties\" block." };
+            public static readonly NameAndTooltip MipMapTerrainTexture = new() { name = "Terrain Texture", tooltip = "Use the drop-down to select the terrain Texture to debug the mipmap for." };
+            public static readonly NameAndTooltip MipMapDisplayStatusCodes = new() { name = "Display Status Codes", tooltip = "Show detailed status codes indicating why textures are not streaming or highlighting points of attention." };
+            public static readonly NameAndTooltip MipMapActivityTimespan = new() { name = "Activity Timespan", tooltip = "How long a texture should be shown as \"recently updated\"." };
+            public static readonly NameAndTooltip MipMapCombinePerMaterial = new() { name = "Combined per Material", tooltip = "Combine the information over all slots per material." };
 
             // Color picker
             public static readonly NameAndTooltip ColorPickerDebugMode = new() { name = "Debug Mode", tooltip = "Use the drop-down to select the format of the color picker display." };
@@ -1549,6 +1754,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
             public static readonly NameAndTooltip FreezeCameraForCulling = new() { name = "Freeze Camera For Culling", tooltip = "Use the drop-down to select a Camera to freeze in order to check its culling. To check if the Camera's culling works correctly, freeze the Camera and move occluders around it." };
             public static readonly NameAndTooltip HighQualityLineRenderingMode = new() { name = "High Quality Line Rendering Mode", tooltip = "" };
+            public static readonly NameAndTooltip StpDebugMode = new() { name = "STP Debug Mode", tooltip = "" };
 
             // Monitors
             public static readonly NameAndTooltip MonitorsSize        = new() { name = "Size"       , tooltip = "Sets the size ratio of the displayed monitors" };
@@ -1557,13 +1763,18 @@ namespace UnityEngine.Rendering.HighDefinition
             public static readonly NameAndTooltip WaveformParade      = new() { name = "Parade mode", tooltip = "Toggles the parade mode of the waveform monitor, splitting the waveform into the red, green and blue channels separately." };
             public static readonly NameAndTooltip VectorscopeToggle   = new() { name = "Vectorscope", tooltip = "Toggles the vectorscope monitor, allowing to measure the overall range of hue and saturation within the image." };
             public static readonly NameAndTooltip VectorscopeExposure = new() { name = "Exposure"   , tooltip = "Set the exposure of the vectorscope monitor." };
+
+            // History Buffers
+            public static readonly NameAndTooltip HistoryBuffersView = new() { name = "Buffer",         tooltip = "Use the drop-down to select a history buffer to display as an overlay on the screen." };
+            public static readonly NameAndTooltip FrameIndex         = new() { name = "Frame Index",    tooltip = "The index of the frame in the history to display (0 is the current frame)." };
+            public static readonly NameAndTooltip ApplyExposure      = new() { name = "Apply Exposure", tooltip = "Apply the Exposure value to the buffer output." };
         }
 
         void RegisterRenderingDebug()
         {
             var widgetList = new List<DebugUI.Widget>();
 
-            widgetList.Add(CreateMissingDebugShadersWarning());
+            widgetList.Add(new DebugUI.RuntimeDebugShadersMessageBox());
 
             widgetList.Add(
                 new DebugUI.EnumField { nameAndTooltip = RenderingStrings.FullscreenDebugMode, getter = () => (int)data.fullScreenDebugMode, setter = value => SetFullScreenDebugMode((FullScreenDebugMode)value), enumNames = s_RenderingFullScreenDebugStrings, enumValues = s_RenderingFullScreenDebugValues, getIndex = () => data.renderingFulscreenDebugModeEnumIndex, setIndex = value => { data.ResetExclusiveEnumIndices(); data.renderingFulscreenDebugModeEnumIndex = value; } }
@@ -1647,18 +1858,109 @@ namespace UnityEngine.Rendering.HighDefinition
                 });
             }
 
-            widgetList.AddRange(new DebugUI.Widget[]
             {
-                new DebugUI.EnumField { nameAndTooltip = RenderingStrings.MipMaps, getter = () => (int)data.mipMapDebugSettings.debugMipMapMode, setter = value => SetMipMapMode((DebugMipMapMode)value), autoEnum = typeof(DebugMipMapMode), getIndex = () => data.mipMapsEnumIndex, setIndex = value => { data.ResetExclusiveEnumIndices(); data.mipMapsEnumIndex = value; } },
-            });
+                widgetList.Add(new DebugUI.Container
+                {
+                   isHiddenCallback = () => (data.fullScreenDebugMode != FullScreenDebugMode.STP),
+                   children =
+                   {
+                       new DebugUI.EnumField{ nameAndTooltip = RenderingStrings.StpDebugMode, getter = () => (int)data.stpDebugViewIndex, setter = value => data.stpDebugViewIndex = value, enumNames = STP.debugViewDescriptions, enumValues = STP.debugViewIndices, getIndex = () => data.stpDebugModeEnumIndex, setIndex = value => data.stpDebugModeEnumIndex = value },
+                   }
+                });
+            }
 
             {
                 widgetList.Add(new DebugUI.Container
                 {
-                    isHiddenCallback = () => data.fullScreenDebugMode == FullScreenDebugMode.None,
+                    displayName = "Mipmap Streaming",
                     children =
                     {
-                        new DebugUI.EnumField { nameAndTooltip = RenderingStrings.TerrainTexture, getter = () => (int)data.mipMapDebugSettings.terrainTexture, setter = value => data.mipMapDebugSettings.terrainTexture = (DebugMipMapModeTerrainTexture)value, autoEnum = typeof(DebugMipMapModeTerrainTexture), getIndex = () => data.terrainTextureEnumIndex, setIndex = value => data.terrainTextureEnumIndex = value }
+                        new DebugUI.BoolField()
+                        {
+                            nameAndTooltip = RenderingStrings.MipMapDisableMipCaching,
+                            getter = () => Texture.streamingTextureDiscardUnusedMips,
+                            setter = (value) => Texture.streamingTextureDiscardUnusedMips = value,
+                        },
+
+                        new DebugUI.EnumField
+                        {
+                            nameAndTooltip = RenderingStrings.MipMapDebugView,
+                            getter = () => (int)data.mipMapDebugSettings.debugMipMapMode,
+                            setter = value => SetMipMapMode((DebugMipMapMode)value),
+                            autoEnum = typeof(DebugMipMapMode),
+                            getIndex = () => data.mipMapsEnumIndex,
+                            setIndex = value => { data.ResetExclusiveEnumIndices(); data.mipMapsEnumIndex = value; }
+                        },
+
+                        new DebugUI.Container
+                        {
+                            isHiddenCallback = () => data.mipMapDebugSettings.debugMipMapMode == DebugMipMapMode.None,
+                            children =
+                            {
+                                new DebugUI.FloatField { nameAndTooltip = RenderingStrings.MipMapDebugOpacity, getter = () => data.mipMapDebugSettings.mipmapOpacity, setter = value => { data.mipMapDebugSettings.mipmapOpacity = value; }, min = () => 0.0f, max = () => 1.0f},
+
+                                new DebugUI.EnumField
+                                {
+                                    isHiddenCallback = () => data.mipMapDebugSettings.CanAggregateData(), // if we can aggregate, we want to show this under a checkbox instead (see next)
+                                    nameAndTooltip = RenderingStrings.MipMapMaterialTextureSlot,
+                                    getter = () => data.mipMapDebugSettings.materialTextureSlot,
+                                    setter = value => data.mipMapDebugSettings.materialTextureSlot = value,
+                                    getIndex = () => data.mipMapDebugSettings.materialTextureSlot,
+                                    setIndex = value => data.mipMapDebugSettings.materialTextureSlot = value,
+                                    enumNames = s_RenderingMipmapDebugMaterialTextureSlotStrings,
+                                    enumValues = s_RenderingMipmapDebugMaterialTextureSlotValues,
+                                },
+
+                                new DebugUI.BoolField()
+                                {
+                                    isHiddenCallback = () => !data.mipMapDebugSettings.CanAggregateData(),
+                                    nameAndTooltip = RenderingStrings.MipMapCombinePerMaterial,
+                                    getter = () => data.mipMapDebugSettings.showInfoForAllSlots,
+                                    setter = value =>
+                                    {
+                                        data.mipMapDebugSettings.showInfoForAllSlots = value;
+                                        data.mipMapDebugSettings.statusMode = value ? DebugMipMapStatusMode.Material : DebugMipMapStatusMode.Texture;
+                                    },
+                                },
+                                new DebugUI.Container
+                                {
+                                    isHiddenCallback = () => !data.mipMapDebugSettings.CanAggregateData() || data.mipMapDebugSettings.showInfoForAllSlots,
+                                    children =
+                                    {
+                                        new DebugUI.BoolField
+                                        {
+                                            isHiddenCallback = () => data.mipMapDebugSettings.debugMipMapMode != DebugMipMapMode.MipStreamingStatus,
+                                            nameAndTooltip = RenderingStrings.MipMapDisplayStatusCodes,
+                                            getter = () => data.mipMapDebugSettings.showStatusCode,
+                                            setter = value => data.mipMapDebugSettings.showStatusCode = value,
+                                        },
+                                        new DebugUI.EnumField
+                                        {
+                                            isHiddenCallback = () => !data.mipMapDebugSettings.CanAggregateData() || data.mipMapDebugSettings.showInfoForAllSlots,
+                                            nameAndTooltip = RenderingStrings.MipMapMaterialTextureSlot,
+                                            getter = () => data.mipMapDebugSettings.materialTextureSlot,
+                                            setter = value => data.mipMapDebugSettings.materialTextureSlot = value,
+                                            getIndex = () => data.mipMapDebugSettings.materialTextureSlot,
+                                            setIndex = value => data.mipMapDebugSettings.materialTextureSlot = value,
+                                            enumNames = s_RenderingMipmapDebugMaterialTextureSlotStrings,
+                                            enumValues = s_RenderingMipmapDebugMaterialTextureSlotValues,
+                                        },
+                                    }
+                                },
+
+                                new DebugUI.EnumField { nameAndTooltip = RenderingStrings.MipMapTerrainTexture, getter = () => (int)data.mipMapDebugSettings.terrainTexture, setter = value => data.mipMapDebugSettings.terrainTexture = (DebugMipMapModeTerrainTexture)value, autoEnum = typeof(DebugMipMapModeTerrainTexture), getIndex = () => data.terrainTextureEnumIndex, setIndex = value => data.terrainTextureEnumIndex = value },
+
+                                new DebugUI.FloatField
+                                {
+                                    isHiddenCallback = () => data.mipMapDebugSettings.debugMipMapMode != DebugMipMapMode.MipStreamingActivity,
+                                    nameAndTooltip = RenderingStrings.MipMapActivityTimespan,
+                                    getter = () => data.mipMapDebugSettings.recentlyUpdatedCooldown,
+                                    setter = value => data.mipMapDebugSettings.recentlyUpdatedCooldown = value,
+                                    min = () => 0.0f,
+                                    max = () => 60.0f
+                                },
+                            }
+                        }
                     }
                 });
             }
@@ -1760,6 +2062,52 @@ namespace UnityEngine.Rendering.HighDefinition
                 }
             });
 
+            widgetList.Add(new DebugUI.Container
+            {
+                displayName = "HDR Output",
+                children =
+                {
+                    new DebugUI.MessageBox
+                    {
+                        displayName = "The values on the Rendering Debugger editor window might not be accurate. Please use the playmode debug UI (Ctrl+Backspace).",
+                        style = DebugUI.MessageBox.Style.Warning,
+                    },
+                    DebugDisplaySettingsHDROutput.CreateHDROuputDisplayTable()
+                }
+            });
+
+            widgetList.Add(new DebugUI.Container
+            {
+                displayName = "History Buffers",
+                children =
+                {
+                    new DebugUI.EnumField
+                    {
+                        nameAndTooltip = RenderingStrings.HistoryBuffersView,
+                        getter = () => (int)data.historyBuffersView,
+                        setter = value => SetHistoryBufferView(value),
+                        enumNames = s_RenderingHistoryBuffersStrings,
+                        enumValues = s_RenderingHistoryBuffersValues,
+                        getIndex = () => data.renderingHistoryBuffersViewEnumIndex,
+                        setIndex = value => { data.ResetExclusiveEnumIndices(); data.renderingHistoryBuffersViewEnumIndex = value; }
+                    },
+                    new DebugUI.IntField
+                    {
+                        nameAndTooltip = RenderingStrings.FrameIndex,
+                        getter = () => data.historyBufferFrameIndex,
+                        setter = value => data.historyBufferFrameIndex = value,
+                        min = () => 0, max = () => 2
+                    },
+                    new DebugUI.BoolField
+                    {
+                        isHiddenCallback = () => !data.SupportsExposure(),
+                        nameAndTooltip = RenderingStrings.ApplyExposure,
+                        getter = ()    =>   data.applyExposure,
+                        setter = value => { data.applyExposure = value; }
+                    },
+                }
+            });
+
 #if ENABLE_NVIDIA && ENABLE_NVIDIA_MODULE
             widgetList.Add(nvidiaDebugView.CreateWidget());
 #endif
@@ -1767,19 +2115,11 @@ namespace UnityEngine.Rendering.HighDefinition
             m_DebugRenderingItems = widgetList.ToArray();
             var panel = DebugManager.instance.GetPanel(k_PanelRendering, true);
             panel.children.Add(m_DebugRenderingItems);
-
-            var renderGraphs = RenderGraph.GetRegisteredRenderGraphs();
-            foreach (var graph in renderGraphs)
-                graph.RegisterDebug(panel);
         }
 
         void UnregisterRenderingDebug()
         {
             UnregisterDebugItems(k_PanelRendering, m_DebugRenderingItems);
-
-            var renderGraphs = RenderGraph.GetRegisteredRenderGraphs();
-            foreach (var graph in renderGraphs)
-                graph.UnRegisterDebug();
         }
 
         internal void RegisterDebug()
@@ -1787,6 +2127,7 @@ namespace UnityEngine.Rendering.HighDefinition
             RegisterMaterialDebug();
             RegisterLightingDebug();
             RegisterRenderingDebug();
+
             DebugManager.instance.RegisterData(this);
         }
 
@@ -1818,6 +2159,52 @@ namespace UnityEngine.Rendering.HighDefinition
                 strings[index] = new GUIContent(((FullScreenDebugMode)i).ToString());
                 values[index] = i;
                 index++;
+            }
+        }
+
+        void FillHistoryBuffersEnum(ref GUIContent[] strings, ref int[] values)
+        {
+            var type = typeof(HDCameraFrameHistoryType);
+            var historyBufferFields = type.GetFields();
+            var historyBufferEnums = Enum.GetValues(type).Cast<HDCameraFrameHistoryType>();
+
+            int min = (int)historyBufferEnums.Min();
+            int max = (int)historyBufferEnums.Max();
+            int count = max - min + 1;
+            strings = new GUIContent[count + 1];
+            values = new int[count + 1];
+            // There's no None enum values for history buffers so might as well use this one
+            strings[0] = new GUIContent(FullScreenDebugMode.None.ToString());
+            values[0] = -1;
+            int index = 1;
+
+            // Sort them by name
+            foreach (var field in historyBufferFields.OrderBy(f => f.Name))
+            {
+                if (field.Name.Equals("value__"))
+                    continue;
+
+                // Ignore the field if it is obsolete
+                if (field.CustomAttributes.All(attr => attr.AttributeType != typeof(ObsoleteAttribute)))
+                {
+                    var value = (int)field.GetRawConstantValue();
+                    strings[index] = new GUIContent(field.Name);
+                    values[index] = value;
+                    index++;
+                }
+            }
+        }
+
+        void FillMipmapDebugMaterialTextureSlotArrays(ref GUIContent[] strings, ref int[] values)
+        {
+            const int maxSlotCount = 64;
+            strings = new GUIContent[maxSlotCount];
+            values = new int[maxSlotCount];
+
+            for (int i = 0; i < maxSlotCount; ++i)
+            {
+                strings[i] = new GUIContent(string.Format("Slot {0}", i));
+                values[i] = i;
             }
         }
 
@@ -1862,15 +2249,18 @@ namespace UnityEngine.Rendering.HighDefinition
         internal void UpdateMaterials()
         {
             if (data.mipMapDebugSettings.debugMipMapMode != 0)
-                Texture.SetStreamingTextureMaterialDebugProperties();
+            {
+                int textureSlotImpl = (data.mipMapDebugSettings.CanAggregateData() && data.mipMapDebugSettings.showInfoForAllSlots)
+                    ? -1
+                    : data.mipMapDebugSettings.materialTextureSlot;
+                Texture.SetStreamingTextureMaterialDebugProperties(textureSlotImpl);
+            }
         }
 
         internal void UpdateCameraFreezeOptions()
         {
             if (needsRefreshingCameraFreezeList)
             {
-                s_CameraNames.Insert(0, new GUIContent("None"));
-
                 s_CameraNamesStrings = s_CameraNames.ToArray();
                 s_CameraNamesValues = Enumerable.Range(0, s_CameraNames.Count()).ToArray();
 
@@ -1890,7 +2280,8 @@ namespace UnityEngine.Rendering.HighDefinition
                 GetDebugLightingMode() == DebugLightingMode.IndirectDiffuseLighting ||
                 GetDebugLightingMode() == DebugLightingMode.ReflectionLighting ||
                 GetDebugLightingMode() == DebugLightingMode.RefractionLighting ||
-                GetDebugLightingMode() == DebugLightingMode.ProbeVolumeSampledSubdivision
+                GetDebugLightingMode() == DebugLightingMode.ProbeVolumeSampledSubdivision ||
+                GetDebugMipMapMode() != DebugMipMapMode.None
             );
         }
 
@@ -1916,7 +2307,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 (data.fullScreenDebugMode == FullScreenDebugMode.PreRefractionColorPyramid || data.fullScreenDebugMode == FullScreenDebugMode.FinalColorPyramid || data.fullScreenDebugMode == FullScreenDebugMode.VolumetricClouds ||
                     data.fullScreenDebugMode == FullScreenDebugMode.TransparentScreenSpaceReflections || data.fullScreenDebugMode == FullScreenDebugMode.ScreenSpaceReflections || data.fullScreenDebugMode == FullScreenDebugMode.ScreenSpaceReflectionsPrev || data.fullScreenDebugMode == FullScreenDebugMode.ScreenSpaceReflectionsAccum || data.fullScreenDebugMode == FullScreenDebugMode.ScreenSpaceReflectionSpeedRejection ||
                     data.fullScreenDebugMode == FullScreenDebugMode.LightCluster || data.fullScreenDebugMode == FullScreenDebugMode.ScreenSpaceShadows || data.fullScreenDebugMode == FullScreenDebugMode.NanTracker || data.fullScreenDebugMode == FullScreenDebugMode.ColorLog || data.fullScreenDebugMode == FullScreenDebugMode.ScreenSpaceGlobalIllumination || data.fullScreenDebugMode == FullScreenDebugMode.LensFlareScreenSpace ||
-                    data.fullScreenDebugMode == FullScreenDebugMode.VolumetricFog);
+                    data.fullScreenDebugMode == FullScreenDebugMode.VolumetricFog || data.fullScreenDebugMode == FullScreenDebugMode.STP || data.fullScreenDebugMode == FullScreenDebugMode.DepthOfFieldTileClassification);
         }
     }
 }

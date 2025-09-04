@@ -4,7 +4,8 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/Deferred.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRendering.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DynamicScaling.hlsl"
+#include_with_pragmas "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRenderingKeywords.hlsl"
 
 struct Attributes
 {
@@ -73,6 +74,8 @@ Varyings Vertex(Attributes input)
     output.screenUV.xy = output.screenUV.xy * 0.5 + 0.5 * output.screenUV.z;
     #endif
 
+    output.screenUV.xy = DynamicScalingApplyScaleBias(output.screenUV.xy, float4(_RTHandleScale.xy, 0.0f, 0.0f));
+
     return output;
 }
 
@@ -81,34 +84,48 @@ TEXTURE2D_X_HALF(_GBuffer0);
 TEXTURE2D_X_HALF(_GBuffer1);
 TEXTURE2D_X_HALF(_GBuffer2);
 
+
 #if _RENDER_PASS_ENABLED
+    #define GBUFFER0 0
+    #define GBUFFER1 1
+    #define GBUFFER2 2
+    #define GBUFFER3 3
 
-#define GBUFFER0 0
-#define GBUFFER1 1
-#define GBUFFER2 2
-#define GBUFFER3 3
+    FRAMEBUFFER_INPUT_X_HALF(GBUFFER0);
+    FRAMEBUFFER_INPUT_X_HALF(GBUFFER1);
+    FRAMEBUFFER_INPUT_X_HALF(GBUFFER2);
+    FRAMEBUFFER_INPUT_X_FLOAT(GBUFFER3);
 
-FRAMEBUFFER_INPUT_HALF(GBUFFER0);
-FRAMEBUFFER_INPUT_HALF(GBUFFER1);
-FRAMEBUFFER_INPUT_HALF(GBUFFER2);
-FRAMEBUFFER_INPUT_FLOAT(GBUFFER3);
+    #if OUTPUT_SHADOWMASK && (defined(_WRITE_RENDERING_LAYERS) || defined(_LIGHT_LAYERS))
+        #define GBUFFER4 4
+        #define GBUFFER5 5
+        TEXTURE2D_X_HALF(_GBuffer4);
+        TEXTURE2D_X_HALF(_GBuffer5);
+        FRAMEBUFFER_INPUT_X_HALF(GBUFFER4);
+        FRAMEBUFFER_INPUT_X_HALF(GBUFFER5);
+    #elif OUTPUT_SHADOWMASK || defined(_WRITE_RENDERING_LAYERS) || defined(_LIGHT_LAYERS)
+        #define GBUFFER4 4
+        TEXTURE2D_X_HALF(_GBuffer4);
+        FRAMEBUFFER_INPUT_X_HALF(GBUFFER4);
+    #endif
+
 #else
-#ifdef GBUFFER_OPTIONAL_SLOT_1
-TEXTURE2D_X_HALF(_GBuffer4);
-#endif
+    #ifdef GBUFFER_OPTIONAL_SLOT_1
+        TEXTURE2D_X_HALF(_GBuffer4);
+    #endif
+
+    #ifdef GBUFFER_OPTIONAL_SLOT_2
+        TEXTURE2D_X(_GBuffer5);
+    #endif
 #endif
 
-#if defined(GBUFFER_OPTIONAL_SLOT_2) && _RENDER_PASS_ENABLED
-TEXTURE2D_X_HALF(_GBuffer5);
-#elif defined(GBUFFER_OPTIONAL_SLOT_2)
-TEXTURE2D_X(_GBuffer5);
-#endif
 #ifdef GBUFFER_OPTIONAL_SLOT_3
 TEXTURE2D_X(_GBuffer6);
 #endif
 
 float4x4 _ScreenToWorld[2];
-SamplerState my_point_clamp_sampler;
+// 2023.3 Deprecated. This is for backwards compatibility. Remove in the future.
+#define my_point_clamp_sampler sampler_PointClamp
 
 float3 _LightPosWS;
 half3 _LightColor;
@@ -232,28 +249,34 @@ half4 DeferredShading(Varyings input) : SV_Target
 
     float2 screen_uv = (input.screenUV.xy / input.screenUV.z);
 
-#if defined(_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
-    float2 undistorted_screen_uv = screen_uv;
-    screen_uv = input.positionCS.xy * _ScreenSize.zw;
+#if defined(SUPPORTS_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+     float2 undistorted_screen_uv = screen_uv;
+     UNITY_BRANCH if (_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+     {
+         screen_uv = input.positionCS.xy * _ScreenSize.zw;
+     }
 #endif
 
+    half4 shadowMask = 1.0;
+
     #if _RENDER_PASS_ENABLED
-    float d        = LOAD_FRAMEBUFFER_INPUT(GBUFFER3, input.positionCS.xy).x;
-    half4 gbuffer0 = LOAD_FRAMEBUFFER_INPUT(GBUFFER0, input.positionCS.xy);
-    half4 gbuffer1 = LOAD_FRAMEBUFFER_INPUT(GBUFFER1, input.positionCS.xy);
-    half4 gbuffer2 = LOAD_FRAMEBUFFER_INPUT(GBUFFER2, input.positionCS.xy);
+    float d        = LOAD_FRAMEBUFFER_X_INPUT(GBUFFER3, input.positionCS.xy).x;
+    half4 gbuffer0 = LOAD_FRAMEBUFFER_X_INPUT(GBUFFER0, input.positionCS.xy);
+    half4 gbuffer1 = LOAD_FRAMEBUFFER_X_INPUT(GBUFFER1, input.positionCS.xy);
+    half4 gbuffer2 = LOAD_FRAMEBUFFER_X_INPUT(GBUFFER2, input.positionCS.xy);
+    #if defined(_DEFERRED_MIXED_LIGHTING)
+    shadowMask = LOAD_FRAMEBUFFER_X_INPUT(GBUFFER4, input.positionCS.xy);
+    #endif
     #else
     // Using SAMPLE_TEXTURE2D is faster than using LOAD_TEXTURE2D on iOS platforms (5% faster shader).
     // Possible reason: HLSLcc upcasts Load() operation to float, which doesn't happen for Sample()?
-    float d        = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, screen_uv, 0).x; // raw depth value has UNITY_REVERSED_Z applied on most platforms.
-    half4 gbuffer0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, screen_uv, 0);
-    half4 gbuffer1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, my_point_clamp_sampler, screen_uv, 0);
-    half4 gbuffer2 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screen_uv, 0);
-    #endif
+    float d        = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_PointClamp, screen_uv, 0).x; // raw depth value has UNITY_REVERSED_Z applied on most platforms.
+    half4 gbuffer0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, sampler_PointClamp, screen_uv, 0);
+    half4 gbuffer1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, sampler_PointClamp, screen_uv, 0);
+    half4 gbuffer2 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, sampler_PointClamp, screen_uv, 0);
     #if defined(_DEFERRED_MIXED_LIGHTING)
-    half4 shadowMask = SAMPLE_TEXTURE2D_X_LOD(MERGE_NAME(_, GBUFFER_SHADOWMASK), my_point_clamp_sampler, screen_uv, 0);
-    #else
-    half4 shadowMask = 1.0;
+    shadowMask = SAMPLE_TEXTURE2D_X_LOD(MERGE_NAME(_, GBUFFER_SHADOWMASK), sampler_PointClamp, screen_uv, 0);
+    #endif
     #endif
 
     half surfaceDataOcclusion = gbuffer1.a;
@@ -268,8 +291,11 @@ half4 DeferredShading(Varyings input) : SV_Target
         return half4(color, alpha); // Cannot discard because stencil must be updated.
     #endif
 
-    #if defined(_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
-    input.positionCS.xy = undistorted_screen_uv * _ScreenSize.xy;
+    #if defined(SUPPORTS_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+     UNITY_BRANCH if (_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+     {
+        input.positionCS.xy = undistorted_screen_uv * _ScreenSize.xy;
+     }
     #endif
 
     #if defined(USING_STEREO_MATRICES)
@@ -283,10 +309,14 @@ half4 DeferredShading(Varyings input) : SV_Target
     Light unityLight = GetStencilLight(posWS.xyz, screen_uv, shadowMask, materialFlags);
 
     #ifdef _LIGHT_LAYERS
-    float4 renderingLayers = SAMPLE_TEXTURE2D_X_LOD(MERGE_NAME(_, GBUFFER_LIGHT_LAYERS), my_point_clamp_sampler, screen_uv, 0);
-    uint meshRenderingLayers = DecodeMeshRenderingLayer(renderingLayers.r);
-    [branch] if (!IsMatchingLightLayer(unityLight.layerMask, meshRenderingLayers))
-        return half4(color, alpha); // Cannot discard because stencil must be updated.
+        #if _RENDER_PASS_ENABLED
+            float renderingLayers = LOAD_FRAMEBUFFER_X_INPUT(GBUFFER4, input.positionCS.xy).x;
+        #else
+    float4 renderingLayers = SAMPLE_TEXTURE2D_X_LOD(MERGE_NAME(_, GBUFFER_LIGHT_LAYERS), sampler_PointClamp, screen_uv, 0);
+        #endif
+        uint meshRenderingLayers = DecodeMeshRenderingLayer(renderingLayers);
+        [branch] if (!IsMatchingLightLayer(unityLight.layerMask, meshRenderingLayers))
+            return half4(color, alpha); // Cannot discard because stencil must be updated.
     #endif
 
     #if defined(_SCREEN_SPACE_OCCLUSION) && !defined(_SURFACE_TYPE_TRANSPARENT)
@@ -331,7 +361,7 @@ half4 FragFog(Varyings input) : SV_Target
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
     #if _RENDER_PASS_ENABLED
-        float d = LOAD_FRAMEBUFFER_INPUT(GBUFFER3, input.positionCS.xy).x;
+        float d = LOAD_FRAMEBUFFER_X_INPUT(GBUFFER3, input.positionCS.xy).x;
     #else
         float d = LOAD_TEXTURE2D_X(_CameraDepthTexture, input.positionCS.xy).x;
     #endif
@@ -348,7 +378,7 @@ half4 FragSSAOOnly(Varyings input) : SV_Target
 
     float2 screen_uv = (input.screenUV.xy / input.screenUV.z);
     AmbientOcclusionFactor aoFactor = GetScreenSpaceAmbientOcclusion(screen_uv);
-    half surfaceDataOcclusion = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, my_point_clamp_sampler, screen_uv, 0).a;
+    half surfaceDataOcclusion = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, sampler_PointClamp, screen_uv, 0).a;
     // What we want is really to apply the mininum occlusion value between the baked occlusion from surfaceDataOcclusion and real-time occlusion from SSAO.
     // But we already applied the baked occlusion during gbuffer pass, so we have to cancel it out here.
     // We must also avoid divide-by-0 that the reciprocal can generate.

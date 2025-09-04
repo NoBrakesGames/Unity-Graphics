@@ -7,9 +7,12 @@ half4 _RendererColor;
 PackedVaryings vert(Attributes input)
 {
     Varyings output = (Varyings)0;
+    UNITY_SETUP_INSTANCE_ID(input);
+
+    SetUpSpriteInstanceProperties();
     input.positionOS = UnityFlipSprite(input.positionOS, unity_SpriteProps.xy);
     output = BuildVaryings(input);
-    output.color *= _RendererColor;
+    output.color *= _RendererColor * unity_SpriteColor; // vertex color has to applied here
     PackedVaryings packedOutput = PackVaryings(output);
     return packedOutput;
 }
@@ -42,7 +45,7 @@ half4 frag(PackedVaryings packedInput) : SV_TARGET
     InitializeInputData(unpacked.positionWS.xy, half2(unpacked.texCoord0.xy), inputData);
     half4 debugColor = 0;
 
-    SETUP_DEBUG_DATA_2D(inputData, unpacked.positionWS);
+    SETUP_DEBUG_DATA_2D(inputData, unpacked.positionWS, unpacked.positionCS);
 
     if (CanDebugOverrideOutputColor(surfaceData, inputData, debugColor))
     {
@@ -50,8 +53,9 @@ half4 frag(PackedVaryings packedInput) : SV_TARGET
     }
     #endif
 
-#ifndef HAVE_VFX_MODIFICATION
-    color *= unpacked.color * unity_SpriteColor;
+    // Disable vertex color multiplication. Users can get the color from VertexColor node
+#if !defined(HAVE_VFX_MODIFICATION) && !defined(_DISABLE_COLOR_TINT)
+    color *= unpacked.color;
 #endif
 
     return color;

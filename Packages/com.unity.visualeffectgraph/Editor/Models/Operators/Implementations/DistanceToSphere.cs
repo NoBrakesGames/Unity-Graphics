@@ -1,10 +1,9 @@
-using System;
-using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-Distance(Sphere)")]
+    [VFXInfo(name = "Distance (Sphere)", category = "Math/Geometry")]
     class DistanceToSphere : VFXOperator
     {
         public class InputProperties

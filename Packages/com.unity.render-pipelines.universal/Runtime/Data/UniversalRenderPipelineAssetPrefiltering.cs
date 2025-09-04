@@ -32,6 +32,7 @@ namespace UnityEngine.Rendering.Universal
             SelectVertexAndOff,         // Selects Vertex & OFF variant
             SelectPixel,                // Selects Pixel  & Removes OFF variant
             SelectPixelAndOff,          // Selects Pixel  & OFF variant
+            SelectAll                   // Selects Vertex, Pixel & OFF variant
         }
 
         // Platform specific filtering overrides
@@ -40,11 +41,12 @@ namespace UnityEngine.Rendering.Universal
         [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.DBufferMRT1)]
         [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.DBufferMRT2)]
         [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.DBufferMRT3)]
+        [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.USE_LEGACY_LIGHTMAPS)]
         private const bool k_CommonGLDefaults = true;
 
         // Foveated Rendering
         #if ENABLE_VR && ENABLE_XR_MODULE
-        [ShaderKeywordFilter.ApplyRulesIfNotGraphicsAPI(GraphicsDeviceType.PlayStation5NGGC)]
+        [ShaderKeywordFilter.ApplyRulesIfNotGraphicsAPI(GraphicsDeviceType.PlayStation5NGGC, GraphicsDeviceType.Metal)]
         #endif
         [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.FoveatedRenderingNonUniformRaster)]
         private const bool k_PrefilterFoveatedRenderingNonUniformRaster = true;
@@ -68,6 +70,7 @@ namespace UnityEngine.Rendering.Universal
         [ShaderKeywordFilter.SelectIf(PrefilteringModeAdditionalLights.SelectVertexAndOff,keywordNames: new string[] {"", ShaderKeywordStrings.AdditionalLightsVertex})]
         [ShaderKeywordFilter.SelectIf(PrefilteringModeAdditionalLights.SelectPixel,       keywordNames: ShaderKeywordStrings.AdditionalLightsPixel)]
         [ShaderKeywordFilter.SelectIf(PrefilteringModeAdditionalLights.SelectPixelAndOff, keywordNames: new string[] {"", ShaderKeywordStrings.AdditionalLightsPixel})]
+        [ShaderKeywordFilter.SelectIf(PrefilteringModeAdditionalLights.SelectAll,         keywordNames: new string[] {"", ShaderKeywordStrings.AdditionalLightsVertex, ShaderKeywordStrings.AdditionalLightsPixel})]
         [SerializeField] private PrefilteringModeAdditionalLights m_PrefilteringModeAdditionalLight = PrefilteringModeAdditionalLights.SelectPixelAndOff;
 
         // Additional Lights Shadows
@@ -113,9 +116,13 @@ namespace UnityEngine.Rendering.Universal
 
         // HDR Output
         [ShaderKeywordFilter.RemoveIf(true, keywordNames: new [] {
-            HDRKeywords.HDR_COLORSPACE_CONVERSION, HDRKeywords.HDR_ENCODING, HDRKeywords.HDR_COLORSPACE_CONVERSION_AND_ENCODING
+            HDRKeywords.HDR_INPUT, HDRKeywords.HDR_COLORSPACE_CONVERSION, HDRKeywords.HDR_ENCODING, HDRKeywords.HDR_COLORSPACE_CONVERSION_AND_ENCODING
         })]
         [SerializeField] private bool m_PrefilterHDROutput = false;
+
+        // Alpha Output
+        [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings._ENABLE_ALPHA_OUTPUT)]
+        [SerializeField] private bool m_PrefilterAlphaOutput = false;
 
         // Screen Space Ambient Occlusion (SSAO) specific keywords
         [ShaderKeywordFilter.RemoveIf(true, keywordNames: ScreenSpaceAmbientOcclusion.k_SourceDepthNormalsKeyword)]
@@ -153,6 +160,15 @@ namespace UnityEngine.Rendering.Universal
         // Decal Layers - Gets overridden in Decal renderer feature if enabled.
         [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.DecalLayers)]
         private const bool k_DecalLayersDefault = true;
+        
+        [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.SoftShadowsLow)]
+        [SerializeField] private bool m_PrefilterSoftShadowsQualityLow = false;
+        [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.SoftShadowsMedium)]
+        [SerializeField] private bool m_PrefilterSoftShadowsQualityMedium = false;
+        [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.SoftShadowsHigh)]
+        [SerializeField] private bool m_PrefilterSoftShadowsQualityHigh = false;
+        [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.SoftShadows)]
+        [SerializeField] private bool m_PrefilterSoftShadows = false;
 
         // Screen Coord Override - Controlled by the Global Settings
         [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.SCREEN_COORD_OVERRIDE)]
@@ -161,6 +177,19 @@ namespace UnityEngine.Rendering.Universal
         // Native Render Pass
         [ShaderKeywordFilter.RemoveIf(true, keywordNames: ShaderKeywordStrings.RenderPassEnabled)]
         [SerializeField] private bool m_PrefilterNativeRenderPass = false;
+
+        // Use legacy lightmaps (GPU resident drawer)
+        [ShaderKeywordFilter.ApplyRulesIfNotGraphicsAPI(GraphicsDeviceType.OpenGLES3, GraphicsDeviceType.OpenGLCore)]
+        [ShaderKeywordFilter.SelectOrRemove(true, keywordNames: ShaderKeywordStrings.USE_LEGACY_LIGHTMAPS)]
+        [SerializeField] private bool m_PrefilterUseLegacyLightmaps = false;
+
+        // Reflection probe blending (_REFLECTION_PROBE_BLENDING)
+        [ShaderKeywordFilter.SelectOrRemove(false, keywordNames: ShaderKeywordStrings.ReflectionProbeBlending)]
+        [SerializeField] private bool m_PrefilterReflectionProbeBlending = false;
+
+        // Reflection probe box projection (_REFLECTION_PROBE_BOX_PROJECTION)
+        [ShaderKeywordFilter.SelectOrRemove(false, keywordNames: ShaderKeywordStrings.ReflectionProbeBoxProjection)]
+        [SerializeField] private bool m_PrefilterReflectionProbeBoxProjection = false;
 
         /// <summary>
         /// Data used for Shader Prefiltering. Gathered after going through the URP Assets,
@@ -174,9 +203,11 @@ namespace UnityEngine.Rendering.Universal
             public PrefilteringModeAdditionalLights additionalLightsPrefilteringMode;
             public PrefilteringMode additionalLightsShadowsPrefilteringMode;
             public PrefilteringMode screenSpaceOcclusionPrefilteringMode;
+            public bool useLegacyLightmaps;
 
             public bool stripXRKeywords;
             public bool stripHDRKeywords;
+            public bool stripAlphaOutputKeywords;
             public bool stripDebugDisplay;
             public bool stripScreenCoordOverride;
             public bool stripWriteRenderingLayers;
@@ -184,6 +215,9 @@ namespace UnityEngine.Rendering.Universal
             public bool stripDBufferMRT2;
             public bool stripDBufferMRT3;
             public bool stripNativeRenderPass;
+            public bool stripSoftShadowsQualityLow;
+            public bool stripSoftShadowsQualityMedium;
+            public bool stripSoftShadowsQualityHigh;
 
             public bool stripSSAOBlueNoise;
             public bool stripSSAOInterleaved;
@@ -194,6 +228,22 @@ namespace UnityEngine.Rendering.Universal
             public bool stripSSAOSampleCountLow;
             public bool stripSSAOSampleCountMedium;
             public bool stripSSAOSampleCountHigh;
+
+            public bool stripReflectionProbeBlending;
+            public bool stripReflectionProbeBoxProjection;
+
+            public static ShaderPrefilteringData GetDefault()
+            {
+                return new ShaderPrefilteringData()
+                {
+                    forwardPlusPrefilteringMode = PrefilteringMode.Select,
+                    deferredPrefilteringMode = PrefilteringMode.Select,
+                    mainLightShadowsPrefilteringMode = PrefilteringModeMainLightShadows.SelectAll,
+                    additionalLightsPrefilteringMode = PrefilteringModeAdditionalLights.SelectAll,
+                    additionalLightsShadowsPrefilteringMode = PrefilteringMode.Select,
+                    screenSpaceOcclusionPrefilteringMode = PrefilteringMode.Select,
+                };
+            }
         }
 
         /// <summary>
@@ -208,9 +258,11 @@ namespace UnityEngine.Rendering.Universal
             m_PrefilteringModeAdditionalLight        = prefilteringData.additionalLightsPrefilteringMode;
             m_PrefilteringModeAdditionalLightShadows = prefilteringData.additionalLightsShadowsPrefilteringMode;
             m_PrefilteringModeScreenSpaceOcclusion   = prefilteringData.screenSpaceOcclusionPrefilteringMode;
+            m_PrefilterUseLegacyLightmaps            = prefilteringData.useLegacyLightmaps;
 
             m_PrefilterXRKeywords                    = prefilteringData.stripXRKeywords;
             m_PrefilterHDROutput                     = prefilteringData.stripHDRKeywords;
+            m_PrefilterAlphaOutput                   = prefilteringData.stripAlphaOutputKeywords;
             m_PrefilterDebugKeywords                 = prefilteringData.stripDebugDisplay;
             m_PrefilterWriteRenderingLayers          = prefilteringData.stripWriteRenderingLayers;
             m_PrefilterScreenCoord                   = prefilteringData.stripScreenCoordOverride;
@@ -218,6 +270,11 @@ namespace UnityEngine.Rendering.Universal
             m_PrefilterDBufferMRT2                   = prefilteringData.stripDBufferMRT2;
             m_PrefilterDBufferMRT3                   = prefilteringData.stripDBufferMRT3;
             m_PrefilterNativeRenderPass              = prefilteringData.stripNativeRenderPass;
+
+            m_PrefilterSoftShadowsQualityLow         = prefilteringData.stripSoftShadowsQualityLow;
+            m_PrefilterSoftShadowsQualityMedium      = prefilteringData.stripSoftShadowsQualityMedium;
+            m_PrefilterSoftShadowsQualityHigh        = prefilteringData.stripSoftShadowsQualityHigh;
+            m_PrefilterSoftShadows                   = !m_PrefilterSoftShadowsQualityLow || !m_PrefilterSoftShadowsQualityMedium || !m_PrefilterSoftShadowsQualityHigh;
 
             m_PrefilterSSAOBlueNoise                 = prefilteringData.stripSSAOBlueNoise;
             m_PrefilterSSAOInterleaved               = prefilteringData.stripSSAOInterleaved;
@@ -228,6 +285,9 @@ namespace UnityEngine.Rendering.Universal
             m_PrefilterSSAOSampleCountLow            = prefilteringData.stripSSAOSampleCountLow;
             m_PrefilterSSAOSampleCountMedium         = prefilteringData.stripSSAOSampleCountMedium;
             m_PrefilterSSAOSampleCountHigh           = prefilteringData.stripSSAOSampleCountHigh;
+
+            m_PrefilterReflectionProbeBlending       = prefilteringData.stripReflectionProbeBlending;
+            m_PrefilterReflectionProbeBoxProjection  = prefilteringData.stripReflectionProbeBoxProjection;
         }
     }
 }

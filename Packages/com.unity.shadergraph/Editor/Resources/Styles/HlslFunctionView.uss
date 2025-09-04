@@ -33,3 +33,8 @@ HlslFunctionView > #Row {
     -unity-text-align: upper-left;
     overflow: hidden;
 }
+
+.sg-hlsl-function-view__body {
+    align-self: stretch;
+    flex-shrink: 1;
+}

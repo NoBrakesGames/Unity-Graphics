@@ -1,9 +1,9 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Logic")]
+    [VFXHelpURL("Operator-LogicNand")]
+    [VFXInfo(name = "Nand", category = "Logic")]
     class LogicalNand : VFXOperator
     {
         override public string name { get { return "Nand"; } }

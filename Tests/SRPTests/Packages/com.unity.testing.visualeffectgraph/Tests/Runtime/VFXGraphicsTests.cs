@@ -39,12 +39,25 @@ namespace UnityEngine.VFX.Test
 #endif
         }
 
+#if UNITY_WEBGL || UNITY_ANDROID
+        [UnitySetUp]
+        public IEnumerator SetUp()
+        {
+            yield return RuntimeGraphicsTestCaseProvider.EnsureGetReferenceImageBundlesAsync();
+        }
+#endif
+
         [UnityTest, Category("VisualEffect")]
         [PrebuildSetup("SetupGraphicsTestCases")]
         [UseGraphicsTestCases]
         [Timeout(450 * 1000)] // Increase timeout to handle complex scenes with many shaders and XR variants
         public IEnumerator Run(GraphicsTestCase testCase)
         {
+            Debug.Log($"Running test case {testCase.ScenePath} with reference image {testCase.ScenePath}. {testCase.ReferenceImagePathLog}.");
+#if UNITY_WEBGL || UNITY_ANDROID
+            RuntimeGraphicsTestCaseProvider.AssociateReferenceImageWithTest(testCase);
+#endif
+
 #if UNITY_EDITOR
             while (SceneView.sceneViews.Count > 0)
             {
@@ -52,6 +65,7 @@ namespace UnityEngine.VFX.Test
                 sceneView.Close();
             }
 #endif
+			Debug.Log($"Running test case '{testCase}' with scene '{testCase.ScenePath}' {testCase.ReferenceImagePathLog}.");
             SceneManagement.SceneManager.LoadScene(testCase.ScenePath);
 
             // Always wait one frame for scene load
@@ -112,14 +126,17 @@ namespace UnityEngine.VFX.Test
                 var rt = RenderTexture.GetTemporary(imageComparisonSettings.TargetWidth, imageComparisonSettings.TargetHeight, 24);
                 camera.targetTexture = rt;
 
-                //Waiting for the rendering to be ready, if at least one component has been culled, camera is ready
-                maxFrame = maxFrameWaiting;
-                while (vfxComponents.All(o => o.culled) && maxFrame-- > 0)
-                    yield return new WaitForEndOfFrame();
-                Assert.Greater(maxFrame, 0);
+                if (vfxComponents.Length > 0)
+                {
+                    //Waiting for the rendering to be ready, if at least one component has been culled, camera is ready
+                    maxFrame = maxFrameWaiting;
+                    while (vfxComponents.All(o => o.culled) && maxFrame-- > 0)
+                        yield return new WaitForEndOfFrame();
+                    Assert.Greater(maxFrame, 0);
 
-                foreach (var component in vfxComponents)
-                    component.Reinit();
+                    foreach (var component in vfxComponents)
+                        component.Reinit();
+                }
 
 #if UNITY_EDITOR
                 //When we change the graph, if animator was already enable, we should reinitialize animator to force all BindValues
@@ -161,7 +178,7 @@ namespace UnityEngine.VFX.Test
                 {
                     camera.targetTexture = null;
 
-                    ImageAssert.AreEqual(testCase.ReferenceImage, camera, imageComparisonSettings);
+                    ImageAssert.AreEqual(testCase.ReferenceImage, camera, imageComparisonSettings, testCase.ReferenceImagePathLog);
 
                 }
                 finally

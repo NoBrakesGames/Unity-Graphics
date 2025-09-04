@@ -5,10 +5,7 @@ using System.Linq;
 using UnityEditor.ShaderGraph;
 using UnityEditor.ShaderGraph.Internal;
 using UnityEngine;
-using UnityEngine.VFX;
 using UnityEngine.Rendering;
-using Object = System.Object;
-using System.Reflection;
 
 namespace UnityEditor.VFX
 {
@@ -19,7 +16,8 @@ namespace UnityEditor.VFX
             public static readonly PragmaDescriptor kPragmaDescriptorNone = new() { value = "None" };
             public static readonly KeywordDescriptor kKeywordDescriptorNone = new() { referenceName = "None" };
 
-            public StructCollection structs;
+            public StructCollection baseStructs;
+            public FieldDescriptor[] varyingsAdditionalFields;
             public DependencyCollection fieldDependencies;
             public (PragmaDescriptor oldDesc, PragmaDescriptor newDesc)[] pragmasReplacement;
             public (KeywordDescriptor oldDesc, KeywordDescriptor newDesc)[] keywordsReplacement;
@@ -31,7 +29,10 @@ namespace UnityEditor.VFX
         abstract public string SRPAssetTypeStr { get; }
         abstract public Type SRPOutputDataType { get; }
 
+        public abstract bool IsShaderVFXCompatible(Shader shader);
         public virtual void SetupMaterial(Material mat, bool hasMotionVector = false, bool hasShadowCasting = false, ShaderGraphVfxAsset shaderGraph = null) { }
+
+        public virtual bool AllowMaterialOverride(ShaderGraphVfxAsset shaderGraph) => true;
 
         public virtual bool TryGetQueueOffset(ShaderGraphVfxAsset shaderGraph, VFXMaterialSerializedSettings materialSettings, out int queueOffset)
         {
@@ -59,42 +60,36 @@ namespace UnityEditor.VFX
         public virtual string GetShaderName(ShaderGraphVfxAsset shaderGraph) => string.Empty;
 
         // List of shader properties that currently are not supported for exposure in VFX shaders (for all pipeline).
-        private static readonly Dictionary<Type, string> s_BaseUnsupportedShaderPropertyTypes = new Dictionary<Type, string>()
+        private static readonly List<(Type type, string name)> s_BaseUnsupportedShaderPropertyTypes = new()
         {
-            { typeof(VirtualTextureShaderProperty),   "Virtual Texture"   },
-            { typeof(GradientShaderProperty),         "Gradient"          }
+            (typeof(VirtualTextureShaderProperty), "Virtual Texture")
         };
 
-        public virtual IEnumerable<KeyValuePair<Type, string>> GetUnsupportedShaderPropertyType()
+        public virtual IEnumerable<(Type type, string name)> GetUnsupportedShaderPropertyType()
         {
             return s_BaseUnsupportedShaderPropertyTypes;
         }
 
-        public bool IsGraphDataValid(GraphData graph)
+        public bool CheckGraphDataValid(GraphData graph, out List<string> errors)
         {
-            var valid = true;
-            var warnings = new List<string>();
+            bool valid = true;
+            errors = new List<string>();
+            var message = new StringBuilder();
 
-            var unsupportedShaderPropertyTypes = GetUnsupportedShaderPropertyType().ToDictionary(a => a.Key, b => b.Value);
-            // Filter property list for any unsupported shader properties.
-            foreach (var property in graph.properties)
+            // Filter property list for any unsupported exposed shader properties.
+            foreach (var property in graph.properties.Where(o => o.isExposed))
             {
-                if (unsupportedShaderPropertyTypes.ContainsKey(property.GetType()))
+                var unsupported = GetUnsupportedShaderPropertyType().FirstOrDefault(o => o.type == property.GetType());
+                if (unsupported.type != null)
                 {
-                    warnings.Add(unsupportedShaderPropertyTypes[property.GetType()]);
+                    errors.Add($"Shader Graph blackboard property of type '{unsupported.name}' is not currently supported in Visual Effect Graph");
+                    message.Append(unsupported.name);
                     valid = false;
                 }
             }
 
-            // VFX currently does not support the concept of per-particle keywords.
-            if (graph.keywords.Any())
-            {
-                warnings.Add("Keyword");
-                valid = false;
-            }
-
             if (!valid)
-                Debug.LogWarning($"({String.Join(", ", warnings)}) blackboard properties in Shader Graph are currently not supported in Visual Effect shaders. Falling back to default generation path.");
+                Debug.LogError($"{message} blackboard properties in Shader Graph are not currently supported in Visual Effect Shaders.");
 
             return valid;
         }
@@ -117,6 +112,7 @@ namespace UnityEditor.VFX
             yield return GraphicsDeviceType.PlayStation4;
             yield return GraphicsDeviceType.PlayStation5;
             yield return GraphicsDeviceType.Switch;
+            yield return GraphicsDeviceType.WebGPU;
         }
     }
 }

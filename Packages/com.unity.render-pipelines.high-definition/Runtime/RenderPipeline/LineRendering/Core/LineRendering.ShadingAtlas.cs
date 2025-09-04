@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering
 {
@@ -111,7 +111,7 @@ namespace UnityEngine.Rendering
             if(samples > 0)
             {
                 // TODO: Release memory if required memory is considerably less than what we now have reserved?
-                if (historyCurRT == null || historyCurRT.rt.width * historyCurRT.rt.height < samples)
+                if (historyCurRT == null || historyCurRT.rt == null || historyCurRT.rt.width * historyCurRT.rt.height < samples)
                 {
                     if (historyCurRT != null)
                         RTHandles.Release(historyCurRT);
@@ -133,7 +133,7 @@ namespace UnityEngine.Rendering
             m_ShadingAtlasRT[0] = historyCurRT;
             var historyPrevRT = m_ShadingAtlasRT[1];
 
-            bool historyExists = historyPrevRT != null && historyPrevRT.rt.IsCreated();
+            bool historyExists = historyPrevRT != null && historyPrevRT.rt != null && historyPrevRT.rt.IsCreated();
 
             if (historyExists)
                 ++m_ShadingAtlasUpdateCount;

@@ -10,7 +10,7 @@ namespace UnityEditor.ShaderGraph
     [Serializable]
     class ShaderKeyword : ShaderInput
     {
-        public const string kVariantLimitWarning = "Graph is generating too many variants. Either delete Keywords, reduce Keyword variants or increase the Shader Variant Limit in Preferences > Shader Graph.";
+        public const string kVariantLimitWarning = "Graph is generating too many variants. Either delete Keywords, reduce Keyword variants or increase the Shader Variant Limit in Preferences > Shader Graph or Project Settings > Shader Graph.";
 
         public ShaderKeyword()
         {
@@ -117,6 +117,8 @@ namespace UnityEditor.ShaderGraph
             get => !m_IsEditable;
             set => m_IsEditable = !value;
         }
+
+        internal override bool isCustomSlotAllowed => false;
 
         internal override bool isExposable => !isBuiltIn && (keywordDefinition != KeywordDefinition.Predefined);
 

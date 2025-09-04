@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.Linq;
 using Unity.Collections;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Rendering;
 
 namespace UnityEngine.Rendering.Universal
 {
     public partial class ScriptableRenderer
     {
-        private const int kRenderPassMapSize = 10;
-        private const int kRenderPassMaxCount = 20;
+        // Used "internal" only for testing. This should be private.
+        internal const int kRenderPassMapSize = 10;
+        internal const int kRenderPassMaxCount = 20;
 
         // used to keep track of the index of the last pass when we called BeginSubpass
         private int m_LastBeginSubpassPassIndex = 0;
@@ -20,6 +20,9 @@ namespace UnityEngine.Rendering.Universal
         private int[][] m_MergeableRenderPassesMapArrays;
         private Hash128[] m_PassIndexToPassHash = new Hash128[kRenderPassMaxCount];
         private Dictionary<Hash128, int> m_RenderPassesAttachmentCount = new Dictionary<Hash128, int>(kRenderPassMapSize);
+
+        // used to keep track of the index of the first pass in the last group of merged native passes
+        private int m_firstPassIndexOfLastMergeableGroup;
 
         AttachmentDescriptor[] m_ActiveColorAttachmentDescriptors = new AttachmentDescriptor[]
         {
@@ -77,9 +80,11 @@ namespace UnityEngine.Rendering.Universal
                     m_MergeableRenderPassesMapArrays[i][j] = -1;
                 }
             }
+
+            m_firstPassIndexOfLastMergeableGroup = 0;
         }
 
-        internal void SetupNativeRenderPassFrameData(ref CameraData cameraData, bool isRenderPassEnabled)
+        internal void SetupNativeRenderPassFrameData(UniversalCameraData cameraData, bool isRenderPassEnabled)
         {
             //TODO: edge cases to detect that should affect possible passes to merge
             // - total number of color attachment > 8
@@ -91,7 +96,6 @@ namespace UnityEngine.Rendering.Universal
                 int lastPassIndex = m_ActiveRenderPassQueue.Count - 1;
 
                 // Make sure the list is already sorted!
-
                 m_MergeableRenderPassesMap.Clear();
                 m_RenderPassesAttachmentCount.Clear();
                 uint currentHashIndex = 0;
@@ -100,13 +104,23 @@ namespace UnityEngine.Rendering.Universal
                 {
                     var renderPass = m_ActiveRenderPassQueue[i];
 
-                    renderPass.renderPassQueueIndex = i;
-
+                    // Disable obsolete warning for internal usage
+                    #pragma warning disable CS0618
                     bool RPEnabled = IsRenderPassEnabled(renderPass);
+                    #pragma warning restore CS0618
                     if (!RPEnabled)
                         continue;
 
-                    var rpDesc = InitializeRenderPassDescriptor(ref cameraData, renderPass);
+                    // Check if current index pass is higher than the maximum number of passes
+                    if (i >= kRenderPassMaxCount)
+                    {
+                        Debug.LogError($"Exceeded the maximum number of Render Passes (${kRenderPassMaxCount}). Please consider using Render Graph to support a higher number of render passes with Native RenderPass, note support will be enabled by default.");
+                        return;
+                    }
+
+                    renderPass.renderPassQueueIndex = i;
+
+                    var rpDesc = InitializeRenderPassDescriptor(cameraData, renderPass);
 
                     Hash128 hash = CreateRenderPassHash(rpDesc, currentHashIndex);
 
@@ -116,18 +130,18 @@ namespace UnityEngine.Rendering.Universal
                     {
                         m_MergeableRenderPassesMap.Add(hash, m_MergeableRenderPassesMapArrays[m_MergeableRenderPassesMap.Count]);
                         m_RenderPassesAttachmentCount.Add(hash, 0);
+                        m_firstPassIndexOfLastMergeableGroup = i;
                     }
                     else if (m_MergeableRenderPassesMap[hash][GetValidPassIndexCount(m_MergeableRenderPassesMap[hash]) - 1] != (i - 1))
                     {
                         // if the passes are not sequential we want to split the current mergeable passes list. So we increment the hashIndex and update the hash
-
                         currentHashIndex++;
                         hash = CreateRenderPassHash(rpDesc, currentHashIndex);
-
                         m_PassIndexToPassHash[i] = hash;
 
                         m_MergeableRenderPassesMap.Add(hash, m_MergeableRenderPassesMapArrays[m_MergeableRenderPassesMap.Count]);
                         m_RenderPassesAttachmentCount.Add(hash, 0);
+                        m_firstPassIndexOfLastMergeableGroup = i;
                     }
 
                     m_MergeableRenderPassesMap[hash][GetValidPassIndexCount(m_MergeableRenderPassesMap[hash])] = i;
@@ -141,7 +155,7 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        internal void UpdateFinalStoreActions(int[] currentMergeablePasses, ref CameraData cameraData)
+        internal void UpdateFinalStoreActions(int[] currentMergeablePasses, UniversalCameraData cameraData, bool isLastMergeableGroup)
         {
             for (int i = 0; i < m_FinalColorStoreAction.Length; ++i)
                 m_FinalColorStoreAction[i] = RenderBufferStoreAction.Store;
@@ -160,6 +174,10 @@ namespace UnityEngine.Rendering.Universal
                 var samples = pass.overrideCameraTarget ? GetFirstAllocatedRTHandle(pass).rt.descriptor.msaaSamples :
                     (cameraData.targetTexture != null ? cameraData.targetTexture.descriptor.msaaSamples : cameraData.cameraTargetDescriptor.msaaSamples);
 
+                bool rendererSupportsMSAA = cameraData.renderer != null && cameraData.renderer.supportedRenderingFeatures.msaa;
+                if (!cameraData.camera.allowMSAA || !rendererSupportsMSAA)
+                    samples = 1;
+
                 // only override existing non destructive actions
                 for (int i = 0; i < m_FinalColorStoreAction.Length; ++i)
                 {
@@ -172,6 +190,8 @@ namespace UnityEngine.Rendering.Universal
                             m_FinalColorStoreAction[i] = RenderBufferStoreAction.StoreAndResolve;
                         else if (m_FinalColorStoreAction[i] == RenderBufferStoreAction.DontCare)
                             m_FinalColorStoreAction[i] = RenderBufferStoreAction.Resolve;
+                        else if (isLastMergeableGroup && m_FinalColorStoreAction[i] == RenderBufferStoreAction.Resolve)
+                            m_FinalColorStoreAction[i] = RenderBufferStoreAction.StoreAndResolve;
                     }
                 }
 
@@ -181,7 +201,7 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        internal void SetNativeRenderPassMRTAttachmentList(ScriptableRenderPass renderPass, ref CameraData cameraData, bool needCustomCameraColorClear, ClearFlag cameraClearFlag)
+        internal void SetNativeRenderPassMRTAttachmentList(ScriptableRenderPass renderPass, UniversalCameraData cameraData, bool needCustomCameraColorClear, ClearFlag cameraClearFlag)
         {
             using (new ProfilingScope(Profiling.setMRTAttachmentsList))
             {
@@ -195,7 +215,7 @@ namespace UnityEngine.Rendering.Universal
 
                 m_RenderPassesAttachmentCount[currentPassHash] = 0;
 
-                UpdateFinalStoreActions(currentMergeablePasses, ref cameraData);
+                UpdateFinalStoreActions(currentMergeablePasses, cameraData, currentPassIndex == m_firstPassIndexOfLastMergeableGroup);
 
                 int currentAttachmentIdx = 0;
                 bool hasInput = false;
@@ -278,7 +298,7 @@ namespace UnityEngine.Rendering.Universal
             return false;
         }
 
-        internal void SetNativeRenderPassAttachmentList(ScriptableRenderPass renderPass, ref CameraData cameraData, RTHandle passColorAttachment, RTHandle passDepthAttachment, ClearFlag finalClearFlag, Color finalClearColor)
+        internal void SetNativeRenderPassAttachmentList(ScriptableRenderPass renderPass, UniversalCameraData cameraData, RTHandle passColorAttachment, RTHandle passDepthAttachment, ClearFlag finalClearFlag, Color finalClearColor)
         {
             using (new ProfilingScope(Profiling.setAttachmentList))
             {
@@ -292,7 +312,7 @@ namespace UnityEngine.Rendering.Universal
 
                 m_RenderPassesAttachmentCount[currentPassHash] = 0;
 
-                UpdateFinalStoreActions(currentMergeablePasses, ref cameraData);
+                UpdateFinalStoreActions(currentMergeablePasses, cameraData, currentPassIndex == m_firstPassIndexOfLastMergeableGroup);
 
                 int currentAttachmentIdx = 0;
                 foreach (var passIdx in currentMergeablePasses)
@@ -381,7 +401,7 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        internal void ExecuteNativeRenderPass(ScriptableRenderContext context, ScriptableRenderPass renderPass, ref CameraData cameraData, ref RenderingData renderingData)
+        internal void ExecuteNativeRenderPass(ScriptableRenderContext context, ScriptableRenderPass renderPass, UniversalCameraData cameraData, ref RenderingData renderingData)
         {
             using (new ProfilingScope(Profiling.execute))
             {
@@ -403,7 +423,7 @@ namespace UnityEngine.Rendering.Universal
                 if (useDepth && !depthOnly)
                     attachments[validColorBuffersCount] = m_ActiveDepthAttachmentDescriptor;
 
-                var rpDesc = InitializeRenderPassDescriptor(ref cameraData, renderPass);
+                var rpDesc = InitializeRenderPassDescriptor(cameraData, renderPass);
 
                 int validPassCount = GetValidPassIndexCount(currentMergeablePasses);
 
@@ -457,7 +477,10 @@ namespace UnityEngine.Rendering.Universal
 
                 attachmentIndices.Dispose();
 
+                // Disable obsolete warning for internal usage
+                #pragma warning disable CS0618
                 renderPass.Execute(context, ref renderingData);
+                #pragma warning restore CS0618
 
                 // Need to execute it immediately to avoid sync issues between context and cmd buffer
                 context.ExecuteCommandBuffer(renderingData.commandBuffer);
@@ -497,7 +520,10 @@ namespace UnityEngine.Rendering.Universal
                 // Only update it as long as it has default value - if it was changed once, we assume it'll be memoryless in the whole RenderPass
                 if (!m_IsActiveColorAttachmentTransient[pass.m_InputAttachmentIndices[i]])
                 {
+                    // Disable obsolete warning for internal usage
+                    #pragma warning disable CS0618
                     m_IsActiveColorAttachmentTransient[pass.m_InputAttachmentIndices[i]] = pass.IsInputAttachmentTransient(i);
+                    #pragma warning restore CS0618
                 }
             }
         }
@@ -534,7 +560,7 @@ namespace UnityEngine.Rendering.Universal
             uint lastSubPassAttCount = GetSubPassAttachmentIndicesCount(lastSubPass);
             uint currentSubPassAttCount = GetSubPassAttachmentIndicesCount(currentSubPass);
 
-            if (currentSubPassAttCount > lastSubPassAttCount)
+            if (currentSubPassAttCount != lastSubPassAttCount)
                 return false;
 
             uint numEqualAttachments = 0;
@@ -647,9 +673,8 @@ namespace UnityEngine.Rendering.Universal
             return CreateRenderPassHash(desc.w, desc.h, desc.depthID, desc.samples, hashIndex);
         }
 
-        private RenderPassDescriptor InitializeRenderPassDescriptor(ref CameraData cameraData, ScriptableRenderPass renderPass)
+        internal static void GetRenderTextureDescriptor(UniversalCameraData cameraData, ScriptableRenderPass renderPass, out RenderTextureDescriptor targetRT)
         {
-            RenderTextureDescriptor targetRT;
             if (!renderPass.overrideCameraTarget || (renderPass.colorAttachmentHandle.rt == null && renderPass.depthAttachmentHandle.rt == null))
             {
                 targetRT = cameraData.cameraTargetDescriptor;
@@ -658,8 +683,8 @@ namespace UnityEngine.Rendering.Universal
                 // and it's new dimensions might not be reflected on the targetTexture. This also applies to camera stacks rendering to a target texture.
                 if (cameraData.targetTexture != null)
                 {
-                    targetRT.width = cameraData.pixelWidth;
-                    targetRT.height = cameraData.pixelHeight;
+                    targetRT.width = cameraData.scaledWidth;
+                    targetRT.height = cameraData.scaledHeight;
                 }
             }
             else
@@ -667,9 +692,17 @@ namespace UnityEngine.Rendering.Universal
                 var handle = GetFirstAllocatedRTHandle(renderPass);
                 targetRT = handle.rt != null ? handle.rt.descriptor : renderPass.depthAttachmentHandle.rt.descriptor;
             }
+        }
 
+        private RenderPassDescriptor InitializeRenderPassDescriptor(UniversalCameraData cameraData, ScriptableRenderPass renderPass)
+        {
+            GetRenderTextureDescriptor(cameraData, renderPass, out RenderTextureDescriptor targetRT);
+
+            // Disable obsolete warning for internal usage
+            #pragma warning disable CS0618
             var depthTarget = renderPass.overrideCameraTarget ? renderPass.depthAttachmentHandle : cameraDepthTargetHandle;
             var depthID = (targetRT.graphicsFormat == GraphicsFormat.None && targetRT.depthStencilFormat != GraphicsFormat.None) ? renderPass.colorAttachmentHandle.GetHashCode() : depthTarget.GetHashCode();
+            #pragma warning restore CS0618
 
             return new RenderPassDescriptor(targetRT.width, targetRT.height, targetRT.msaaSamples, depthID);
         }

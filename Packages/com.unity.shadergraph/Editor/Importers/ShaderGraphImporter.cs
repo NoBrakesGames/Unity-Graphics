@@ -11,11 +11,14 @@ using UnityEditor.Graphing.Util;
 using UnityEditor.ShaderGraph.Internal;
 using UnityEditor.ShaderGraph.Serialization;
 using Object = System.Object;
+using UnityEngine.Rendering.ShaderGraph;
+using UnityEngine.Rendering;
 
 namespace UnityEditor.ShaderGraph
 {
     [ExcludeFromPreset]
-    [ScriptedImporter(131, Extension, -902)]
+    [ScriptedImporter(132, Extension, -902)]
+    [CoreRPHelpURL("Shader-Graph-Asset", "com.unity.shadergraph")]
     class ShaderGraphImporter : ScriptedImporter
     {
         public const string Extension = "shadergraph";
@@ -128,16 +131,18 @@ Shader ""Hidden/GraphErrorShader2""
 
                     ReportErrors(graph, shader, path, importErrorLog);
 
-                    EditorMaterialUtility.SetShaderDefaults(
-                        shader,
-                        generatedShader.assignedTextures.Where(x => x.modifiable).Select(x => x.name).ToArray(),
-                        generatedShader.assignedTextures.Where(x => x.modifiable).Select(x => EditorUtility.InstanceIDToObject(x.textureId) as Texture).ToArray());
+                    if (generatedShader.assignedTextures != null)
+                    {
+                        EditorMaterialUtility.SetShaderDefaults(
+                            shader,
+                            generatedShader.assignedTextures.Where(x => x.modifiable).Select(x => x.name).ToArray(),
+                            generatedShader.assignedTextures.Where(x => x.modifiable).Select(x => EditorUtility.InstanceIDToObject(x.textureId) as Texture).ToArray());
 
-                    EditorMaterialUtility.SetShaderNonModifiableDefaults(
-                        shader,
-                        generatedShader.assignedTextures.Where(x => !x.modifiable).Select(x => x.name).ToArray(),
-                        generatedShader.assignedTextures.Where(x => !x.modifiable).Select(x => EditorUtility.InstanceIDToObject(x.textureId) as Texture).ToArray());
-
+                        EditorMaterialUtility.SetShaderNonModifiableDefaults(
+                            shader,
+                            generatedShader.assignedTextures.Where(x => !x.modifiable).Select(x => x.name).ToArray(),
+                            generatedShader.assignedTextures.Where(x => !x.modifiable).Select(x => EditorUtility.InstanceIDToObject(x.textureId) as Texture).ToArray());
+                    }
                     if (first)
                     {
                         // first shader is always the primary shader
@@ -146,7 +151,7 @@ Shader ""Hidden/GraphErrorShader2""
                         primaryShader = shader;
 
                         // only the main shader gets a material created
-                        Material material = new Material(shader) { name = "Material/" + primaryShaderName };
+                        Material material = new Material(shader) { name = primaryShaderName };
                         importContext.AddObjectToAsset("Material", material);
 
                         first = false;
@@ -177,6 +182,8 @@ Shader ""Hidden/GraphErrorShader2""
             return primaryShader;
         }
 
+        internal static bool subtargetNotFoundError = false;
+
         public override void OnImportAsset(AssetImportContext ctx)
         {
             var importLog = new AssetImportErrorLog(ctx);
@@ -192,6 +199,11 @@ Shader ""Hidden/GraphErrorShader2""
                 assetGuid = AssetDatabase.AssetPathToGUID(path)
             };
             MultiJson.Deserialize(graph, textGraph);
+            if (subtargetNotFoundError)
+            {
+                Debug.LogError($"{ctx.assetPath}: Import Error: Expected active subtarget not found, defaulting to first available.");
+                subtargetNotFoundError = false;
+            }
             graph.OnEnable();
             graph.ValidateGraph();
 
@@ -221,6 +233,11 @@ Shader ""Hidden/GraphErrorShader2""
                 }
             }
 #endif
+
+            if (mainObject == null)
+            {
+                mainObject = ShaderUtil.CreateShaderAsset(ctx, k_ErrorShader, false);
+            }
 
             Texture2D texture = Resources.Load<Texture2D>("Icons/sg_graph_icon");
             ctx.AddObjectToAsset("MainAsset", mainObject, texture);
@@ -663,27 +680,31 @@ Shader ""Hidden/GraphErrorShader2""
                 var source = registry.sources[name];
                 var precision = source.nodes.First().concretePrecision;
 
-                var hasPrecisionMismatch = false;
+                // var hasPrecisionMismatch = false;
                 var nodeNames = new HashSet<string>();
                 foreach (var node in source.nodes)
                 {
                     nodeNames.Add(node.name);
-                    if (node.concretePrecision != precision)
-                    {
-                        hasPrecisionMismatch = true;
-                        break;
-                    }
+                    //if (node.concretePrecision != precision)
+                    //{
+                    //    hasPrecisionMismatch = true;
+                    //    break;
+                    //}
                 }
 
-                if (hasPrecisionMismatch)
-                {
-                    var message = new StringBuilder($"Precision mismatch for function {name}:");
-                    foreach (var node in source.nodes)
-                    {
-                        message.AppendLine($"{node.name} ({node.objectId}): {node.concretePrecision}");
-                    }
-                    throw new InvalidOperationException(message.ToString());
-                }
+                // Commenting this out to keep intent; precision mismatch at this point in import/code gen
+                // is not actionable for the user. It's better to import correctly on the chance that the
+                // generated code works, which will be most cases. In cases where it does not, the shader
+                // compiler will generate appropriate errors that are more actionable.
+                //if (hasPrecisionMismatch)
+                //{
+                //    var message = new StringBuilder($"Precision mismatch for function {name}:");
+                //    foreach (var node in source.nodes)
+                //    {
+                //        message.AppendLine($"{node.name} ({node.objectId}): {node.concretePrecision}");
+                //    }                    
+                //    throw new InvalidOperationException(message.ToString());
+                //}
 
                 var code = source.code.Replace(PrecisionUtil.Token, precision.ToShaderString());
                 code = $"// Node: {string.Join(", ", nodeNames)}{nl}{code}";
@@ -859,7 +880,7 @@ Shader ""Hidden/GraphErrorShader2""
             sharedCodeIndices.Add(codeSnippets.Count);
             codeSnippets.Add($"{outputStructName} {evaluationFunctionName}({nl}{indent}{inputStructName} IN");
 
-            var inputProperties = new List<AbstractShaderProperty>();
+            var inputProperties = new List<ShaderInput>();
             var portPropertyIndices = new List<int>[ports.Count];
             var propertiesStages = new List<ShaderStageCapability>();
             for (var portIndex = 0; portIndex < ports.Count; portIndex++)
@@ -871,7 +892,6 @@ Shader ""Hidden/GraphErrorShader2""
             // Union with the flat properties collection because previous shader graph version could store properties without category
             var sortedProperties = graph.categories
                 .SelectMany(x => x.Children)
-                .OfType<AbstractShaderProperty>()
                 .Union(graph.properties)
                 .Where(x => x.isExposed);
 
@@ -894,7 +914,9 @@ Shader ""Hidden/GraphErrorShader2""
 
                 propertiesStages.Add(stageCapability);
                 inputProperties.Add(property);
-                codeSnippets.Add($",{nl}{indent}/* Property: {property.displayName} */ {property.GetPropertyAsArgumentStringForVFX(property.concretePrecision.ToShaderString())}");
+
+                if (property is AbstractShaderProperty shaderProperty)
+                    codeSnippets.Add($",{nl}{indent}/* Property: {property.displayName} */ {shaderProperty.GetPropertyAsArgumentStringForVFX(shaderProperty.concretePrecision.ToShaderString())}");
             }
 
             sharedCodeIndices.Add(codeSnippets.Count);
@@ -967,6 +989,7 @@ Shader ""Hidden/GraphErrorShader2""
             asset.inputStructName = inputStructName;
             asset.outputStructName = outputStructName;
             asset.portRequirements = portRequirements;
+            asset.SetGUID(assetGuid);
             asset.m_PropertiesStages = propertiesStages.ToArray();
             asset.concretePrecision = graph.graphDefaultConcretePrecision;
             asset.SetProperties(inputProperties);

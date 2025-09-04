@@ -185,6 +185,7 @@ namespace UnityEditor.VFX
                 case VFXValueType.CameraBuffer:
                 case VFXValueType.Matrix4x4:
                 case VFXValueType.Boolean:
+                case VFXValueType.Buffer:
                     return true;
             }
 

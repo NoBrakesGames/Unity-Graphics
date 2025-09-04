@@ -1,4 +1,4 @@
-#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
 //#pragma enable_d3d11_debug_symbols
 
 #pragma kernel WaterClearIndirect
@@ -11,15 +11,17 @@
 #pragma kernel WaterDeferredLighting_Variant2 WATER_DEFERRED_LIGHTING=WaterDeferredLighting_Variant2 VARIANT=2 USE_INDIRECT
 #pragma kernel WaterDeferredLighting_Variant3 WATER_DEFERRED_LIGHTING=WaterDeferredLighting_Variant3 VARIANT=3 USE_INDIRECT
 #pragma kernel WaterDeferredLighting_Variant4 WATER_DEFERRED_LIGHTING=WaterDeferredLighting_Variant4 VARIANT=4 USE_INDIRECT
-#pragma kernel WaterDeferredLighting WATER_DEFERRED_LIGHTING=WaterDeferredLighting
 
-#pragma kernel WaterFogIndirect USE_INDIRECT VARIANT=NUM_WATER_VARIANTS
+#pragma kernel WaterFogIndirect              USE_INDIRECT VARIANT=NUM_WATER_VARIANTS WATER_FOG_INDIRECT=WaterFogIndirect
+#pragma kernel WaterFogTransmittanceIndirect USE_INDIRECT VARIANT=NUM_WATER_VARIANTS WATER_FOG_INDIRECT=WaterFogTransmittanceIndirect OUTPUT_TRANSMITTANCE_BUFFER
 
 // Given that the algorithm requires BSDF evaluation, we need to define this macro
 #define HAS_LIGHTLOOP
 #define SCREEN_SPACE_INDIRECT_DIFFUSE_DISABLED
 #define USE_CLUSTERED_LIGHTLIST
 #define HAS_REFRACTION 1
+#define SUPPORT_WATER_ABSORPTION
+#define WATER_FOG_PASS
 
 #ifdef PLATFORM_LANE_COUNT
 #define NR_THREADS              PLATFORM_LANE_COUNT
@@ -28,7 +30,8 @@
 #endif
 
 // Shadow qualities are supported
-#pragma multi_compile SHADOW_LOW SHADOW_MEDIUM SHADOW_HIGH
+#pragma multi_compile PUNCTUAL_SHADOW_LOW PUNCTUAL_SHADOW_MEDIUM PUNCTUAL_SHADOW_HIGH
+#pragma multi_compile DIRECTIONAL_SHADOW_LOW DIRECTIONAL_SHADOW_MEDIUM DIRECTIONAL_SHADOW_HIGH
 #pragma multi_compile AREA_SHADOW_MEDIUM AREA_SHADOW_HIGH
 #pragma multi_compile _ RENDERING_LAYERS
 
@@ -51,12 +54,15 @@
 
 // Input textures of the kernels
 TEXTURE2D_X(_DepthTexture);
-TEXTURE2D_X_UINT2(_StencilTexture);
 TEXTURE2D_X(_CameraColorTexture);
 
 // Output textures of the kernels
 RW_TEXTURE2D_X(float4, _CameraColorTextureRW);
 RW_TEXTURE2D_X(float4, _NormalBufferRW);
+
+#if defined(OUTPUT_TRANSMITTANCE_BUFFER)
+RW_TEXTURE2D_X(float2, _TransmittanceBufferRW);
+#endif
 
 #if defined (USE_INDIRECT)
 StructuredBuffer<uint> _WaterTileBuffer;
@@ -263,7 +269,7 @@ void WATER_DEFERRED_LIGHTING(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 #if defined (USE_INDIRECT)
 [numthreads(8, 8, 1)]
-void WaterFogIndirect(uint2 groupThreadId : SV_GroupThreadID, uint groupId : SV_GroupID)
+void WATER_FOG_INDIRECT(uint2 groupThreadId : SV_GroupThreadID, uint groupId : SV_GroupID)
 {
     // Evaluate the actual dispatch
     uint3 dispatchThreadId  = GetActualDispatchThread(groupThreadId, groupId);
@@ -281,13 +287,26 @@ void WaterFogIndirect(uint2 groupThreadId : SV_GroupThreadID, uint groupId : SV_
     // Compute the posInput
     PositionInputs posInput = GetPositionInput(currentCoord, _ScreenSize.zw, depthValue, UNITY_MATRIX_I_VP, GetWorldToViewMatrix(), 0);
 
+    // Read the color value
+    float3 result = LOAD_TEXTURE2D_X(_CameraColorTexture, currentCoord).xyz;
+
+    // Atmospheric fog on front faces, absorption on back faces
+    float3 volColor = 0, volOpacity = 0;
+
     // Compute the view vector
     float3 V = GetWorldSpaceNormalizeViewDir(posInput.positionWS);
 
-    float3 volColor, volOpacity;
+    // Compute water or fog absorption
     EvaluateAtmosphericScattering(posInput, V, volColor, volOpacity);
 
+    result.rgb = result * (1 - volOpacity) + volColor;
+
     // Output to the color buffer
-    _CameraColorTextureRW[COORD_TEXTURE2D_X(currentCoord)] = float4(LOAD_TEXTURE2D_X(_CameraColorTexture, currentCoord).xyz * (1 - volOpacity) + volColor, 1.0);
+    _CameraColorTextureRW[COORD_TEXTURE2D_X(currentCoord)] = float4(result, 1.0);
+
+    #if defined(OUTPUT_TRANSMITTANCE_BUFFER)
+    float2 transmittance = _TransmittanceBufferRW[COORD_TEXTURE2D_X(currentCoord)] * (1 - volOpacity.x);
+    _TransmittanceBufferRW[COORD_TEXTURE2D_X(currentCoord)] = transmittance;
+    #endif
 }
 #endif

@@ -123,12 +123,16 @@ namespace UnityEditor.Rendering.HighDefinition
             {
                 void DrawTag(ref Rect _rect, GUIContent label)
                 {
+                    var labelRect = _rect;
                     EditorStyles.label.CalcMinMaxWidth(label, out var minWidth, out var maxWidth);
-                    minWidth += 6;
-                    rect.x -= minWidth;
-                    rect.width = minWidth;
-                    GUI.Box(rect, label);
-                    rect.x -= 2;
+                    labelRect.width = EditorStyles.label.CalcSize(label).x;
+                    labelRect.height = EditorStyles.label.CalcSize(label).y;
+                    var height = EditorStyles.label.CalcHeight(label,labelRect.width);
+                    labelRect.y += height/4f;
+                    labelRect.x -= minWidth;
+                    var style = new GUIStyle(EditorStyles.label);
+                    style.normal.background = Texture2D.grayTexture;
+                    GUI.Box(labelRect, label, style);
                 }
 
                 var asset = m_HDRPAssets[index];
@@ -158,13 +162,13 @@ namespace UnityEditor.Rendering.HighDefinition
             /// </summary>
             static void PopulateHDRPAssetsFromQualitySettings(List<HDRPAssetLocations> target)
             {
-                if (GraphicsSettings.renderPipelineAsset is HDRenderPipelineAsset hdrp)
+                if (GraphicsSettings.defaultRenderPipeline is HDRenderPipelineAsset hdrp)
                     target.Add(new HDRPAssetLocations(true, hdrp));
 
                 var qualityLevelCount = QualitySettings.names.Length;
                 for (var i = 0; i < qualityLevelCount; ++i)
                 {
-                    if (!(QualitySettings.GetRenderPipelineAssetAt(i) is HDRenderPipelineAsset hdrp2))
+                    if (QualitySettings.GetRenderPipelineAssetAt(i) is not HDRenderPipelineAsset hdrp2)
                         continue;
 
                     var index = target.FindIndex(a => a.asset == hdrp2);

@@ -1,7 +1,7 @@
 #ifndef UNITY_IMAGE_BASED_LIGHTING_HLSL_INCLUDED
 #define UNITY_IMAGE_BASED_LIGHTING_HLSL_INCLUDED
 
-#if SHADER_API_MOBILE || SHADER_API_GLES3
+#if SHADER_API_MOBILE || SHADER_API_GLES3 || SHADER_API_SWITCH || defined(UNITY_UNIFIED_SHADER_PRECISION_MODEL)
 #pragma warning (disable : 3205) // conversion of larger type to smaller
 #endif
 
@@ -416,7 +416,7 @@ uint GetIBLRuntimeFilterSampleCount(uint mipLevel)
 }
 
 // Ref: Listing 19 in "Moving Frostbite to PBR"
-real4 IntegrateLD(TEXTURECUBE_PARAM(tex, sampl),
+float4 IntegrateLD(TEXTURECUBE_PARAM(tex, sampl),
                    TEXTURE2D(ggxIblSamples),
                    real3 V,
                    real3 N,
@@ -434,8 +434,8 @@ real4 IntegrateLD(TEXTURECUBE_PARAM(tex, sampl),
     real partLambdaV = GetSmithJointGGXPartLambdaV(NdotV, roughness);
 #endif
 
-    real3 lightInt = real3(0.0, 0.0, 0.0);
-    real  cbsdfInt = 0.0;
+    float3 lightInt = float3(0.0, 0.0, 0.0);
+    float  cbsdfInt = 0.0;
 
     for (uint i = 0; i < sampleCount; ++i)
     {
@@ -529,7 +529,7 @@ real4 IntegrateLD(TEXTURECUBE_PARAM(tex, sampl),
     #endif
     }
 
-    return real4(lightInt / cbsdfInt, 1.0);
+    return float4(lightInt / cbsdfInt, 1.0);
 }
 
 real4 IntegrateLDCharlie(TEXTURECUBE_PARAM(tex, sampl),
@@ -696,7 +696,7 @@ float InfluenceFadeNormalWeight(float3 normal, float3 centerToPos)
     return saturate((-1.0f / 0.4f) * dot(normal, centerToPos) + (0.6f / 0.4f));
 }
 
-#if SHADER_API_MOBILE || SHADER_API_GLES3
+#if SHADER_API_MOBILE || SHADER_API_GLES3 || SHADER_API_SWITCH
 #pragma warning (enable : 3205) // conversion of larger type to smaller
 #endif
 

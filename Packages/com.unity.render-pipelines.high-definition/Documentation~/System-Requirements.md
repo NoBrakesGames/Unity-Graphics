@@ -1,4 +1,4 @@
-# Requirements and compatibility
+# System requirements and compatibility
 
 This page contains information on system requirements and compatibility of the High Definition Render Pipeline (HDRP) package.
 
@@ -7,12 +7,18 @@ This page contains information on system requirements and compatibility of the H
 The following table shows the compatibility of the High Definition Render Pipeline (HDRP) versions with different Unity Editor versions.
 
 | **Package version** | **Minimum Unity version** | **Maximum Unity version** |
-| ------------------- | ------------------------- | ------------------------- |
-| 11.x                | 2021.1                    | 2021.1                    |
-| 10.x                | 2020.2                    | 2020.3                    |
-| 8.x / 9.x-preview   | 2020.1                    | 2020.1                    |
-| 7.x                 | 2019.3                    | 2019.4                    |
-| 6.x                 | 2019.2                    | 2019.2                    |
+| --------------- | --------------------- | --------------------- |
+| 16.0.x          | 2023.2                | 2023.x                |
+| 15.0.x          | 2023.1                | 2023.1                |
+| 14.0.x          | 2022.2                | 2022.x                |
+| 13.x.x          | 2022.1                | 2022.1                |
+| 12.0.x          | 2021.2                | 2021.3                |
+| 11.x            | 2021.1                | 2021.1                |
+| 10.x            | 2020.2                | 2020.3                |
+| 9.x-preview     | 2020.1                | 2020.1                |
+| 8.x             | 2020.1                | 2020.1                |
+| 7.x             | 2019.3                | 2019.4                |
+| 6.x             | 2019.2                | 2019.2                |
 
 ## Render pipeline compatibility
 
@@ -24,11 +30,9 @@ This section describes the HDRP package’s target platform requirements. For pl
 
 For more information, see [System requirements for Unity](https://docs.unity3d.com/Manual/system-requirements.html).
 
-HRDP is only compatible with the following platforms:
+HDRP is compatible with the following platforms:
 
 - Windows and Windows Store, with DirectX 11 or DirectX 12 and Shader Model 5.0
-- Google
-  - Stadia
 - Sony
   - PlayStation 4
   - PlayStation 5
@@ -42,4 +46,4 @@ HRDP is only compatible with the following platforms:
 
 ### Ray tracing
 
-To use ray tracing in HDRP, there are hardware requirements you must meet. For information on these requirements, see [Getting started with ray tracing](Ray-Tracing-Getting-Started.md#HardwareRequirements).
+To use ray tracing in HDRP, there are hardware requirements you must meet. For information on these requirements, see [Getting started with ray tracing](Ray-Tracing-Getting-Started.md).

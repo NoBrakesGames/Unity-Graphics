@@ -36,6 +36,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         protected VFXContext m_ContextVFX = null;
         protected VFXTaskCompiledData m_TaskDataVFX;
         protected bool TargetsVFX() => m_ContextVFX != null;
+        protected bool TargetVFXSupportsRaytracing() => TargetsVFX() && ((VFXAbstractParticleOutput)m_ContextVFX).isRayTraced;
 
         protected virtual int ComputeMaterialNeedsUpdateHash() => 0;
 
@@ -65,6 +66,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             $"{HDUtils.GetHDRenderPipelinePath()}Editor/Material/ShaderGraph/Templates/",
             $"{HDUtils.GetVFXPath()}/Editor/ShaderGraph/Templates"
         };
+        protected virtual bool supportGlobalMipBias => true;
 
         public virtual string identifier => GetType().Name;
 
@@ -76,6 +78,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             hdMetadata.migrateFromOldCrossPipelineSG = m_MigrateFromOldCrossPipelineSG;
             hdMetadata.hdSubTargetVersion = systemData.version;
             hdMetadata.hasVertexModificationInMotionVector = systemData.customVelocity || systemData.tessellation || graph.AnyVertexAnimationActive();
+            hdMetadata.isVFXCompatible = graph.IsVFXCompatible();
             return hdMetadata;
         }
 
@@ -197,6 +200,24 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                 passDescriptor.fieldDependencies = passDescriptor.fieldDependencies == null ? new DependencyCollection() : new DependencyCollection { passDescriptor.fieldDependencies }; // Duplicate fieldDependencies to avoid side effects (static list modification)
                 passDescriptor.fieldDependencies.Add(CoreFieldDependencies.Default);
 
+                if (systemData.debugSymbols && Unsupported.IsDeveloperMode())
+                {
+                    passDescriptor.pragmas = new PragmaCollection
+                    {
+                        passDescriptor.pragmas,
+                        Pragma.DebugSymbols
+                    };
+                }
+
+                if (supportGlobalMipBias)
+                {
+                    if (passDescriptor.defines == null)
+                        passDescriptor.defines = new();
+
+                    if (!passDescriptor.defines.Any(d => d.descriptor.referenceName == CoreDefines.SupportGlobalMipBias.First().descriptor.referenceName))
+                        passDescriptor.defines.Add(CoreDefines.SupportGlobalMipBias);
+                }
+
                 CollectPassKeywords(ref passDescriptor);
 
                 finalPasses.Add(passDescriptor, passes[i].fieldConditions);
@@ -263,6 +284,15 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 
             // Overwrite the pass pragmas with just the kernel pragma for now.
             passDescriptor.pragmas = new PragmaCollection { Pragma.Kernel(kernel.name) };
+
+            if (supportGlobalMipBias)
+            {
+                if (passDescriptor.defines == null)
+                    passDescriptor.defines = new();
+
+                if (!passDescriptor.defines.Any(d => d.descriptor.referenceName == CoreDefines.SupportGlobalMipBias.First().descriptor.referenceName))
+                    passDescriptor.defines.Add(CoreDefines.SupportGlobalMipBias);
+            }
 
             CollectPassKeywords(ref passDescriptor);
 

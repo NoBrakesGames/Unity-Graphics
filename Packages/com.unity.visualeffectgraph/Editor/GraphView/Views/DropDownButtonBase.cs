@@ -30,6 +30,7 @@ namespace UnityEditor.VFX.UI
         protected readonly VisualElement m_PopupContent;
 
         protected DropDownButtonBase(
+            string elementName,
             VFXView view,
             string uxmlSource,
             string mainButtonLabel,
@@ -38,6 +39,7 @@ namespace UnityEditor.VFX.UI
             bool hasSeparatorBefore = false,
             bool hasSeparatorAfter = false)
         {
+            name = elementName;
             m_VFXView = view;
             style.flexDirection = new StyleEnum<FlexDirection>(FlexDirection.Row);
 
@@ -50,6 +52,7 @@ namespace UnityEditor.VFX.UI
             }
 
             m_MainButton = new Button(OnMainButton) { name = mainButtonName };
+            m_MainButton.focusable = false;
             m_MainButton.AddToClassList("dropdown-button");
             m_MainButton.AddToClassList("unity-toolbar-toggle");
             if (!string.IsNullOrEmpty(iconPath))
@@ -69,6 +72,7 @@ namespace UnityEditor.VFX.UI
             Add(separator);
 
             var dropDownButton = new Button(OnTogglePopup);
+            dropDownButton.focusable = false;
             dropDownButton.AddToClassList("dropdown-arrow");
             dropDownButton.AddToClassList("unity-toolbar-toggle");
             dropDownButton.Add(new VisualElement());
@@ -98,7 +102,7 @@ namespace UnityEditor.VFX.UI
 
         private Vector2 GetPopupPosition() => m_VFXView.ViewToScreenPosition(worldBound.position);
 
-        private void OnTogglePopup()
+        protected void OnTogglePopup()
         {
             // If the user click on the arrow button while the popup is opened
             // the popup is then closed (because clicked outside) and immediately reopened

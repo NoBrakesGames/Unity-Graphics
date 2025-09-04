@@ -1,12 +1,12 @@
-using System;
-using System.Collections.Generic;
 using System.Linq;
+
 using UnityEngine;
 using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-ChangeSpace")]
+    [VFXInfo(category = "Math/Geometry", synonyms = new []{ "Convert" })]
     class ChangeSpace : VFXOperatorNumericUniform
     {
         [VFXSetting, SerializeField]
@@ -26,20 +26,22 @@ namespace UnityEditor.VFX.Operator
             }
         }
 
-        public override string libraryName { get { return "Change Space"; } }
-        public override string name
-        {
-            get
-            {
-                return $"Change Space ({ ((GetNbOutputSlots() > 0) ? outputSlots[0].property.type.UserFriendlyName() : "null") })";
-            }
-        }
+        public override string name => $"Change Space ({ ((GetNbOutputSlots() > 0) ? outputSlots[0].property.type.UserFriendlyName() : "null") })";
 
         protected override ValidTypeRule typeFilter
         {
             get
             {
                 return ValidTypeRule.allowSpaceable;
+            }
+        }
+
+        public override void OnEnable()
+        {
+            base.OnEnable();
+            if ((int)m_targetSpace == int.MaxValue)
+            {
+                m_targetSpace = VFXSpace.None;
             }
         }
 
@@ -57,14 +59,14 @@ namespace UnityEditor.VFX.Operator
             }
         }
 
-        internal override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal override void GenerateErrors(VFXErrorReporter report)
         {
             if (m_targetSpace == inputSlots[0].space)
             {
-                manager.RegisterError("ChangeSpace_Input_Target_Are_Equals", VFXErrorType.Warning, "The input space and target space are identical. This operator won't do anything.");
+                report.RegisterError("ChangeSpace_Input_Target_Are_Equals", VFXErrorType.Warning, "The input space and target space are identical. This operator won't do anything.", this);
             }
 
-            base.GenerateErrors(manager);
+            base.GenerateErrors(report);
         }
 
         protected internal override void Invalidate(VFXModel model, InvalidationCause cause)

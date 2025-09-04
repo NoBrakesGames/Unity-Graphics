@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Generic;
 using UnityEditor.IMGUI.Controls;
+using UnityEditor.Rendering.HighDefinition.ShaderGraph;
+using UnityEditor.ShaderGraph;
 using UnityEditor.ShortcutManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
 using static UnityEditorInternal.EditMode;
+using RenderingLayerMask = UnityEngine.RenderingLayerMask;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
@@ -15,6 +19,16 @@ namespace UnityEditor.Rendering.HighDefinition
         const float k_Limit = 100000;
         const float k_LimitInv = 1 / k_Limit;
 
+
+        static public readonly GUIContent k_NewDecalMaterialButtonText = EditorGUIUtility.TrTextContent("New", "Creates a new Decal material.");
+        static public readonly string k_NewDecalText = "HDRP Decal";
+        static public readonly string k_NewSGDecalText = "ShaderGraph Decal";
+
+        internal enum DefaultDecal
+        {
+            HDRPDecal,
+            SGDecal
+        }
         static Color fullColor
         {
             get
@@ -27,7 +41,7 @@ namespace UnityEditor.Rendering.HighDefinition
         static Color s_LastColor;
         static void UpdateColorsInHandlesIfRequired()
         {
-            Color c = HDRenderPipelinePreferences.decalGizmoColor;
+            Color c = DecalPreferences.decalGizmoColor;
             if (c != s_LastColor)
             {
                 if (s_BoxHandle != null && !s_BoxHandle.Equals(null))
@@ -49,6 +63,7 @@ namespace UnityEditor.Rendering.HighDefinition
         SerializedProperty m_UVScaleProperty;
         SerializedProperty m_UVBiasProperty;
         SerializedProperty m_AffectsTransparencyProperty;
+        SerializedScalableSettingValue m_TransparentTextureResolution;
         SerializedProperty m_ScaleMode;
         SerializedProperty m_Size;
         SerializedProperty[] m_SizeValues;
@@ -74,7 +89,21 @@ namespace UnityEditor.Rendering.HighDefinition
             }
         }
 
-        bool showAffectTransparency => ((target as DecalProjector).material != null) && DecalSystem.IsHDRenderPipelineDecal((target as DecalProjector).material.shader);
+        private bool affectTransparency(DecalProjector decalProjector)
+        {
+            Material material = decalProjector.material;
+            if (material == null)
+                return false;
+
+            if (material.IsShaderGraph())
+            {
+                return DecalSystem.IsDecalMaterial(material);
+            }
+            else
+                return DecalSystem.IsHDRenderPipelineDecal(material.shader);
+        }
+
+        bool showAffectTransparency => affectTransparency(target as DecalProjector);
 
         bool showAffectTransparencyHaveMultipleDifferentValue
         {
@@ -83,17 +112,29 @@ namespace UnityEditor.Rendering.HighDefinition
                 if (targets.Length < 2)
                     return false;
                 DecalProjector decalProjector0 = (targets[0] as DecalProjector);
-                bool show = decalProjector0.material != null && DecalSystem.IsHDRenderPipelineDecal(decalProjector0.material.shader);
+                bool show = affectTransparency(decalProjector0);
                 for (int index = 0; index < targets.Length; ++index)
                 {
                     if ((targets[index] as DecalProjector).material != null)
                     {
                         DecalProjector decalProjectori = (targets[index] as DecalProjector);
-                        if (decalProjectori != null && DecalSystem.IsHDRenderPipelineDecal(decalProjectori.material.shader) ^ show)
+                        if (decalProjectori != null && affectTransparency(decalProjectori) ^ show)
                             return true;
                     }
                 }
                 return false;
+            }
+        }
+
+        bool showTransparentTextureResolution
+        {
+            get
+            {
+                DecalProjector projector = target as DecalProjector;
+                if (!affectTransparency(projector))
+                    return false;
+
+                return projector.material.IsShaderGraph() && m_AffectsTransparencyProperty.boolValue;
             }
         }
 
@@ -199,6 +240,7 @@ namespace UnityEditor.Rendering.HighDefinition
             m_UVScaleProperty = serializedObject.FindProperty("m_UVScale");
             m_UVBiasProperty = serializedObject.FindProperty("m_UVBias");
             m_AffectsTransparencyProperty = serializedObject.FindProperty("m_AffectsTransparency");
+            m_TransparentTextureResolution = new SerializedScalableSettingValue(serializedObject.Find((DecalProjector p) => p.TransparentTextureResolution));
             m_ScaleMode = serializedObject.FindProperty("m_ScaleMode");
             m_Size = serializedObject.FindProperty("m_Size");
             m_SizeValues = new[]
@@ -567,7 +609,15 @@ namespace UnityEditor.Rendering.HighDefinition
 
             // update each target
             foreach (DecalProjector decalProjector in targets)
+            {
                 UpdateSizeOfOneTarget(decalProjector);
+
+                // Fix for UUM-29105 (Changes made to Decal Project Prefab in the Inspector are not saved)
+                // This editor doesn't use serializedObject to modify the target objects, explicitly mark the prefab
+                // asset dirty to ensure the new data is saved.
+                if (PrefabUtility.IsPartOfPrefabAsset(decalProjector))
+                    EditorUtility.SetDirty(decalProjector);
+            }
 
             // update again serialize object to register change in targets
             serializedObject.Update();
@@ -580,9 +630,9 @@ namespace UnityEditor.Rendering.HighDefinition
                 m_SizeValues[axe].floatValue = newSize;
         }
 
-        internal void MinMaxSliderWithFields(GUIContent label, ref float minValue, ref float maxValue, float minLimit, float maxLimit)
+        internal void MinMaxSliderWithFields(Rect rect, GUIContent label, ref float minValue, ref float maxValue, float minLimit, float maxLimit)
         {
-            var rect = EditorGUILayout.GetControlRect();
+            // Reserve label space and push the slider rect to the right
             rect = EditorGUI.PrefixLabel(rect, label);
 
             const float fieldWidth = 40, padding = 4;
@@ -610,6 +660,45 @@ namespace UnityEditor.Rendering.HighDefinition
                 tmpRect.xMax = rect.xMax - (fieldWidth + padding);
                 EditorGUI.MinMaxSlider(tmpRect, ref minValue, ref maxValue, minLimit, maxLimit);
             }
+        }
+
+        void DoRenderingLayerMask()
+        {
+            Rect rect = EditorGUILayout.GetControlRect(true, 18f);
+            EditorGUI.BeginProperty(rect, k_DecalLayerMaskContent, m_DecalLayerMask);
+
+            var mask = m_DecalLayerMask.uintValue;
+            EditorGUI.BeginChangeCheck();
+            mask = EditorGUI.RenderingLayerMaskField(rect, k_DecalLayerMaskContent, (RenderingLayerMask)mask, EditorStyles.layerMaskField);
+            if (EditorGUI.EndChangeCheck())
+            {
+                m_DecalLayerMask.intValue = unchecked((int) mask);
+                serializedObject.ApplyModifiedProperties();
+            }
+
+            EditorGUI.EndProperty();
+        }
+
+        void DoAngleFade()
+        {
+            // The slider edits 2 different properties. Both can be overridden separately.
+            var rect = EditorGUILayout.GetControlRect();
+            EditorGUI.BeginProperty(rect, k_AngleFadeContent, m_StartAngleFadeProperty);
+            EditorGUI.BeginProperty(rect, k_AngleFadeContent, m_EndAngleFadeProperty);
+
+            float angleFadeMinValue = m_StartAngleFadeProperty.floatValue;
+            float angleFadeMaxValue = m_EndAngleFadeProperty.floatValue;
+            EditorGUI.BeginChangeCheck();
+            MinMaxSliderWithFields(rect,k_AngleFadeContent, ref angleFadeMinValue, ref angleFadeMaxValue, 0.0f, 180.0f);
+            if (EditorGUI.EndChangeCheck())
+            {
+                m_StartAngleFadeProperty.floatValue = angleFadeMinValue;
+                m_EndAngleFadeProperty.floatValue = angleFadeMaxValue;
+                serializedObject.ApplyModifiedProperties();
+            }
+
+            EditorGUI.EndProperty();
+            EditorGUI.EndProperty();
         }
 
         public override void OnInspectorGUI()
@@ -677,7 +766,7 @@ namespace UnityEditor.Rendering.HighDefinition
                     ReinitSavedRatioSizePivotPosition();
                 EditorGUI.EndProperty();
 
-                EditorGUILayout.PropertyField(m_MaterialProperty, k_MaterialContent);
+                DecalMaterialFieldWithButton(m_MaterialProperty);
 
                 bool decalLayerEnabled = false;
                 if (hdrp != null)
@@ -685,7 +774,7 @@ namespace UnityEditor.Rendering.HighDefinition
                     decalLayerEnabled = supportDecals && hdrp.currentPlatformRenderPipelineSettings.supportDecalLayers;
                     using (new EditorGUI.DisabledScope(!decalLayerEnabled))
                     {
-                        EditorGUILayout.PropertyField(m_DecalLayerMask, k_DecalLayerMaskContent);
+                        DoRenderingLayerMask();
                     }
                 }
 
@@ -693,19 +782,15 @@ namespace UnityEditor.Rendering.HighDefinition
                 EditorGUILayout.PropertyField(m_DrawDistanceProperty, k_DistanceContent);
                 if (EditorGUI.EndChangeCheck() && m_DrawDistanceProperty.floatValue < 0f)
                     m_DrawDistanceProperty.floatValue = 0f;
+                if (m_DrawDistanceProperty.floatValue > DecalSystem.instance.DrawDistance)
+                {
+                    EditorGUILayout.HelpBox(String.Format(DecalSystem.s_GlobalDrawDistanceWarning, DecalSystem.instance.DrawDistance), MessageType.Warning);
+                }
 
                 EditorGUILayout.PropertyField(m_FadeScaleProperty, k_FadeScaleContent);
                 using (new EditorGUI.DisabledScope(!decalLayerEnabled))
                 {
-                    float angleFadeMinValue = m_StartAngleFadeProperty.floatValue;
-                    float angleFadeMaxValue = m_EndAngleFadeProperty.floatValue;
-                    EditorGUI.BeginChangeCheck();
-                    MinMaxSliderWithFields(k_AngleFadeContent, ref angleFadeMinValue, ref angleFadeMaxValue, 0.0f, 180.0f);
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        m_StartAngleFadeProperty.floatValue = angleFadeMinValue;
-                        m_EndAngleFadeProperty.floatValue = angleFadeMaxValue;
-                    }
+                    DoAngleFade();
                 }
 
                 if (!decalLayerEnabled)
@@ -732,6 +817,12 @@ namespace UnityEditor.Rendering.HighDefinition
                     EditorGUILayout.PropertyField(m_AffectsTransparencyProperty, k_AffectTransparentContent);
                     if (m_AffectsTransparencyProperty.boolValue && !DecalSystem.instance.IsAtlasAllocatedSuccessfully())
                         EditorGUILayout.HelpBox(DecalSystem.s_AtlasSizeWarningMessage, MessageType.Warning);
+                }
+
+                if (showTransparentTextureResolution)
+                {
+                    var scalableSetting = hdrp.currentPlatformRenderPipelineSettings.decalSettings.transparentTextureResolution;
+                    m_TransparentTextureResolution.LevelAndIntGUILayout(k_TransparentTextureResolutionContent, scalableSetting, hdrp.name);
                 }
             }
             if (EditorGUI.EndChangeCheck())
@@ -780,6 +871,54 @@ namespace UnityEditor.Rendering.HighDefinition
                         MessageType.Error);
                 }
             }
+        }
+
+        internal void DecalMaterialFieldWithButton(SerializedProperty prop)
+        {
+            const int k_NewFieldWidth = 70;
+
+            var rect = EditorGUILayout.GetControlRect();
+            rect.xMax -= k_NewFieldWidth + 2;
+
+            EditorGUI.PropertyField(rect, prop);
+
+            var newFieldRect = rect;
+            newFieldRect.x = rect.xMax + 2;
+            newFieldRect.width = k_NewFieldWidth;
+
+            if (!EditorGUI.DropdownButton(newFieldRect, k_NewDecalMaterialButtonText, FocusType.Keyboard))
+                return;
+
+            GenericMenu menu = new GenericMenu();
+            menu.AddItem(new GUIContent(k_NewDecalText), false, () => CreateDefaultDecalMaterial(target as MonoBehaviour, DefaultDecal.HDRPDecal));
+            menu.AddItem(new GUIContent(k_NewSGDecalText), false, () => CreateDefaultDecalMaterial(target as MonoBehaviour, DefaultDecal.SGDecal));
+            menu.DropDown(newFieldRect);
+        }
+
+        public static void CreateDefaultDecalMaterial(MonoBehaviour obj, DefaultDecal defaultDecal)
+        {
+            string materialName = "";
+            var materialIcon = AssetPreview.GetMiniTypeThumbnail(typeof(Material));
+
+            var action = ScriptableObject.CreateInstance<DoCreateDecalDefaultMaterial>();
+            action.decalProjector = obj as DecalProjector;
+
+            switch (defaultDecal)
+            {
+                case DefaultDecal.HDRPDecal:
+                    materialName = "New " + k_NewDecalText;
+                    action.isShaderGraph = false;
+                    break;
+                case DefaultDecal.SGDecal:
+                    materialName = "New " + k_NewSGDecalText;
+                    action.isShaderGraph = true;
+                    break;
+                default:
+                    Debug.LogError("Decal creation failed.");
+                    break;
+            }
+
+            ProjectWindowUtil.StartNameEditingIfProjectWindowExists(0, action, materialName, materialIcon, null);
         }
 
         [Shortcut("HDRP/Decal: Handle changing size stretching UV", typeof(SceneView), KeyCode.Keypad1, ShortcutModifiers.Action)]
@@ -847,6 +986,35 @@ namespace UnityEditor.Rendering.HighDefinition
                 return;
 
             QuitEditMode();
+        }
+    }
+
+    class DoCreateDecalDefaultMaterial : ProjectWindowCallback.EndNameEditAction
+    {
+        public DecalProjector decalProjector;
+        public bool isShaderGraph = false;
+        public override void Action(int instanceId, string pathName, string resourceFile)
+        {
+            string shaderGraphName = AssetDatabase.GenerateUniqueAssetPath(pathName + ".shadergraph");
+            string materialName = AssetDatabase.GenerateUniqueAssetPath(pathName + ".mat");
+            Shader shader = null;
+
+            if (isShaderGraph)
+            {
+                shader = DecalSubTarget.CreateDecalGraphAtPath(shaderGraphName);
+            }
+            else
+            {
+                shader = Shader.Find("HDRP/Decal");
+            }
+
+            if (shader != null)
+            {
+                var material = new Material(shader);
+                AssetDatabase.CreateAsset(material, materialName);
+                ProjectWindowUtil.ShowCreatedAsset(material);
+                decalProjector.material = material;
+            }
         }
     }
 }

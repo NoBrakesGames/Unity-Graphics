@@ -34,6 +34,8 @@ namespace UnityEditor.ShaderGraph.Drawing
             RegisterCallback<DragPerformEvent>(OnDragPerformEvent);
             RegisterCallback<MouseMoveEvent>(OnMouseMoveEvent);
 
+            this.viewTransformChanged += OnTransformChanged;
+
             // Get reference to GraphView assembly
             Assembly graphViewAssembly = null;
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
@@ -50,16 +52,34 @@ namespace UnityEditor.ShaderGraph.Drawing
             m_UndoRedoPerformedMethodInfo = graphViewType?.GetMethod("UndoRedoPerformed",
                 BindingFlags.FlattenHierarchy | BindingFlags.Instance | BindingFlags.NonPublic,
                 null,
-                new Type[] { },
+                new Type[] { typeof(UndoRedoInfo).MakeByRefType()},
                 null);
         }
 
-        protected override bool canCutSelection
+        // GraphView has a bug where the viewTransform will be reset to default when swapping between two
+        // GraphViewEditor windows of the same type. This is a hack to prevent that from happening w/as little
+        // halo as possible.
+        Vector3 lkgPosition;
+        Vector3 lkgScale;
+        void OnTransformChanged(GraphView graphView)
+        {
+            if (!graphView.viewTransform.position.Equals(Vector3.zero))
+            {
+                lkgPosition = graphView.viewTransform.position;
+                lkgScale = graphView.viewTransform.scale;
+            }
+            else if (!lkgPosition.Equals(Vector3.zero))
+            {
+                graphView.UpdateViewTransform(lkgPosition, lkgScale);
+            }
+        }
+
+        protected internal override bool canCutSelection
         {
             get { return selection.OfType<IShaderNodeView>().Any(x => x.node.canCutNode) || selection.OfType<Group>().Any() || selection.OfType<SGBlackboardField>().Any() || selection.OfType<SGBlackboardCategory>().Any() || selection.OfType<StickyNote>().Any(); }
         }
 
-        protected override bool canCopySelection
+        protected internal override bool canCopySelection
         {
             get { return selection.OfType<IShaderNodeView>().Any(x => x.node.canCopyNode) || selection.OfType<Group>().Any() || selection.OfType<SGBlackboardField>().Any() || selection.OfType<SGBlackboardCategory>().Any() || selection.OfType<StickyNote>().Any(); }
         }
@@ -246,10 +266,11 @@ namespace UnityEditor.ShaderGraph.Drawing
 
                 foreach (AbstractMaterialNode node in graph.GetNodes<AbstractMaterialNode>())
                 {
+                    var keyHint = ShaderGraphShortcuts.GetKeycodeForContextMenu(ShaderGraphShortcuts.nodePreviewShortcutID);
                     if (node.hasPreview && node.previewExpanded == true)
-                        evt.menu.InsertAction(2, "Collapse All Previews", CollapsePreviews, (a) => DropdownMenuAction.Status.Normal);
+                        evt.menu.InsertAction(2, $"Collapse All Previews {keyHint}", CollapsePreviews, (a) => DropdownMenuAction.Status.Normal);
                     if (node.hasPreview && node.previewExpanded == false)
-                        evt.menu.InsertAction(2, "Expand All Previews", ExpandPreviews, (a) => DropdownMenuAction.Status.Normal);
+                        evt.menu.InsertAction(2, $"Expand All Previews {keyHint}", ExpandPreviews, (a) => DropdownMenuAction.Status.Normal);
                 }
                 evt.menu.AppendSeparator();
             }
@@ -299,7 +320,8 @@ namespace UnityEditor.ShaderGraph.Drawing
                 if (selection.OfType<IShaderNodeView>().Count() == 1)
                 {
                     evt.menu.AppendSeparator();
-                    evt.menu.AppendAction("Open Documentation _F1", SeeDocumentation, SeeDocumentationStatus);
+                    var sc = ShaderGraphShortcuts.GetKeycodeForContextMenu(ShaderGraphShortcuts.summonDocumentationShortcutID);
+                    evt.menu.AppendAction($"Open Documentation {sc}", SeeDocumentation, SeeDocumentationStatus);
                 }
                 if (selection.OfType<IShaderNodeView>().Count() == 1 && selection.OfType<IShaderNodeView>().First().node is SubGraphNode)
                 {
@@ -317,7 +339,8 @@ namespace UnityEditor.ShaderGraph.Drawing
             // This needs to work on nodes, groups and properties
             if ((evt.target is Node) || (evt.target is StickyNote))
             {
-                evt.menu.AppendAction("Group Selection %g", _ => GroupSelection(), (a) =>
+                var scg = ShaderGraphShortcuts.GetKeycodeForContextMenu(ShaderGraphShortcuts.nodeGroupShortcutID);
+                evt.menu.AppendAction($"Group Selection {scg}", _ => GroupSelection(), (a) =>
                 {
                     List<ISelectable> filteredSelection = new List<ISelectable>();
 
@@ -342,7 +365,8 @@ namespace UnityEditor.ShaderGraph.Drawing
                     return DropdownMenuAction.Status.Disabled;
                 });
 
-                evt.menu.AppendAction("Ungroup Selection %u", _ => RemoveFromGroupNode(), (a) =>
+                var scu = ShaderGraphShortcuts.GetKeycodeForContextMenu(ShaderGraphShortcuts.nodeUnGroupShortcutID);
+                evt.menu.AppendAction($"Ungroup Selection {scu}", _ => RemoveFromGroupNode(), (a) =>
                 {
                     List<ISelectable> filteredSelection = new List<ISelectable>();
 
@@ -400,8 +424,9 @@ namespace UnityEditor.ShaderGraph.Drawing
                 var target = evt.target as Edge;
                 var pos = evt.mousePosition;
 
+                var keyHint = ShaderGraphShortcuts.GetKeycodeForContextMenu(ShaderGraphShortcuts.createRedirectNodeShortcutID);
                 evt.menu.AppendSeparator();
-                evt.menu.AppendAction("Add Redirect Node", e => CreateRedirectNode(pos, target));
+                evt.menu.AppendAction($"Add Redirect Node {keyHint}", e => CreateRedirectNode(pos, target));
             }
         }
 
@@ -419,7 +444,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                 group = inputSlot.owner.group;
             }
 
-            RedirectNodeData.Create(graph, outputSlot.valueType, contentViewContainer.WorldToLocal(position), inputSlot.slotReference,
+            RedirectNodeData.Create(graph, outputSlot.concreteValueType, contentViewContainer.WorldToLocal(position), inputSlot.slotReference,
                 outputSlot.slotReference, group);
         }
 
@@ -446,7 +471,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                 }
             }
 
-            var nodesConnectedToAMasterNode = new List<AbstractMaterialNode>();
+            var nodesConnectedToAMasterNode = new HashSet<AbstractMaterialNode>();
 
             // Get the list of nodes from Master nodes or SubGraphOutputNode
             foreach (var abs in endNodes)
@@ -456,11 +481,10 @@ namespace UnityEditor.ShaderGraph.Drawing
 
             selection.Clear();
             // Get all nodes and then compare with the master nodes list
-            var nodesConnectedHash = new HashSet<AbstractMaterialNode>(nodesConnectedToAMasterNode);
             var allNodes = nodes.ToList().OfType<IShaderNodeView>();
             foreach (IShaderNodeView materialNodeView in allNodes)
             {
-                if (!nodesConnectedHash.Contains(materialNodeView.node))
+                if (!nodesConnectedToAMasterNode.Contains(materialNodeView.node))
                 {
                     var nd = materialNodeView as GraphElement;
                     AddToSelection(nd);
@@ -585,14 +609,17 @@ namespace UnityEditor.ShaderGraph.Drawing
             DropdownMenuAction.Status maximizeAction = DropdownMenuAction.Status.Disabled;
 
             // Initialize strings
-            string expandPreviewText = "View/Expand Previews";
-            string collapsePreviewText = "View/Collapse Previews";
-            string expandPortText = "View/Expand Ports";
-            string collapsePortText = "View/Collapse Ports";
+            var previewKeyHint = ShaderGraphShortcuts.GetKeycodeForContextMenu(ShaderGraphShortcuts.nodePreviewShortcutID);
+            var portKeyHint = ShaderGraphShortcuts.GetKeycodeForContextMenu(ShaderGraphShortcuts.nodeCollapsedShortcutID);
+
+            string expandPreviewText = $"View/Expand Previews {previewKeyHint}";
+            string collapsePreviewText = $"View/Collapse Previews {previewKeyHint}";
+            string expandPortText = $"View/Expand Ports {portKeyHint}";
+            string collapsePortText = $"View/Collapse Ports {portKeyHint}";
             if (selection.Count == 1)
             {
-                collapsePreviewText = "View/Collapse Preview";
-                expandPreviewText = "View/Expand Preview";
+                collapsePreviewText = $"View/Collapse Preview {previewKeyHint}";
+                expandPreviewText = $"View/Expand Preview {previewKeyHint}";
             }
 
             // Check if we can expand or collapse the ports/previews
@@ -660,14 +687,17 @@ namespace UnityEditor.ShaderGraph.Drawing
             m.Invoke(null, new object[] { (Action<Color>)ApplyColor, defaultColor, true, false });
         }
 
-        protected override bool canDeleteSelection
+        protected internal override bool canDeleteSelection
         {
             get
             {
-                return selection.Any(x => !(x is IShaderNodeView nodeView) || nodeView.node.canDeleteNode);
+                return selection.Any(x =>
+                {
+                    if (x is ContextView) return false; //< context view must not be deleted. ( eg, Vertex, Fragment )
+                    return !(x is IShaderNodeView nodeView) || nodeView.node.canDeleteNode;
+                });
             }
         }
-
         public void GroupSelection()
         {
             var title = "New Group";
@@ -754,6 +784,7 @@ namespace UnityEditor.ShaderGraph.Drawing
             // Reflect the data down
             graph.ValidateGraph();
             editorView.colorManager.UpdateNodeViews(nodes);
+            m_InspectorUpdateDelegate?.Invoke();
 
             // Update the views
             foreach (MaterialNodeView selectedNode in nodes)
@@ -1079,7 +1110,8 @@ namespace UnityEditor.ShaderGraph.Drawing
         internal void RestorePersistentSelectionAfterUndoRedo()
         {
             wasUndoRedoPerformed = true;
-            m_UndoRedoPerformedMethodInfo?.Invoke(this, new object[] { });
+            UndoRedoInfo info = new UndoRedoInfo();
+            m_UndoRedoPerformedMethodInfo?.Invoke(this, new object[] {info});
         }
 
         #region Drag and drop
@@ -1458,7 +1490,12 @@ namespace UnityEditor.ShaderGraph.Drawing
                 {
                     var nodeList = copyGraph.GetNodes<AbstractMaterialNode>();
 
-                    ClampNodesWithinView(graphView, new List<IRectInterface>().Union(nodeList).Union(copyGraph.stickyNotes));
+                    ClampNodesWithinView(graphView,
+                        new List<IRectInterface>()
+                            .Union(nodeList)
+                            .Union(copyGraph.stickyNotes)
+                            .Union(copyGraph.groups)
+                    );
 
                     graphView.graph.PasteGraph(copyGraph, remappedNodes, remappedEdges);
 

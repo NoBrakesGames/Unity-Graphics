@@ -6,18 +6,10 @@ using UnityEngine;
 
 namespace UnityEditor.VFX.Block
 {
-    class VelocityBaseProvider : VariantProvider
-    {
-        public override IEnumerable<Variant> ComputeVariants()
-        {
-            return Enum.GetValues(typeof(AttributeCompositionMode))
-                .OfType<AttributeCompositionMode>()
-                .Select(x => new Variant(new[] { new KeyValuePair<string, object>("composition", x) }, new[] { "velocity", VFXBlockUtility.GetNameString(x) }));
-        }
-    }
-
     abstract class VelocityBase : VFXBlock
     {
+        public const string Category = "Velocity From Direction & Speed";
+
         public enum SpeedMode
         {
             Constant,
@@ -30,10 +22,10 @@ namespace UnityEditor.VFX.Block
         [VFXSetting, SerializeField, Tooltip("Specifies whether the applied speed is constant or random.")]
         protected SpeedMode speedMode = SpeedMode.Constant;
 
-        public override VFXContextType compatibleContexts { get { return VFXContextType.InitAndUpdate; } }
-        public override VFXDataType compatibleData { get { return VFXDataType.Particle; } }
+        public override VFXContextType compatibleContexts => VFXContextType.InitAndUpdate;
+        public override VFXDataType compatibleData => VFXDataType.Particle;
 
-        public override string name { get { return string.Format("{0} Velocity from Direction & Speed ({1})", VFXBlockUtility.GetNameString(composition), "{0}"); } }
+        public override string name => VFXBlockUtility.GetNameString(composition).Label().AppendLiteral("Velocity from Direction & Speed");
 
         protected abstract bool altersDirection { get; }
 

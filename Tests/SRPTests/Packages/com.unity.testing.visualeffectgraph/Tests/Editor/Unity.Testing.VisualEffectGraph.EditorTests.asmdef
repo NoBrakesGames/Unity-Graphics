@@ -8,7 +8,10 @@
         "Unity.VisualEffectGraph.Editor",
         "UnityEditor.TestTools.Graphics",
         "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner"
+        "UnityEditor.TestRunner",
+        "Unity.Timeline",
+        "Unity.Timeline.Editor",
+        "Unity.ShaderGraph.Editor"
     ],
     "includePlatforms": [
         "Editor"
@@ -23,6 +26,27 @@
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+    {
+        "name": "com.unity.timeline",
+        "expression": "[0.0.0-builtin]",
+        "define": "VFX_HAS_TIMELINE"
+    },
+    {
+        "name": "com.unity.timeline",
+        "expression": "1.0.0",
+        "define": "VFX_HAS_TIMELINE"
+    },
+    {
+      "name": "com.unity.render-pipelines.high-definition",
+      "expression": "1.0.0",
+      "define": "VFX_TESTS_HAS_HDRP"
+    },
+    {
+      "name": "com.unity.render-pipelines.universal",
+      "expression": "1.0.0",
+      "define": "VFX_TESTS_HAS_URP"
+    }
+    ],
     "noEngineReferences": false
 }

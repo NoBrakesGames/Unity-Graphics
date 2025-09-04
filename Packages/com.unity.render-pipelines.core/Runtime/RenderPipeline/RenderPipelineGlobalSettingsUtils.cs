@@ -1,8 +1,9 @@
-﻿#if UNITY_EDITOR
+#if UNITY_EDITOR
 using System;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
+using UnityEditor.Rendering;
 
 namespace UnityEngine.Rendering
 {
@@ -48,7 +49,7 @@ namespace UnityEngine.Rendering
             path = AssetDatabase.GenerateUniqueAssetPath(path);
 
             var assetCreated = ScriptableObject.CreateInstance(renderPipelineGlobalSettingsType) as RenderPipelineGlobalSettings;
-            if (assetCreated)
+            if (assetCreated != null)
             {
                 AssetDatabase.CreateAsset(assetCreated, path);
 
@@ -56,9 +57,12 @@ namespace UnityEngine.Rendering
                 if (dataSource != null)
                     EditorUtility.CopySerializedManagedFieldsOnly(dataSource, assetCreated);
 
+                EditorGraphicsSettings.PopulateRenderPipelineGraphicsSettings(assetCreated);
+
                 assetCreated.Initialize(dataSource);
 
-                AssetDatabase.SaveAssets();
+                EditorUtility.SetDirty(assetCreated);
+                AssetDatabase.SaveAssetIfDirty(assetCreated);
                 AssetDatabase.Refresh();
             }
 
@@ -71,7 +75,7 @@ namespace UnityEngine.Rendering
         /// 1. Loads the asset at the default path.
         /// 2. Finds any asset in the project with the same type.
         /// 3. If `canCreateNewAsset` is true, creates a new asset in the default path.
-        /// If Unity finds or creates a valid asset, Unity updates the <see cref="GraphicsSettings"/> with it. Otherwise Unity will unregister the settings for the given pipeline. 
+        /// If Unity finds or creates a valid asset, Unity updates the <see cref="GraphicsSettings"/> with it. Otherwise Unity will unregister the settings for the given pipeline.
         /// </summary>
         /// <param name="instance">The current instance of the asset.</param>
         /// <param name="defaultPath">The default path.</param>
@@ -126,16 +130,14 @@ namespace UnityEngine.Rendering
                 }
             }
 
-            if (instance == null || instance.Equals(null))
-            {
-                error = new Exception($"Unable to find or create a {globalSettingsName}. The configured Render Pipeline may not work correctly. Go to Project Settings > Graphics > {globalSettingsName} for additional help.");
-                GraphicsSettings.UnregisterRenderPipelineSettings<TRenderPipeline>();
-                return false;
-            }
+            error = instance == null || instance.Equals(null)
+                ? new Exception(
+                    $"Unable to find or create a {globalSettingsName}. The configured Render Pipeline may not work correctly. Go to Project Settings > Graphics > {globalSettingsName} for additional help.")
+                : null;
 
-            error = null;
-            GraphicsSettings.RegisterRenderPipelineSettings<TRenderPipeline>(instance);
-            return true;
+            EditorGraphicsSettings.SetRenderPipelineGlobalSettingsAsset<TRenderPipeline>(instance);
+
+            return error == null;
         }
     }
 }

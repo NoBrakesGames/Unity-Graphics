@@ -1,14 +1,13 @@
-using System;
-using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Force")]
+    [VFXHelpURL("Block-ConformToSphere")]
+    [VFXInfo(name = "Attractor Shape|Sphere", category = "Force")]
     class ConformToSphere : VFXBlock
     {
-        public override string name { get { return "Conform to Sphere"; } }
+        public override string name => "Attractor Shape Sphere";
         public override VFXContextType compatibleContexts { get { return VFXContextType.Update; } }
         public override VFXDataType compatibleData { get { return VFXDataType.Particle; } }
 

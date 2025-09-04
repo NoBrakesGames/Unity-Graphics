@@ -17,7 +17,8 @@ namespace UnityEditor.VFX
         }
     }
 
-    [VFXInfo]
+    [VFXHelpURL("Context-Event")]
+    [VFXInfo(name = "Event", category = "#1Event")]
     class VFXBasicEvent : VFXContext
     {
         [VFXSetting, PushButton(typeof(LaunchEventBehavior), "Send"), Delayed]

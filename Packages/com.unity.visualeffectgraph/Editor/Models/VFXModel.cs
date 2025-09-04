@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+
 using UnityEngine;
-using UnityEditor.VFX;
 using UnityEditor.VFX.UI;
 using UnityEngine.VFX;
 using UnityEngine.Profiling;
@@ -28,7 +28,8 @@ namespace UnityEditor.VFX
         public Action<VFXObject, bool> onModified;
         void OnValidate()
         {
-            Modified(false);
+            if (!VFXGraph.restoringGraph)
+                Modified(false);
         }
 
         public void Modified(bool uiChange)
@@ -58,8 +59,7 @@ namespace UnityEditor.VFX
             kInitValueChanged,              // A value has changed in a spawn/init context and may require a reinit
         }
 
-        public new virtual string name { get { return string.Empty; } }
-        public virtual string libraryName { get { return name; } }
+        public new virtual string name => string.Empty;
 
         public delegate void InvalidateEvent(VFXModel model, InvalidationCause cause);
 
@@ -86,9 +86,9 @@ namespace UnityEditor.VFX
 
         public virtual void CheckGraphBeforeImport() { }
 
-        public virtual void OnUnknownChange()
-        {
-        }
+        public virtual void OnUnknownChange() { }
+
+        public virtual void OnSRPChanged() { }
 
         public virtual void GetSourceDependentAssets(HashSet<string> dependencies)
         {
@@ -129,9 +129,9 @@ namespace UnityEditor.VFX
             }
         }
 
-        public void RefreshErrors()
+        public virtual void RefreshErrors()
         {
-            VFXViewWindow.RefreshErrors(this);
+            GetGraph()?.errorManager.RefreshInvalidateReport(this);
         }
 
         protected virtual void OnAdded() { }
@@ -322,8 +322,12 @@ namespace UnityEditor.VFX
             {
                 setting.field.SetValue(setting.instance, value);
                 OnSettingModified(setting);
-                if (setting.instance != this)
-                    setting.instance.OnSettingModified(setting);
+                if (setting.instance != (object)this)
+                {
+                    if (setting.instance is VFXModel model)
+                        model.OnSettingModified(setting);
+                }
+
                 return true;
             }
             return false;
@@ -333,11 +337,6 @@ namespace UnityEditor.VFX
         // Use OnInvalidate with KSettingChanged and not this method to handle other side effects
         public virtual void OnSettingModified(VFXSetting setting) { }
         public virtual IEnumerable<int> GetFilteredOutEnumerators(string name) { return null; }
-
-        public virtual VFXSetting GetSetting(string name)
-        {
-            return new VFXSetting(GetType().GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance), this);
-        }
 
         public void Invalidate(InvalidationCause cause)
         {
@@ -383,7 +382,7 @@ namespace UnityEditor.VFX
             return m_UIIgnoredErrors.Any();
         }
 
-        internal virtual void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal virtual void GenerateErrors(VFXErrorReporter report)
         {
         }
 
@@ -392,23 +391,50 @@ namespace UnityEditor.VFX
             OnInvalidate(model, cause);
             if (m_Parent != null)
                 m_Parent.Invalidate(model, cause);
+            if (cause is InvalidationCause.kParamChanged or InvalidationCause.kExpressionValueInvalidated or InvalidationCause.kExpressionInvalidated or InvalidationCause.kSettingChanged)
+                RefreshErrors();
         }
 
-        public virtual IEnumerable<VFXSetting> GetSettings(bool listHidden, VFXSettingAttribute.VisibleFlags flags = VFXSettingAttribute.VisibleFlags.All)
+        private static Dictionary<Type, List<(FieldInfo field, VFXSettingAttribute attribute)>> s_CacheFieldByType;
+        private static readonly BindingFlags kSettingsBindingFlag = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        public static IEnumerable<(FieldInfo field, VFXSettingAttribute attribute)> GetFields(Type type)
         {
-            return GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Where(f =>
-            {
-                var attrArray = f.GetCustomAttributes(typeof(VFXSettingAttribute), true);
-                if (attrArray.Length == 1)
-                {
-                    var attr = attrArray[0] as VFXSettingAttribute;
-                    if (listHidden)
-                        return true;
+            s_CacheFieldByType ??= new();
+            if (s_CacheFieldByType.TryGetValue(type, out var listOfSettings))
+                return listOfSettings;
 
-                    return (attr.visibleFlags & flags) != 0 && !filteredOutSettings.Contains(f.Name);
+            listOfSettings = new List<(FieldInfo settings, VFXSettingAttribute attribute)>();
+            foreach (var field in type.GetFields(kSettingsBindingFlag))
+            {
+                var attrArray = field.GetCustomAttributes(typeof(VFXSettingAttribute), true);
+                    if (attrArray.Length == 1)
+                    {
+                        var attr = (VFXSettingAttribute)attrArray[0];
+                    listOfSettings.Add((field, attr));
                 }
-                return false;
-            }).Select(field => new VFXSetting(field, this));
+            }
+            s_CacheFieldByType.Add(type, listOfSettings);
+            return listOfSettings;
+        }
+
+        public virtual VFXSetting GetSetting(string name)
+        {
+            return new VFXSetting(GetType().GetField(name, kSettingsBindingFlag), this);
+        }
+
+        protected static bool ShouldSettingBeListed(FieldInfo field, VFXSettingAttribute attribute, bool listHidden, VFXSettingAttribute.VisibleFlags flags, IEnumerable<string> filteredOutSettings)
+        {
+            return listHidden || (attribute.visibleFlags.HasFlag(flags)
+                                  && !filteredOutSettings.Contains(field.Name));
+        }
+
+        public virtual IEnumerable<VFXSetting> GetSettings(bool listHidden, VFXSettingAttribute.VisibleFlags flags = VFXSettingAttribute.VisibleFlags.Default)
+        {
+            foreach (var settings in GetFields(GetType()))
+            {
+                if (ShouldSettingBeListed(settings.field, settings.attribute, listHidden, flags, filteredOutSettings))
+                    yield return new VFXSetting(settings.field, this, settings.attribute.visibleFlags);
+            }
         }
 
         static protected VFXExpression TransformExpression(VFXExpression input, SpaceableType dstSpaceType, VFXExpression matrix)
@@ -504,11 +530,23 @@ namespace UnityEditor.VFX
                     return graph;
                 case VFXSlot { owner: VFXModel m }:
                    return m.GetGraph();
+                case VFXData data:
+                    return data.owners.FirstOrDefault()?.GetGraph();
                 case { } m when m.GetParent() is { } parent:
                     return parent.GetGraph();
             }
 
             return null;
+        }
+
+        public IEnumerable<VFXModel> GetRecursiveChildren()
+        {
+            yield return this;
+
+            foreach (var model in children.SelectMany(x => x.GetRecursiveChildren()))
+            {
+                yield return model;
+            }
         }
 
         public static void UnlinkModel(VFXModel model, bool notify = true)
@@ -535,7 +573,7 @@ namespace UnityEditor.VFX
             model.Detach(notify);
         }
 
-        public static void ReplaceModel(VFXModel dst, VFXModel src, bool notify = true)
+        public static void ReplaceModel(VFXModel dst, VFXModel src, bool notify = true, bool unlink = true)
         {
             // UI
             dst.m_UIPosition = src.m_UIPosition;
@@ -557,7 +595,8 @@ namespace UnityEditor.VFX
             }
 
             // Unlink everything
-            UnlinkModel(src);
+            if (unlink)
+                UnlinkModel(src);
 
             // Replace model
             var parent = src.GetParent();

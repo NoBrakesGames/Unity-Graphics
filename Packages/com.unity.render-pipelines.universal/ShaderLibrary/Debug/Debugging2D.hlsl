@@ -8,20 +8,23 @@
 
 #if defined(DEBUG_DISPLAY)
 
-#define SETUP_DEBUG_TEXTURE_DATA_2D(inputData, positionWS, texture)    SetupDebugDataTexture(inputData, positionWS, texture##_TexelSize, texture##_MipInfo, GetMipCount(TEXTURE2D_ARGS(texture, sampler##texture)))
-#define SETUP_DEBUG_DATA_2D(inputData, positionWS)                     SetupDebugData(inputData, positionWS)
+#define SETUP_DEBUG_TEXTURE_DATA_2D_NO_TS(inputData, positionWS, positionCS, texture)   SetupDebugDataTexture(inputData, positionWS, positionCS, float4(0.1, 0.1, 1.0, 1.0), texture##_MipInfo, texture##_StreamInfo, GetMipCount(TEXTURE2D_ARGS(texture, sampler##texture)))
+#define SETUP_DEBUG_TEXTURE_DATA_2D(inputData, positionWS, positionCS, texture)         SetupDebugDataTexture(inputData, positionWS, positionCS, texture##_TexelSize, texture##_MipInfo, texture##_StreamInfo, GetMipCount(TEXTURE2D_ARGS(texture, sampler##texture)))
+#define SETUP_DEBUG_DATA_2D(inputData, positionWS, positionCS)                          SetupDebugData(inputData, positionWS, positionCS)
 
-void SetupDebugData(inout InputData2D inputData, float3 positionWS)
+void SetupDebugData(inout InputData2D inputData, float3 positionWS, float4 positionCS)
 {
     inputData.positionWS = positionWS;
+    inputData.positionCS = positionCS;
 }
 
-void SetupDebugDataTexture(inout InputData2D inputData, float3 positionWS, float4 texelSize, float4 mipInfo, uint mipCount)
+void SetupDebugDataTexture(inout InputData2D inputData, float3 positionWS, float4 positionCS, float4 texelSize, float4 mipInfo, float4 streamInfo, uint mipCount)
 {
-    SetupDebugData(inputData, positionWS);
+    SetupDebugData(inputData, positionWS, positionCS);
 
     inputData.texelSize = texelSize;
     inputData.mipInfo = mipInfo;
+    inputData.streamInfo = streamInfo;
     inputData.mipCount = mipCount;
 }
 
@@ -66,13 +69,22 @@ bool CalculateDebugColorMaterialSettings(in SurfaceData2D surfaceData, in InputD
     }
 }
 
+bool CalculateColorForDebugMipmapStreaming(in SurfaceData2D surfaceData, in InputData2D inputData, inout half4 debugColor)
+{
+    return CalculateColorForDebugMipmapStreaming(inputData.mipCount, uint2(inputData.positionCS.xy), inputData.texelSize, inputData.uv, inputData.mipInfo, inputData.streamInfo, surfaceData.albedo, debugColor);
+}
+
 bool CalculateDebugColorForRenderingSettings(in SurfaceData2D surfaceData, in InputData2D inputData, inout half4 debugColor)
 {
     if (CalculateColorForDebugSceneOverride(debugColor))
     {
         return true;
     }
-    return TryGetDebugColorInvalidMode(debugColor);
+    else if (CalculateColorForDebugMipmapStreaming(surfaceData, inputData, debugColor))
+    {
+        return true;
+    }
+    return false;
 }
 
 bool CalculateDebugColorLightingSettings(inout SurfaceData2D surfaceData, inout InputData2D inputData, inout half4 debugColor)
@@ -139,8 +151,9 @@ bool CanDebugOverrideOutputColor(inout SurfaceData2D surfaceData, inout InputDat
 
 #else
 
-#define SETUP_DEBUG_TEXTURE_DATA_2D(inputData, positionWS, texture)
-#define SETUP_DEBUG_DATA_2D(inputData, positionWS)
+#define SETUP_DEBUG_TEXTURE_DATA_2D_NO_TS(inputData, positionWS, positionCS, texture)
+#define SETUP_DEBUG_TEXTURE_DATA_2D(inputData, positionWS, positionCS, texture)
+#define SETUP_DEBUG_DATA_2D(inputData, positionWS, positionCS)
 
 #endif
 

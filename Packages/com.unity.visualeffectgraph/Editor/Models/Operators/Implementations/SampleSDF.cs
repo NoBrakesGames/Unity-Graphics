@@ -1,9 +1,9 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Sampling")]
+    [VFXHelpURL("Operator-SampleSDF")]
+    [VFXInfo(name = "Sample Signed Distance Field", category = "Sampling")]
     class SampleSDF : VFXOperator
     {
         override public string name { get { return "Sample Signed Distance Field"; } }

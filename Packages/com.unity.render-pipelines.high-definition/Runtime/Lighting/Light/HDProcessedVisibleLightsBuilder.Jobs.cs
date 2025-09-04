@@ -46,6 +46,8 @@ namespace UnityEngine.Rendering.HighDefinition
             [ReadOnly]
             public bool enableRayTracing;
             [ReadOnly]
+            public bool enablePathTracing;
+            [ReadOnly]
             public bool showDirectionalLight;
             [ReadOnly]
             public bool showPunctualLight;
@@ -84,6 +86,12 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 if (dataIndex < 0)
                     return true;
+
+                // If the light was forced visible it will be outside of the view and have no pixels on screen.
+                // The light will still generate a cached shadow map, but removed before going in to the
+                // main light loop.
+                if (light.forcedVisible)
+                    return false;
 
                 // We can skip the processing of lights that are so small to not affect at least a pixel on screen.
                 // TODO: The minimum pixel size on screen should really be exposed as parameter, to allow small lights to be culled to user's taste.
@@ -245,7 +253,10 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 ref HDLightRenderData lightRenderData = ref GetLightData(dataIndex);
 
-                if (enableRayTracing && !lightRenderData.includeForRayTracing)
+                if (enableRayTracing && !enablePathTracing && !lightRenderData.includeForRayTracing)
+                    return;
+
+                if (enableRayTracing && enablePathTracing && !lightRenderData.includeForPathTracing)
                     return;
 
                 float3 lightPosition = visibleLight.GetPosition();
@@ -289,7 +300,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 if (outputIndex < 0 || outputIndex >= visibleLights.Length)
                     throw new Exception("Trying to access an output index out of bounds. Output index is " + outputIndex + "and max length is " + visibleLights.Length);
 #endif
-                sortKeys[outputIndex] = HDGpuLightsBuilder.PackLightSortKey(lightCategory, gpuLightType, lightVolumeType, index);
+                sortKeys[outputIndex] = HDGpuLightsBuilder.PackLightSortKey(lightCategory, gpuLightType, lightVolumeType, index, visibleLight.forcedVisible);
 
                 processedLightVolumeType[index] = lightVolumeType;
                 processedEntities[index] = new HDProcessedVisibleLight()
@@ -334,6 +345,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 pixelCount = hdCamera.actualWidth * hdCamera.actualHeight,
                 enableAreaLights = ShaderConfig.s_AreaLights != 0,
                 enableRayTracing = hdCamera.frameSettings.IsEnabled(FrameSettingsField.RayTracing) && rayTracingState,
+                enablePathTracing = hdCamera.IsPathTracingEnabled() && rayTracingState,
                 showDirectionalLight = debugDisplaySettings.data.lightingDebugSettings.showDirectionalLight,
                 showPunctualLight = debugDisplaySettings.data.lightingDebugSettings.showPunctualLight,
                 showAreaLight = debugDisplaySettings.data.lightingDebugSettings.showAreaLight,

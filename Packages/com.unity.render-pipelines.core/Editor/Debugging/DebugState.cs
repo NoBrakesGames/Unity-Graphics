@@ -56,7 +56,7 @@ namespace UnityEditor.Rendering
     /// <summary>
     /// Generic serialized state of a Debug Item.
     /// </summary>
-    /// <typeparam name="T"></typeparam>
+    /// <typeparam name="T">The type of the Debug Item.</typeparam>
     [Serializable]
     public class DebugState<T> : DebugState
     {
@@ -239,6 +239,12 @@ namespace UnityEditor.Rendering
     /// </summary>
     [Serializable, DebugState(typeof(DebugUI.UIntField))]
     public sealed class DebugStateUInt : DebugState<uint> { }
+
+    /// <summary>
+    /// Rendering layer mask state.
+    /// </summary>
+    [Serializable, DebugState(typeof(DebugUI.RenderingLayerField))]
+    public sealed class DebugStateRenderingLayer : DebugState<RenderingLayerMask> { }
 
     /// <summary>
     /// Float Debug State.

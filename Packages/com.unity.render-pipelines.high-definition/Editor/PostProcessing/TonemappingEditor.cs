@@ -79,14 +79,15 @@ namespace UnityEditor.Rendering.HighDefinition
 
         internal bool HDROutputIsActive()
         {
-            // TODO: Until we can test it, disable on Mac.
-            return SystemInfo.graphicsDeviceType != GraphicsDeviceType.Metal && SystemInfo.hdrDisplaySupportFlags.HasFlag(HDRDisplaySupportFlags.Supported) && HDROutputSettings.main.active;
+            return SystemInfo.hdrDisplaySupportFlags.HasFlag(HDRDisplaySupportFlags.Supported) && HDROutputSettings.main.active;
         }
 
 
         public override void OnInspectorGUI()
         {
-            bool hdrInPlayerSettings = UnityEditor.PlayerSettings.useHDRDisplay;
+            HDEditorUtils.EnsureFrameSetting(FrameSettingsField.Tonemapping);
+
+            bool hdrInPlayerSettings = UnityEditor.PlayerSettings.allowHDRDisplaySupport;
 
             PropertyField(m_Mode);
 

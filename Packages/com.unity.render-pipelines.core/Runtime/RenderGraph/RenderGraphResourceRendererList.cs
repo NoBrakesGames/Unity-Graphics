@@ -1,12 +1,10 @@
 using System.Diagnostics;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.RendererUtils;
-
+using UnityEngine.Scripting.APIUpdating;
 // Typedefs for the in-engine RendererList API (to avoid conflicts with the experimental version)
 using CoreRendererList = UnityEngine.Rendering.RendererList;
 using CoreRendererListDesc = UnityEngine.Rendering.RendererUtils.RendererListDesc;
 
-namespace UnityEngine.Experimental.Rendering.RenderGraphModule
+namespace UnityEngine.Rendering.RenderGraphModule
 {
     internal enum RendererListHandleType
     {
@@ -20,6 +18,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
     /// Renderer List resource handle.
     /// </summary>
     [DebuggerDisplay("RendererList ({handle})")]
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public struct RendererListHandle
     {
         internal RendererListHandleType type;

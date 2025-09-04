@@ -75,8 +75,13 @@ namespace UnityEditor.ShaderGraph
 
         public void Dirty(ModificationScope scope)
         {
-            if (m_OnModified != null)
+            // Calling m_OnModified immediately upon dirtying the node can result in a lot of churn. For example,
+            // nodes can cause cascading view updates *multiple times* per operation.
+            // If this call causes future performance issues, we should investigate some kind of deferral or early out
+            // until all of the dirty nodes have been identified.
+            if (m_OnModified != null && !owner.replaceInProgress)
                 m_OnModified(this, scope);
+            NodeValidation.HandleValidationExtensions(this);
         }
 
         public string name
@@ -84,6 +89,8 @@ namespace UnityEditor.ShaderGraph
             get { return m_Name; }
             set { m_Name = value; }
         }
+
+        public virtual string displayName => name;
 
         public string[] synonyms;
 
@@ -801,7 +808,7 @@ namespace UnityEditor.ShaderGraph
             var slot = FindSlot<MaterialSlot>(slotId);
             if (slot == null)
                 throw new ArgumentException(string.Format("Attempting to use MaterialSlot({0}) on node of type {1} where this slot can not be found", slotId, this), "slotId");
-            return string.Format("_{0}_{1}_{2}", GetVariableNameForNode(), NodeUtils.GetHLSLSafeName(slot.shaderOutputName), unchecked((uint)slotId));
+            return string.Format("_{0}_{1}_{2}_{3}", GetVariableNameForNode(), NodeUtils.GetHLSLSafeName(slot.shaderOutputName), unchecked((uint)slotId), slot.concreteValueType.ToPropertyType().ToString());
         }
 
         public string GetConnnectionStateVariableNameForSlot(int slotId)
@@ -868,9 +875,7 @@ namespace UnityEditor.ShaderGraph
             if (owner != null)
             {
                 var edges = owner.GetEdges(GetSlotReference(slotId));
-
-                foreach (var edge in edges.ToArray())
-                    owner.RemoveEdge(edge);
+                owner.RemoveEdges(edges.ToArray());
             }
 
             //remove slots

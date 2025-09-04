@@ -5,6 +5,7 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
         _MainTex("Diffuse", 2D) = "white" {}
         _MaskTex("Mask", 2D) = "white" {}
         _NormalMap("Normal Map", 2D) = "bump" {}
+        [MaterialToggle] _ZWrite("ZWrite", Float) = 0
 
         // Legacy properties. They're here so that materials using this shader can gracefully fallback to the legacy sprite shader.
         [HideInInspector] _Color("Tint", Color) = (1,1,1,1)
@@ -19,7 +20,7 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
 
         Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha
         Cull Off
-        ZWrite Off
+        ZWrite [_ZWrite]
 
         Pass
         {
@@ -32,10 +33,10 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
             #pragma vertex CombinedShapeLightVertex
             #pragma fragment CombinedShapeLightFragment
 
-            #pragma multi_compile USE_SHAPE_LIGHT_TYPE_0 __
-            #pragma multi_compile USE_SHAPE_LIGHT_TYPE_1 __
-            #pragma multi_compile USE_SHAPE_LIGHT_TYPE_2 __
-            #pragma multi_compile USE_SHAPE_LIGHT_TYPE_3 __
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/Shaders/2D/Include/ShapeLightShared.hlsl"
+
+            // GPU Instancing
+            #pragma multi_compile_instancing
             #pragma multi_compile _ DEBUG_DISPLAY SKINNED_SPRITE
 
             struct Attributes
@@ -60,16 +61,17 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
             };
 
             #include "Packages/com.unity.render-pipelines.universal/Shaders/2D/Include/LightingUtility.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DebugMipmapStreamingMacros.hlsl"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
+            UNITY_TEXTURE_STREAMING_DEBUG_VARS_FOR_TEX(_MainTex);
+
             TEXTURE2D(_MaskTex);
             SAMPLER(sampler_MaskTex);
 
             // NOTE: Do not ifdef the properties here as SRP batcher can not handle different layouts.
             CBUFFER_START(UnityPerMaterial)
-                half4 _MainTex_ST;
-                half4 _NormalMap_ST;  // Is this the right way to do this?
                 half4 _Color;
             CBUFFER_END
 
@@ -96,12 +98,13 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
                 UNITY_SKINNED_VERTEX_COMPUTE(v);
 
+                SetUpSpriteInstanceProperties();
                 v.positionOS = UnityFlipSprite(v.positionOS, unity_SpriteProps.xy);
                 o.positionCS = TransformObjectToHClip(v.positionOS);
                 #if defined(DEBUG_DISPLAY)
                 o.positionWS = TransformObjectToWorld(v.positionOS);
                 #endif
-                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+                o.uv = v.uv;
                 o.lightingUV = half2(ComputeScreenPos(o.positionCS / o.positionCS.w).xy);
 
                 o.color = v.color * _Color * unity_SpriteColor;
@@ -120,6 +123,8 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
                 InitializeSurfaceData(main.rgb, main.a, mask, surfaceData);
                 InitializeInputData(i.uv, i.lightingUV, inputData);
 
+                SETUP_DEBUG_TEXTURE_DATA_2D_NO_TS(inputData, i.positionWS, i.positionCS, _MainTex);
+
                 return CombinedShapeLightShared(surfaceData, inputData);
             }
             ENDHLSL
@@ -136,6 +141,8 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
             #pragma vertex NormalsRenderingVertex
             #pragma fragment NormalsRenderingFragment
 
+            // GPU Instancing
+            #pragma multi_compile_instancing
             #pragma multi_compile _ SKINNED_SPRITE
 
             struct Attributes
@@ -143,6 +150,7 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
                 float3 positionOS   : POSITION;
                 float4 color        : COLOR;
                 float2 uv           : TEXCOORD0;
+                float3 normal       : NORMAL;
                 float4 tangent      : TANGENT;
                 UNITY_SKINNED_VERTEX_INPUTS
                 UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -166,8 +174,6 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
 
             // NOTE: Do not ifdef the properties here as SRP batcher can not handle different layouts.
             CBUFFER_START( UnityPerMaterial )
-                half4 _MainTex_ST;
-                half4 _NormalMap_ST;  // Is this the right way to do this?
                 half4 _Color;
             CBUFFER_END
 
@@ -178,11 +184,12 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
                 UNITY_SKINNED_VERTEX_COMPUTE(attributes);
 
+                SetUpSpriteInstanceProperties();
                 attributes.positionOS = UnityFlipSprite(attributes.positionOS, unity_SpriteProps.xy);
                 o.positionCS = TransformObjectToHClip(attributes.positionOS);
-                o.uv = TRANSFORM_TEX(attributes.uv, _NormalMap);
-                o.color = attributes.color;
-                o.normalWS = -GetViewForwardDir();
+                o.uv = attributes.uv;
+                o.color = attributes.color * _Color * unity_SpriteColor;
+                o.normalWS = TransformObjectToWorldDir(attributes.normal);
                 o.tangentWS = TransformObjectToWorldDir(attributes.tangent.xyz);
                 o.bitangentWS = cross(o.normalWS, o.tangentWS) * attributes.tangent.w;
                 return o;
@@ -207,11 +214,17 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
             HLSLPROGRAM
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/2D/Include/Core2D.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DebugMipmapStreamingMacros.hlsl"
+            #if defined(DEBUG_DISPLAY)
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Debug/Debugging2D.hlsl"
+            #endif
 
             #pragma vertex UnlitVertex
             #pragma fragment UnlitFragment
 
-            #pragma multi_compile _ SKINNED_SPRITE
+            // GPU Instancing
+            #pragma multi_compile_instancing
+            #pragma multi_compile _ DEBUG_DISPLAY SKINNED_SPRITE
 
             struct Attributes
             {
@@ -235,11 +248,10 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
 
             TEXTURE2D(_MainTex);
             SAMPLER(sampler_MainTex);
+            UNITY_TEXTURE_STREAMING_DEBUG_VARS_FOR_TEX(_MainTex);
 
             // NOTE: Do not ifdef the properties here as SRP batcher can not handle different layouts.
             CBUFFER_START( UnityPerMaterial )
-                half4 _MainTex_ST;
-                half4 _NormalMap_ST;  // Is this the right way to do this?
                 half4 _Color;
             CBUFFER_END
 
@@ -250,12 +262,13 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
                 UNITY_SKINNED_VERTEX_COMPUTE(attributes);
 
+                SetUpSpriteInstanceProperties();
                 attributes.positionOS = UnityFlipSprite( attributes.positionOS, unity_SpriteProps.xy);
                 o.positionCS = TransformObjectToHClip(attributes.positionOS);
                 #if defined(DEBUG_DISPLAY)
-                o.positionWS = TransformObjectToWorld(v.positionOS);
+                o.positionWS = TransformObjectToWorld(attributes.positionOS);
                 #endif
-                o.uv = TRANSFORM_TEX(attributes.uv, _MainTex);
+                o.uv = attributes.uv;
                 o.color = attributes.color * _Color * unity_SpriteColor;
                 return o;
             }
@@ -271,7 +284,7 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
 
                 InitializeSurfaceData(mainTex.rgb, mainTex.a, surfaceData);
                 InitializeInputData(i.uv, inputData);
-                SETUP_DEBUG_DATA_2D(inputData, i.positionWS);
+                SETUP_DEBUG_TEXTURE_DATA_2D_NO_TS(inputData, i.positionWS, i.positionCS, _MainTex);
 
                 if(CanDebugOverrideOutputColor(surfaceData, inputData, debugColor))
                 {
@@ -284,6 +297,4 @@ Shader "Universal Render Pipeline/2D/Sprite-Lit-Default"
             ENDHLSL
         }
     }
-
-    Fallback "Sprites/Default"
 }

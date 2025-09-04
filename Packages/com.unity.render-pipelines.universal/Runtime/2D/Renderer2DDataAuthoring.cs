@@ -11,37 +11,36 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField, Reload("Runtime/Materials/Sprite-Lit-Default.mat")]
         Material m_DefaultCustomMaterial = null;
 
-        [SerializeField, Reload("Runtime/Materials/Sprite-Lit-Default.mat")]
-        Material m_DefaultLitMaterial = null;
-
-        [SerializeField, Reload("Runtime/Materials/Sprite-Unlit-Default.mat")]
-        Material m_DefaultUnlitMaterial = null;
-
-        [SerializeField, Reload("Runtime/Materials/SpriteMask-Default.mat")]
-        Material m_DefaultMaskMaterial = null;
-
         internal override Shader GetDefaultShader()
         {
-            return Shader.Find("Universal Render Pipeline/2D/Sprite-Lit-Default");
+            if (!GraphicsSettings.TryGetRenderPipelineSettings<Renderer2DResources>(out var resources))
+                return null;
+
+            return resources.defaultLitMaterial.shader;
         }
 
         internal override Material GetDefaultMaterial(DefaultMaterialType materialType)
         {
-            if (materialType == DefaultMaterialType.Sprite || materialType == DefaultMaterialType.Particle)
-            {
-                if (m_DefaultMaterialType == Renderer2DDefaultMaterialType.Lit)
-                    return m_DefaultLitMaterial;
-                else if (m_DefaultMaterialType == Renderer2DDefaultMaterialType.Unlit)
-                    return m_DefaultUnlitMaterial;
-                else
-                    return m_DefaultCustomMaterial;
-            }
-            if (materialType == DefaultMaterialType.SpriteMask)
-            {
-                return m_DefaultMaskMaterial;
-            }
+            if (!GraphicsSettings.TryGetRenderPipelineSettings<Renderer2DResources>(out var resources))
+                return null;
 
-            return null;
+            switch (materialType)
+            {
+                case DefaultMaterialType.Sprite:
+                case DefaultMaterialType.Particle:
+                {
+                    return m_DefaultMaterialType switch
+                    {
+                        Renderer2DDefaultMaterialType.Lit => resources.defaultLitMaterial,
+                        Renderer2DDefaultMaterialType.Unlit => resources.defaultUnlitMaterial,
+                        _ => m_DefaultCustomMaterial
+                    };
+                }
+                case DefaultMaterialType.SpriteMask:
+                    return resources.defaultMaskMaterial;
+                default:
+                    return null;
+            }
         }
 
         private void InitializeSpriteEditorPrefs()
@@ -75,6 +74,9 @@ namespace UnityEngine.Rendering.Universal
 
         void RebuildBlendStyles(bool force = false)
         {
+            // Initialize Editor Prefs for Sprite Editor
+            InitializeSpriteEditorPrefs();
+
             // Initialize Light Blend Styles
             if (m_LightBlendStyles != null && !force)
             {
@@ -105,9 +107,6 @@ namespace UnityEngine.Rendering.Universal
             m_LightBlendStyles[3].name = "Additive with Mask";
             m_LightBlendStyles[3].blendMode = Light2DBlendStyle.BlendMode.Additive;
             m_LightBlendStyles[3].maskTextureChannel = Light2DBlendStyle.TextureChannel.R;
-
-            // Initialize Editor Prefs for Sprite Editor
-            InitializeSpriteEditorPrefs();
         }
 
         private void Awake()

@@ -38,7 +38,7 @@ namespace UnityEngine.Rendering.HighDefinition
             bool useSplitLighting = false;
             if (material.HasProperty(kMaterialID))
             {
-                var materialId = material.GetMaterialId();
+                var materialId = material.GetMaterialType();
 
                 // Check that the value of material type is in range with the allowed values from the shader:
                 int materialTypeMaskIndex = material.shader.FindPropertyIndex(kMaterialTypeMask);
@@ -64,13 +64,24 @@ namespace UnityEngine.Rendering.HighDefinition
                 useSplitLighting = materialId == MaterialId.LitSSS;
                 CoreUtils.SetKeyword(material, "_MATERIAL_FEATURE_SUBSURFACE_SCATTERING", materialId == MaterialId.LitSSS);
                 CoreUtils.SetKeyword(material, "_MATERIAL_FEATURE_TRANSMISSION", materialId == MaterialId.LitTranslucent || (materialId == MaterialId.LitSSS && material.GetFloat(kTransmissionEnable) > 0.0f));
+                CoreUtils.SetKeyword(material, "_MATERIAL_FEATURE_COLORED_TRANSMISSION", materialId == MaterialId.LitColoredTranslucent);
                 CoreUtils.SetKeyword(material, "_MATERIAL_FEATURE_ANISOTROPY", materialId == MaterialId.LitAniso);
                 CoreUtils.SetKeyword(material, "_MATERIAL_FEATURE_IRIDESCENCE", materialId == MaterialId.LitIridescence);
                 CoreUtils.SetKeyword(material, "_MATERIAL_FEATURE_SPECULAR_COLOR", materialId == MaterialId.LitSpecular);
             }
-            else if (material.HasProperty(kUseSplitLighting))
-                useSplitLighting = material.GetInt(kUseSplitLighting) != 0;
-            BaseLitAPI.SetupStencil(material, receivesLighting: true, receiveSSR, useSplitLighting);
+            else
+            {
+                int index = material.shader.FindPropertyIndex(kUseSplitLighting);
+                if (index != -1)
+                    useSplitLighting = material.shader.GetPropertyDefaultFloatValue(index) != 0;
+
+            }
+
+            if (material.HasProperty(kClearCoatEnabled))
+                CoreUtils.SetKeyword(material, "_MATERIAL_FEATURE_CLEAR_COAT", material.GetFloat(kClearCoatEnabled) > 0.0);
+
+            bool excludeFromTUAndAA = BaseLitAPI.CompatibleWithExcludeFromTUAndAA(material) && material.GetInt(kExcludeFromTUAndAA) != 0;
+            BaseLitAPI.SetupStencil(material, receivesLighting: true, receiveSSR, useSplitLighting, excludeFromTUAndAA);
         }
 
         public static void ValidateDecalMaterial(Material material)
@@ -81,6 +92,17 @@ namespace UnityEngine.Rendering.HighDefinition
         public static void ValidateFogVolumeMaterial(Material material)
         {
             FogVolumeAPI.SetupFogVolumeKeywordsAndProperties(material);
+        }
+
+        public static void ValidateSixWayMaterial(Material material)
+        {
+            ValidateLightingMaterial(material);
+            SixWayAPI.ValidateMaterial(material);
+        }
+
+        public static void ValidateWaterDecalMaterial(Material material)
+        {
+            WaterDecalAPI.SetupWaterDecalKeywordsAndProperties(material);
         }
     }
 }

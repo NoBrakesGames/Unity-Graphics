@@ -1,10 +1,9 @@
-using System;
-using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-Volume(OrientedBox)")]
+    [VFXInfo(name = "Volume (Oriented Box)", category = "Math/Geometry")]
     class OrientedBoxVolume : VFXOperator
     {
         public class InputProperties

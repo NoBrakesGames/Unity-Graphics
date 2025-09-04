@@ -1,23 +1,30 @@
 using System;
 using System.Diagnostics;
+using UnityEngine.Scripting.APIUpdating;
 
-namespace UnityEngine.Experimental.Rendering.RenderGraphModule
+namespace UnityEngine.Rendering.RenderGraphModule
 {
     /// <summary>
     /// Graphics Buffer resource handle.
     /// </summary>
     [DebuggerDisplay("Buffer ({handle.index})")]
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public struct BufferHandle
     {
+        // Minor Warning: This calls the zeroing constructor this means that the embedded ResourceHandle struct will also be zero-ed
+        // which then means ResourceHandle.type will be set to zero == Texture. As this is an "invalid" bufferhandle I guess setting it
+        // to type texture just makes it even more properly invalid and not a big issue. But something to keep in mind for tooling/logging.
         private static BufferHandle s_NullHandle = new BufferHandle();
 
         /// <summary>
         /// Returns a null graphics buffer handle
         /// </summary>
-        /// <returns>A null graphics buffer handle.</returns>
+        /// <value>A null graphics buffer handle.</value>
         public static BufferHandle nullHandle { get { return s_NullHandle; } }
 
         internal ResourceHandle handle;
+
+        internal BufferHandle(in ResourceHandle h) { handle = h; }
 
         internal BufferHandle(int handle, bool shared = false) { this.handle = new ResourceHandle(handle, RenderGraphResourceType.Buffer, shared); }
 
@@ -86,14 +93,12 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <returns>The texture descriptor hash.</returns>
         public override int GetHashCode()
         {
-            int hashCode = 17;
-
-            hashCode = hashCode * 23 + count;
-            hashCode = hashCode * 23 + stride;
-            hashCode = hashCode * 23 + (int)target;
-            hashCode = hashCode * 23 + (int)usageFlags;
-
-            return hashCode;
+            var hashCode = HashFNV1A32.Create();
+            hashCode.Append(count);
+            hashCode.Append(stride);
+            hashCode.Append((int) target);
+            hashCode.Append((int) usageFlags);
+            return hashCode.value;
         }
     }
 
@@ -109,50 +114,21 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                 return desc.name;
         }
 
-        // NOTE:
-        // Next two functions should have been implemented in RenderGraphResource<DescType, ResType> but for some reason,
-        // when doing so, it's impossible to break in the Texture version of the virtual function (with VS2017 at least), making this completely un-debuggable.
-        // To work around this, we just copy/pasted the implementation in each final class...
-        public override void CreatePooledGraphicsResource()
+        public override int GetDescHashCode() { return desc.GetHashCode(); }
+
+        public override void CreateGraphicsResource()
         {
-            Debug.Assert(m_Pool != null, "GraphicsBufferResource: CreatePooledGraphicsResource should only be called for regular pooled resources");
-
-            int hashCode = desc.GetHashCode();
-
-            if (graphicsResource != null)
-                throw new InvalidOperationException(string.Format("GraphicsBufferResource: Trying to create an already created resource ({0}). Resource was probably declared for writing more than once in the same pass.", GetName()));
-
-            var pool = m_Pool as BufferPool;
-            if (!pool.TryGetResource(hashCode, out graphicsResource))
-            {
-                CreateGraphicsResource(desc.name);
-            }
-
-            cachedHash = hashCode;
-            pool.RegisterFrameAllocation(cachedHash, graphicsResource);
-            graphicsResource.name = desc.name;
-        }
-
-        public override void ReleasePooledGraphicsResource(int frameIndex)
-        {
-            if (graphicsResource == null)
-                throw new InvalidOperationException($"BufferResource: Tried to release a resource ({GetName()}) that was never created. Check that there is at least one pass writing to it first.");
-
-            // Shared resources don't use the pool
-            var pool = m_Pool as BufferPool;
-            if (pool != null)
-            {
-                pool.ReleaseResource(cachedHash, graphicsResource, frameIndex);
-                pool.UnregisterFrameAllocation(cachedHash, graphicsResource);
-            }
-
-            Reset(null);
-        }
-
-        public override void CreateGraphicsResource(string name = "")
-        {
+            var name = GetName();
             graphicsResource = new GraphicsBuffer(desc.target, desc.usageFlags, desc.count, desc.stride);
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             graphicsResource.name = name == "" ? $"RenderGraphBuffer_{desc.count}_{desc.stride}_{desc.target}" : name;
+#endif
+        }
+
+        public override void UpdateGraphicsResource()
+        {
+            if (graphicsResource != null)
+                graphicsResource.name = GetName();
         }
 
         public override void ReleaseGraphicsResource()
@@ -180,12 +156,12 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             res.Release();
         }
 
-        protected override string GetResourceName(GraphicsBuffer res)
+        protected override string GetResourceName(in GraphicsBuffer res)
         {
             return "GraphicsBufferNameNotAvailable"; // GraphicsBuffer.name is a setter only :(
         }
 
-        protected override long GetResourceSize(GraphicsBuffer res)
+        protected override long GetResourceSize(in GraphicsBuffer res)
         {
             return res.count * res.stride;
         }
@@ -198,37 +174,6 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         override protected int GetSortIndex(GraphicsBuffer res)
         {
             return res.GetHashCode();
-        }
-
-        // Another C# nicety.
-        // We need to re-implement the whole thing every time because:
-        // - obj.resource.Release is Type specific so it cannot be called on a generic (and there's no shared interface for resources like RTHandle, GraphicsBuffers etc)
-        // - We can't use a virtual release function because it will capture this in the lambda for RemoveAll generating GCAlloc in the process.
-        override public void PurgeUnusedResources(int currentFrameIndex)
-        {
-            // Update the frame index for the lambda. Static because we don't want to capture.
-            s_CurrentFrameIndex = currentFrameIndex;
-            m_RemoveList.Clear();
-
-            foreach (var kvp in m_ResourcePool)
-            {
-                // WARNING: No foreach here. Sorted list GetEnumerator generates garbage...
-                var list = kvp.Value;
-                var keys = list.Keys;
-                var values = list.Values;
-                for (int i = 0; i < list.Count; ++i)
-                {
-                    var value = values[i];
-                    if (ShouldReleaseResource(value.frameIndex, s_CurrentFrameIndex))
-                    {
-                        value.resource.Release();
-                        m_RemoveList.Add(keys[i]);
-                    }
-                }
-
-                foreach (var key in m_RemoveList)
-                    list.Remove(key);
-            }
         }
     }
 }

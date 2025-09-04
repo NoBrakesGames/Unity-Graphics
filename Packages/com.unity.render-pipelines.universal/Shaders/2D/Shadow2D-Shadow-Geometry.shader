@@ -9,7 +9,7 @@ Shader "Hidden/Shadow2DShadowGeometry"
         Tags { "RenderType"="Opaque" }
 
         Cull Off
-        BlendOp Add
+        BlendOp Max
         Blend One One
         ZWrite Off
         ZTest Always
@@ -17,6 +17,8 @@ Shader "Hidden/Shadow2DShadowGeometry"
         // Process the shadow
         Pass
         {
+            Name "Draw Geometry Shadow (R)"
+
             ColorMask R
 
             HLSLPROGRAM

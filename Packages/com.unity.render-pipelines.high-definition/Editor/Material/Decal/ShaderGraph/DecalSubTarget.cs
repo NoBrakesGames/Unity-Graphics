@@ -8,6 +8,7 @@ using UnityEditor.ShaderGraph.Legacy;
 using static UnityEngine.Rendering.HighDefinition.HDMaterial;
 using static UnityEngine.Rendering.HighDefinition.HDMaterialProperties;
 using static UnityEditor.Rendering.HighDefinition.HDFields;
+using UnityEngine;
 
 namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 {
@@ -184,6 +185,8 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                 AddAffectsProperty(HDMaterialProperties.kAffectSmoothness);
             if (decalData.affectsEmission)
                 AddAffectsProperty(HDMaterialProperties.kAffectEmission);
+            if (decalData.transparentDynamicUpdate)
+                AddAffectsProperty(HDMaterialProperties.kTransparentDynamicUpdateDecals);
 
             // Color mask configuration for writing to the mask map
             AddColorMaskProperty(kDecalColorMask0);
@@ -222,6 +225,38 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             }
         }
 
+        internal static Shader CreateDecalGraphAtPath(string path)
+        {
+            var target = (HDTarget)Activator.CreateInstance(typeof(HDTarget));
+            target.TrySetActiveSubTarget(typeof(DecalSubTarget));
+
+            var blockDescriptors = new[]
+            {
+                BlockFields.VertexDescription.Position,
+                BlockFields.VertexDescription.Normal,
+                BlockFields.VertexDescription.Tangent,
+                BlockFields.SurfaceDescription.BaseColor,
+                BlockFields.SurfaceDescription.Alpha,
+                BlockFields.SurfaceDescription.NormalTS,
+                HDBlockFields.SurfaceDescription.NormalAlpha,
+                BlockFields.SurfaceDescription.Metallic,
+                BlockFields.SurfaceDescription.Occlusion,
+                BlockFields.SurfaceDescription.Smoothness,
+                HDBlockFields.SurfaceDescription.MAOSAlpha,
+                BlockFields.SurfaceDescription.Emission,
+            };
+
+            var graph = new GraphData();
+            graph.AddContexts();
+            graph.InitializeOutputs(new[] { target }, blockDescriptors);
+
+            graph.path = "Shader Graphs";
+            FileUtilities.WriteShaderGraphToDisk(path, graph);
+            AssetDatabase.Refresh();
+
+            return AssetDatabase.LoadAssetAtPath<Shader>(path);
+        }
+
         #region SubShaders
         static class SubShaders
         {
@@ -235,6 +270,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                     { DecalPasses.DecalProjectorForwardEmissive, new FieldCondition(AffectsEmission, true) },
                     { DecalPasses.DBufferMesh, new FieldCondition(DecalDefault, true) },
                     { DecalPasses.DecalMeshForwardEmissive, new FieldCondition(AffectsEmission, true) },
+                    { DecalPasses.AtlasProjector, new FieldCondition(DecalDefault, true) },
                     { DecalPasses.ScenePicking, new FieldCondition(DecalDefault, true) },
                     { DecalPasses.Preview, new FieldCondition(Fields.IsPreview, true) },
                 },
@@ -349,6 +385,25 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                 customInterpolators = CoreCustomInterpolators.Common,
             };
 
+            public static PassDescriptor AtlasProjector = new PassDescriptor()
+            {
+                // Definition
+                displayName = DecalSystem.s_MaterialDecalPassNames[(int)DecalSystem.MaterialDecalPass.AtlasProjector],
+                referenceName = "SHADERPASS_ATLAS_PROJECTOR",
+                lightMode = DecalSystem.s_MaterialDecalPassNames[(int)DecalSystem.MaterialDecalPass.AtlasProjector],
+                useInPreview = false,
+
+                // Port mask
+                validPixelBlocks = DecalBlockMasks.FragmentDefault,
+
+                structs = CoreStructCollections.Basic,
+                renderStates = DecalRenderStates.AtlasProjector,
+                pragmas = DecalPragmas.InstancedDecal,
+                keywords = DecalDefines.Decals,
+                includes = DecalIncludes.Transparent,
+                customInterpolators = CoreCustomInterpolators.Common,
+            };
+
             public static PassDescriptor Preview = new PassDescriptor()
             {
                 // Definition
@@ -416,9 +471,11 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                 HDStructFields.AttributesMesh.normalOS,
                 HDStructFields.AttributesMesh.tangentOS,
                 HDStructFields.AttributesMesh.uv0,
+                HDStructFields.AttributesMesh.instanceID,
                 HDStructFields.FragInputs.tangentToWorld,
                 HDStructFields.FragInputs.positionRWS,
                 HDStructFields.FragInputs.texCoord0,
+                HDStructFields.FragInputs.instanceID
             };
         }
         #endregion
@@ -481,6 +538,14 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                 { RenderState.ZWrite(ZWrite.Off) },
             };
 
+            public static RenderStateCollection AtlasProjector = new RenderStateCollection
+            {
+                { RenderState.Blend("Blend 0 One Zero") },
+                { RenderState.Cull(Cull.Off) },
+                { RenderState.ZTest(ZTest.Always) },
+                { RenderState.ZWrite(ZWrite.Off) }
+            };
+
             public static RenderStateCollection Preview = new RenderStateCollection
             {
                 { RenderState.ZTest(ZTest.LEqual) },
@@ -495,6 +560,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             {
                 { CorePragmas.Basic },
                 { Pragma.DOTSInstancing },
+                Pragma.MultiCompileInstancing
             };
         }
         #endregion
@@ -572,6 +638,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             const string kFunctions = "Packages/com.unity.shadergraph/ShaderGraphLibrary/Functions.hlsl";
             const string kDecal = "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Decal/Decal.hlsl";
             const string kPassDecal = "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDecal.hlsl";
+            const string kPassDecalTransparent = "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDecalTransparent.hlsl";
 
             public static IncludeCollection Default = new IncludeCollection
             {
@@ -582,6 +649,17 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                 { kDecal, IncludeLocation.Pregraph },
                 { CoreIncludes.kShaderGraphFunctions, IncludeLocation.Pregraph },
                 { kPassDecal, IncludeLocation.Postgraph },
+            };
+
+            public static IncludeCollection Transparent = new IncludeCollection
+            {
+                { kPacking, IncludeLocation.Pregraph },
+                { kColor, IncludeLocation.Pregraph },
+                { kFunctions, IncludeLocation.Pregraph },
+                { CoreIncludes.MinimalCorePregraph },
+                { CoreIncludes.kPickingSpaceTransforms, IncludeLocation.Pregraph },
+                { kDecal, IncludeLocation.Pregraph },
+                { kPassDecalTransparent, IncludeLocation.Postgraph },
             };
 
             public static IncludeCollection ScenePicking = new IncludeCollection

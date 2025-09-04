@@ -1,36 +1,28 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using UnityEditor.Experimental.GraphView;
-using UnityEngine;
 using UnityEngine.UIElements;
-using UnityEngine.VFX;
-using UnityEditor.VFX.UIElements;
 
 namespace UnityEditor.VFX.UI
 {
     class VFXOperatorUI : VFXNodeUI
     {
+        private const float defaultOperatorLabelWidth = 10f;
+
         VisualElement m_EditButton;
+        VisualElement m_EditContainer;
+        float m_LastExpendedWidth;
 
         public VFXOperatorUI()
         {
+            defaultLabelWidth = defaultOperatorLabelWidth;
             this.AddStyleSheetPath("VFXOperator");
-
-            m_Middle = new VisualElement();
-            m_Middle.name = "middle";
-            inputContainer.parent.Insert(1, m_Middle);
-
-            m_EditButton = new VisualElement() { name = "edit" };
-            m_EditButton.Add(new VisualElement() { name = "icon" });
-            m_EditButton.AddManipulator(new Clickable(OnEdit));
             this.AddManipulator(new SuperCollapser());
 
-            RegisterCallback<GeometryChangedEvent>(OnPostLayout);
+            RegisterCallback<MouseEnterEvent>(OnMouseHover);
+            RegisterCallback<MouseLeaveEvent>(OnMouseHover);
+            RegisterCallback<DetachFromPanelEvent>(OnDetachFromPanel);
         }
-
-        VisualElement m_EditContainer;
 
         void OnEdit()
         {
@@ -50,55 +42,29 @@ namespace UnityEditor.VFX.UI
 
                 UpdateCollapse();
             }
+
+            RefreshLayout();
         }
 
-        VisualElement m_Middle;
+        public new VFXOperatorController controller => base.controller as VFXOperatorController;
 
-        public new VFXOperatorController controller
+        protected override void OnNewController()
         {
-            get { return base.controller as VFXOperatorController; }
-        }
-
-
-        public override void GetPreferedWidths(ref float labelWidth, ref float controlWidth)
-        {
-            base.GetPreferedWidths(ref labelWidth, ref controlWidth);
-
-            foreach (var port in GetPorts(true, false).Cast<VFXEditableDataAnchor>())
+            base.OnNewController();
+            if (isEditable)
             {
-                float portLabelWidth = port.GetPreferredLabelWidth() + 1;
-                float portControlWidth = port.GetPreferredControlWidth();
+                m_EditButton = new Button(OnEdit) { name = "edit" };
+                titleContainer.Insert(1, m_EditButton);
 
-                if (labelWidth < portLabelWidth)
-                {
-                    labelWidth = portLabelWidth;
-                }
-                if (controlWidth < portControlWidth)
-                {
-                    controlWidth = portControlWidth;
-                }
+                m_EditContainer = GetControllerEditor();
+                if (m_EditContainer != null)
+                    m_EditContainer.name = "edit-container";
             }
         }
 
-        public override void ApplyWidths(float labelWidth, float controlWidth)
-        {
-            base.ApplyWidths(labelWidth, controlWidth);
-            foreach (var port in GetPorts(true, false).Cast<VFXEditableDataAnchor>())
-            {
-                port.SetLabelWidth(labelWidth);
-            }
-            inputContainer.style.width = labelWidth + controlWidth + 20;
-        }
+        private bool isEditable => controller != null && controller.isEditable;
 
-        public bool isEditable
-        {
-            get
-            {
-                return controller != null && controller.isEditable;
-            }
-        }
-
-        protected VisualElement GetControllerEditor()
+        private VisualElement GetControllerEditor()
         {
             if (controller is VFXCascadedOperatorController)
             {
@@ -131,7 +97,6 @@ namespace UnityEditor.VFX.UI
         {
             if (evt.target == this && controller != null && controller.model is VFXInlineOperator)
             {
-                evt.menu.AppendAction("Convert to Exposed Property", OnConvertToExposedProperty, e => DropdownMenuAction.Status.Normal);
                 evt.menu.AppendAction("Convert to Property", OnConvertToProperty, e => DropdownMenuAction.Status.Normal);
                 evt.menu.AppendSeparator();
             }
@@ -139,12 +104,12 @@ namespace UnityEditor.VFX.UI
 
         void OnConvertToProperty(DropdownMenuAction evt)
         {
-            controller.ConvertToProperty(false);
+            ConvertToProperty(false);
         }
 
         void OnConvertToExposedProperty(DropdownMenuAction evt)
         {
-            controller.ConvertToProperty(true);
+            ConvertToProperty(true);
         }
 
         public override bool superCollapsed
@@ -156,19 +121,20 @@ namespace UnityEditor.VFX.UI
         {
             base.SelfChange();
 
-            bool hasMiddle = inputContainer.childCount != 0;
-            if (hasMiddle)
-            {
-                if (m_Middle.parent == null)
-                    inputContainer.parent.Insert(1, m_Middle);
-            }
-            else if (m_Middle.parent != null)
-                m_Middle.RemoveFromHierarchy();
-
             if (isEditable)
             {
+                if (m_EditButton == null)
+                {
+                    m_EditButton = new VisualElement { name = "edit" };
+                    m_EditButton.Add(new VisualElement { name = "icon" });
+                    m_EditButton.AddManipulator(new Clickable(OnEdit));
+                }
+
                 if (m_EditButton.parent == null)
-                    titleContainer.Insert(1, m_EditButton);
+                {
+                    var index = Math.Max(0, titleContainer.childCount - 1);
+                    titleContainer.Insert(index, m_EditButton);
+                }
 
                 if (m_EditContainer == null)
                 {
@@ -183,52 +149,97 @@ namespace UnityEditor.VFX.UI
                     m_EditContainer.RemoveFromHierarchy();
 
                 m_EditContainer = null;
-                if (m_EditButton.parent != null)
+                if (m_EditButton?.parent != null)
                     m_EditButton.RemoveFromHierarchy();
             }
 
-            if (!base.expanded && m_EditContainer != null && m_EditContainer.parent != null)
+            if (!expanded && m_EditContainer != null && m_EditContainer.parent != null)
                 m_EditContainer.RemoveFromHierarchy();
         }
 
-        void OnPostLayout(GeometryChangedEvent e)
+        protected override void OnPostLayout(GeometryChangedEvent e)
         {
-            RefreshLayout();
+            if (expanded)
+            {
+                m_LastExpendedWidth = layout.width;
+            }
+            base.OnPostLayout(e);
         }
 
-        public override void RefreshLayout()
+        protected override void RefreshLayout()
         {
             base.RefreshLayout();
-            if (!superCollapsed)
+            // To prevent width to change between expanded and collapsed state
+            // we set the minwidth to actual width before collapse, and reset to zero when expand
+            // so that the expand/collapse button does not move
+            if (!superCollapsed && !expanded)
             {
-                float settingsLabelWidth = 30;
-                float settingsControlWidth = 50;
-                GetPreferedSettingsWidths(ref settingsLabelWidth, ref settingsControlWidth);
-
-                float labelWidth = 30;
-                float controlWidth = 50;
-                GetPreferedWidths(ref labelWidth, ref controlWidth);
-
-                ApplySettingsWidths(settingsLabelWidth, settingsControlWidth);
-
-                ApplyWidths(labelWidth, controlWidth);
-
-                // To prevent width to change between expanded and collapsed state
-                // we set the minwidth to actual width before collapse, and reset to zero when expand
-                // so that the expand/collapse button does not move
-                if (!expanded)
+                if (resolvedStyle.minWidth.value < m_LastExpendedWidth)
                 {
-                    var newMinWidth = resolvedStyle.width;
-                    if (resolvedStyle.minWidth.value < newMinWidth)
-                    {
-                        style.minWidth = newMinWidth;
-                    }
-
-                    return;
+                    style.minWidth = m_LastExpendedWidth;
                 }
+                return;
             }
 
             style.minWidth = 0f;
+        }
+
+        private void OnDetachFromPanel(DetachFromPanelEvent evt)
+        {
+            var view = evt.originPanel.visualTree.Q<VFXView>();
+            if (view != null)
+            {
+                UpdateHover(view, false);
+            }
+        }
+
+        private void OnMouseHover(EventBase evt)
+        {
+            var view = GetFirstAncestorOfType<VFXView>();
+            if (view != null)
+            {
+                UpdateHover(view, evt.eventTypeId == MouseEnterEvent.TypeId());
+            }
+        }
+
+        private void UpdateHover(VFXView view, bool isHovered)
+        {
+            var blackboard = view.blackboard;
+            if (blackboard == null)
+                return;
+
+            List<string> attributes = null;
+            if (controller.model is IVFXAttributeUsage attributeUsage)
+            {
+                attributes = attributeUsage.usedAttributes.Select(x => x.name).ToList();
+            }
+            else if (controller.model is VFXSubgraphOperator subgraphOperator && subgraphOperator.subgraph.GetResource() is {} resource)
+            {
+                var usedSubgraph = resource.GetOrCreateGraph();
+
+                attributes = usedSubgraph.customAttributes.Select(x => x.attributeName).ToList();
+            }
+
+            if (attributes != null)
+            {
+                foreach (var attribute in attributes)
+                {
+                    var row = blackboard.GetAttributeRowFromName(attribute);
+                    if (row == null)
+                        return;
+
+                    if (isHovered)
+                        row.AddToClassList("hovered");
+                    else
+                        row.RemoveFromClassList("hovered");
+                }
+            }
+        }
+
+        private void ConvertToProperty(bool exposed)
+        {
+            controller.ConvertToProperty(exposed);
+            this.GetFirstAncestorOfType<VFXView>().blackboard.Update(true);
         }
     }
 }

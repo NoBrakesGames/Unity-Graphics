@@ -1,13 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+
 using UnityEditor.Experimental.GraphView;
+using UnityEditor.VFX.Block;
+
 using UnityEngine;
 using UnityEngine.VFX;
-using UnityEditor.VFX;
 using UnityEngine.UIElements;
 using UnityEngine.Profiling;
-using System.Reflection;
 
 using PositionType = UnityEngine.UIElements.Position;
 
@@ -19,11 +20,9 @@ namespace UnityEditor.VFX.UI
         readonly CustomStyleProperty<Color> RectColorProperty = new CustomStyleProperty<Color>("--rect-color");
 
         Image m_HeaderIcon;
-        Image m_HeaderSpace;
-
-        VisualElement m_Footer;
-        Image m_FooterIcon;
-        Label m_FooterTitle;
+        Label m_HeaderSpace;
+        Label m_Subtitle;
+        Label m_Footer;
 
         VisualElement m_FlowInputConnectorContainer;
         VisualElement m_FlowOutputConnectorContainer;
@@ -41,9 +40,7 @@ namespace UnityEditor.VFX.UI
         }
         protected override void OnNewController()
         {
-            var blocks = new List<VFXModelDescriptor<VFXBlock>>(VFXLibrary.GetBlocks());
-
-            m_CanHaveBlocks = blocks.Any(t => controller.model.AcceptChild(t.model));
+            m_CanHaveBlocks = controller.model.CanHaveBlocks();
         }
 
         public bool canHaveBlocks { get => m_CanHaveBlocks; }
@@ -74,26 +71,38 @@ namespace UnityEditor.VFX.UI
             Profiler.BeginSample("VFXContextUI.CreateBlockProvider");
             if (m_BlockProvider == null)
             {
-                m_BlockProvider = new VFXBlockProvider(controller, (d, mPos) =>
+                m_BlockProvider = new VFXBlockProvider(controller, (variant, mPos) =>
                 {
-                    if (d is VFXBlockProvider.NewBlockDescriptor)
+                    if (variant.modelType != typeof(VisualEffectSubgraphBlock))
                     {
                         UpdateSelectionWithNewBlocks();
-                        AddBlock(mPos, (d as VFXBlockProvider.NewBlockDescriptor).newBlock);
+                        AddBlock(mPos, variant);
                     }
                     else
                     {
-                        var subgraphBlock = AssetDatabase.LoadAssetAtPath<VisualEffectSubgraphBlock>((d as VFXBlockProvider.SubgraphBlockDescriptor).item.path);
+                        var path = variant.settings.Single(x => x.Key == "path").Value as string;
+                        var subgraphBlock = AssetDatabase.LoadAssetAtPath<VisualEffectSubgraphBlock>(path);
+                        var view = GetFirstAncestorOfType<VFXView>();
+                        var graph = subgraphBlock.GetResource().GetOrCreateGraph();
+                        if (view.HasCustomAttributeConflicts(graph.attributesManager.GetCustomAttributes()))
+                        {
+                            return;
+                        }
+
+                        // Prevent cyclic recursion
+                        if (controller.model.GetGraph() == graph)
+                        {
+                            Debug.LogWarning("Cannot add this subgraph because it would create a cyclic recursion");
+                            return;
+                        }
 
                         int blockIndex = GetDragBlockIndex(mPos);
                         VFXBlock newModel = ScriptableObject.CreateInstance<VFXSubgraphBlock>();
 
                         newModel.SetSettingValue("m_Subgraph", subgraphBlock);
                         UpdateSelectionWithNewBlocks();
-                        using (var growContext = new GrowContext(this))
-                        {
-                            controller.AddBlock(blockIndex, newModel, true);
-                        }
+                        using var growContext = new GrowContext(this);
+                        controller.AddBlock(blockIndex, newModel, true);
                     }
                 });
             }
@@ -108,11 +117,21 @@ namespace UnityEditor.VFX.UI
                 mainContainer.RemoveFromClassList("empty");
             }
 
-            m_Divider.visible = hasSettings;
-
             m_HeaderIcon.image = GetIconForVFXType(controller.model.inputType);
-            m_HeaderIcon.visible = m_HeaderIcon.image != null;
+            m_HeaderIcon.SendToBack(); // Actually move it as first child so it's before the title label
+            if (m_HeaderIcon.image == null)
+                m_HeaderIcon.AddToClassList("Empty");
 
+            var subTitle = controller.subtitle;
+            m_Subtitle.text = controller.subtitle;
+            if (string.IsNullOrEmpty(subTitle))
+            {
+                m_Subtitle.AddToClassList("empty");
+            }
+            else
+            {
+                m_Subtitle.RemoveFromClassList("empty");
+            }
 
             Profiler.BeginSample("VFXContextUI.SetAllStyleClasses");
 
@@ -153,13 +172,11 @@ namespace UnityEditor.VFX.UI
             AddToClassList("type" + ContextEnumToClassName(type.ToString()));
 
             var space = controller.model.space;
-            foreach (VFXSpace val in System.Enum.GetValues(typeof(VFXSpace)))
-            {
-                if (val != space || !controller.model.spaceable)
-                    m_HeaderSpace.RemoveFromClassList("space" + val.ToString());
-            }
-            if (controller.model.spaceable)
-                m_HeaderSpace.AddToClassList("space" + (controller.model.space).ToString());
+            m_HeaderSpace.text = space.ToString();
+            m_HeaderSpace.tooltip = $"{space.ToString()} Space";
+            m_HeaderSpace.RemoveFromClassList(VFXSpace.World.ToString());
+            m_HeaderSpace.RemoveFromClassList(VFXSpace.Local.ToString());
+            m_HeaderSpace.AddToClassList(space.ToString());
 
             Profiler.EndSample();
             if (controller.model.outputType == VFXDataType.None)
@@ -174,15 +191,14 @@ namespace UnityEditor.VFX.UI
 
                 if (controller.model.outputFlowSlot.Any())
                 {
-                    m_FooterTitle.text = controller.model.outputType.ToString();
-                    m_FooterIcon.image = GetIconForVFXType(controller.model.outputType);
+                    m_Footer.text = controller.model.outputType.ToString();
+                    m_Footer.style.backgroundImage = GetIconForVFXType(controller.model.outputType);
                 }
                 else
                 {
-                    m_FooterTitle.text = string.Empty;
-                    m_FooterIcon.image = null;
+                    m_Footer.text = string.Empty;
+                    m_Footer.style.backgroundImage = null;
                 }
-                m_FooterIcon.visible = m_FooterIcon.image != null;
             }
 
             Profiler.BeginSample("VFXContextUI.CreateInputFlow");
@@ -251,8 +267,6 @@ namespace UnityEditor.VFX.UI
             RefreshContext();
         }
 
-        VisualElement m_Divider;
-
         public VFXContextUI() : base("uxml/VFXContext")
         {
             capabilities |= Capabilities.Selectable | Capabilities.Movable | Capabilities.Deletable | Capabilities.Ascendable;
@@ -265,25 +279,19 @@ namespace UnityEditor.VFX.UI
 
             this.mainContainer.style.overflow = Overflow.Visible;
 
-
-            m_Divider = this.mainContainer.Q("divider");
-
             m_FlowInputConnectorContainer = this.Q("flow-inputs");
 
             m_FlowOutputConnectorContainer = this.Q("flow-outputs");
 
             m_HeaderIcon = titleContainer.Q<Image>("icon");
-            m_HeaderSpace = titleContainer.Q<Image>("header-space");
+            m_HeaderSpace = titleContainer.Q<Label>("header-space");
             m_HeaderSpace.AddManipulator(new Clickable(OnSpace));
+            m_Subtitle = this.Q<Label>("subtitle");
 
             m_BlockContainer = this.Q("block-container");
             m_NoBlock = m_BlockContainer.Q("no-blocks");
 
-            m_Footer = this.Q("footer");
-
-            m_FooterTitle = m_Footer.Q<Label>("title-label");
-            m_FooterIcon = m_Footer.Q<Image>("icon");
-
+            m_Footer = this.Q<Label>("footer");
 
             m_DragDisplay = new VisualElement();
             m_DragDisplay.AddToClassList("dragdisplay");
@@ -297,6 +305,7 @@ namespace UnityEditor.VFX.UI
             m_TextField.RegisterCallback<ChangeEvent<string>>(OnTitleChange);
             m_TextField.Q(TextField.textInputUssName).RegisterCallback<FocusOutEvent>(OnTitleBlur, TrickleDown.TrickleDown);
 
+            this.Q("selection-border").SendToBack();
             RegisterCallback<DragUpdatedEvent>(OnDragUpdated);
             RegisterCallback<DragPerformEvent>(OnDragPerform);
             RegisterCallback<DragExitedEvent>(OnDragExited);
@@ -312,7 +321,36 @@ namespace UnityEditor.VFX.UI
                 controller.model.space = VFXSpace.World;
         }
 
-        public bool CanDrop(IEnumerable<VFXBlockUI> blocks)
+        private bool HasDroppableAttributeItems(IEnumerable<AttributeItem> attributeItems)
+        {
+            foreach (var attributeItem in GetDroppableAttributeItems(attributeItems))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private IEnumerable<AttributeItem> GetDroppableAttributeItems(IEnumerable<AttributeItem> attributeItems)
+        {
+            if (controller.model.contextType == VFXContextType.Spawner)
+            {
+                foreach (var attributeItem in attributeItems)
+                {
+                    if (AttributeProviderSpawner.kSupportedAttributesFromSpawnContext.Contains(attributeItem.title))
+                        yield return attributeItem;
+                }
+                yield break;
+            }
+
+            foreach (var attributeItem in attributeItems)
+            {
+                if (!attributeItem.isReadOnly)
+                    yield return attributeItem;
+            }
+        }
+
+        private bool CanDrop(IEnumerable<VFXBlockUI> blocks)
         {
             bool accept = true;
             if (blocks.Count() == 0) return false;
@@ -327,33 +365,15 @@ namespace UnityEditor.VFX.UI
             return accept;
         }
 
-        public override bool HitTest(Vector2 localPoint)
+        private void PlaceDragIndicator(int index)
         {
-            // needed so that if we click on a block we won't select the context as well.
-            /*if (m_NoBlock.parent ==  null && m_BlockContainer.ContainsPoint(this.ChangeCoordinatesTo(m_BlockContainer, localPoint)))
-            {
-                return false;
-            }*/
-            return ContainsPoint(localPoint);
-        }
-
-        public void DraggingBlocks(IEnumerable<VFXBlockUI> blocks, int index)
-        {
+            var y = GetBlockIndexY(index, false);
             m_DragDisplay.RemoveFromHierarchy();
-
-            if (!CanDrop(blocks))
-            {
-                return;
-            }
-
-            float y = GetBlockIndexY(index, false);
-
             m_DragDisplay.style.top = y;
-
             m_BlockContainer.Add(m_DragDisplay);
         }
 
-        public void RemoveDragIndicator()
+        private void RemoveDragIndicator()
         {
             if (m_DragDisplay.parent != null)
                 m_BlockContainer.Remove(m_DragDisplay);
@@ -361,15 +381,7 @@ namespace UnityEditor.VFX.UI
 
         bool m_DragStarted;
 
-
-        public bool CanAcceptDrop(List<ISelectable> selection)
-        {
-            IEnumerable<VFXBlockUI> blocksUI = selection.Select(t => t as VFXBlockUI).Where(t => t != null);
-
-            return CanDrop(blocksUI);
-        }
-
-        public float GetBlockIndexY(int index, bool middle)
+        private float GetBlockIndexY(int index, bool middle)
         {
             float y = 0;
             if (controller.blockControllers.Count == 0)
@@ -397,7 +409,7 @@ namespace UnityEditor.VFX.UI
             return y;
         }
 
-        public int GetDragBlockIndex(Vector2 mousePosition)
+        private int GetDragBlockIndex(Vector2 mousePosition)
         {
             for (int i = 0; i < controller.blockControllers.Count; ++i)
             {
@@ -412,27 +424,32 @@ namespace UnityEditor.VFX.UI
             return controller.blockControllers.Count;
         }
 
-        void OnDragUpdated(DragUpdatedEvent evt)
+        private void OnDragUpdated(DragUpdatedEvent evt)
         {
             Vector2 mousePosition = m_BlockContainer.WorldToLocal(evt.mousePosition);
-
             int blockIndex = GetDragBlockIndex(mousePosition);
 
             if (DragAndDrop.GetGenericData("DragSelection") is List<ISelectable> dragSelection)
             {
                 var blocksUI = dragSelection.OfType<VFXBlockUI>().ToArray();
-
-                DragAndDrop.visualMode = evt.ctrlKey ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Move;
-                DraggingBlocks(blocksUI, blockIndex);
-                if (!m_DragStarted)
+                var dragBlocks = CanDrop(blocksUI);
+                if (dragBlocks)
                 {
-                    // TODO: Do something on first DragUpdated event (initiate drag)
-                    m_DragStarted = true;
-                    AddToClassList("dropping");
+                    DragAndDrop.visualMode = evt.ctrlKey ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Move;
+
+                    if (!m_DragStarted)
+                    {
+                        // TODO: Do something on first DragUpdated event (initiate drag)
+                        m_DragStarted = true;
+                        AddToClassList("dropping");
+                    }
+
+                    PlaceDragIndicator(blockIndex);
                 }
                 else
                 {
-                    // TODO: Do something on subsequent DragUpdated events
+                    DragAndDrop.visualMode = DragAndDropVisualMode.Rejected;
+                    evt.StopPropagation();
                 }
             }
             else
@@ -441,20 +458,44 @@ namespace UnityEditor.VFX.UI
 
                 if (references.Any() && (!controller.viewController.model.isSubgraph || !references.Any(t => t.GetResource().GetOrCreateGraph().subgraphDependencies.Contains(controller.viewController.model.subgraph) || t.GetResource() == controller.viewController.model)))
                 {
-                    var compatibleReferences = references
-                        .Where(x => x != null && x.GetResource().GetOrCreateGraph().children.OfType<VFXBlockSubgraphContext>().First().compatibleContextType.HasFlag(controller.model.contextType));
+                    var compatibleReferences = references.Where(x =>
+                    {
+                        var subgraphBlock = x?.GetResource()?.GetOrCreateGraph()?.children.OfType<VFXBlockSubgraphContext>().First();
+                        return subgraphBlock != null ? controller.model.Accept(subgraphBlock.compatibleContextType, subgraphBlock.ownedType) : false;
+                    });
 
                     if (compatibleReferences.Any())
                     {
-                        DragAndDrop.visualMode = DragAndDropVisualMode.Link;
+                        DragAndDrop.visualMode = DragAndDropVisualMode.Move;
                         evt.StopPropagation();
-                        DraggingBlocks(Enumerable.Empty<VFXBlockUI>(), blockIndex);
+                        PlaceDragIndicator(blockIndex);
                         if (!m_DragStarted)
                         {
                             // TODO: Do something on first DragUpdated event (initiate drag)
                             m_DragStarted = true;
                             AddToClassList("dropping");
                         }
+                    }
+                    else
+                    {
+                        DragAndDrop.visualMode = DragAndDropVisualMode.Rejected;
+                        evt.StopPropagation();
+                    }
+                }
+                else
+                {
+                    var attributeItems = GetFirstAncestorOfType<VFXView>().selection.OfType<VFXBlackboardAttributeField>().Select(x => x.attribute).ToArray();
+                    if (HasDroppableAttributeItems(attributeItems))
+                    {
+                        if (!m_DragStarted)
+                        {
+                            // TODO: Do something on first DragUpdated event (initiate drag)
+                            m_DragStarted = true;
+                            AddToClassList("dropping");
+                        }
+
+                        PlaceDragIndicator(blockIndex);
+                        DragAndDrop.visualMode = DragAndDropVisualMode.Move;
                     }
                     else
                     {
@@ -471,19 +512,16 @@ namespace UnityEditor.VFX.UI
             if (DragAndDrop.GetGenericData("DragSelection") is List<ISelectable> dragSelection)
             {
                 Vector2 mousePosition = m_BlockContainer.WorldToLocal(evt.mousePosition);
-
-                var blocksUI = dragSelection.OfType<VFXBlockUI>().ToArray();
-                if (!CanDrop(blocksUI))
-                    return;
-
                 int blockIndex = GetDragBlockIndex(mousePosition);
 
-                BlocksDropped(blockIndex, blocksUI, evt.ctrlKey);
-
-                DragAndDrop.AcceptDrag();
-
-                m_DragStarted = false;
-                RemoveFromClassList("dropping");
+                var blocksUI = dragSelection.OfType<VFXBlockUI>().ToArray();
+                var dropBlocks = CanDrop(blocksUI);
+                if (dropBlocks)
+                {
+                    BlocksDropped(blockIndex, blocksUI, evt.ctrlKey);
+                    DragAndDrop.AcceptDrag();
+                    evt.StopPropagation();
+                }
             }
             else
             {
@@ -491,11 +529,22 @@ namespace UnityEditor.VFX.UI
 
                 if (references.Any() && (!controller.viewController.model.isSubgraph || !references.Any(t => t.GetResource().GetOrCreateGraph().subgraphDependencies.Contains(controller.viewController.model.subgraph) || t.GetResource() == controller.viewController.model)))
                 {
+                    VFXView view = GetFirstAncestorOfType<VFXView>();
                     foreach (var reference in references)
                     {
-                        if (reference != null && reference.GetResource().GetOrCreateGraph().children.OfType<VFXBlockSubgraphContext>().First().compatibleContextType.HasFlag(controller.model.contextType))
+                        var graph = reference != null ? reference.GetResource().GetOrCreateGraph() : null;
+                        if (graph != null)
                         {
+                            var subgraphContext = graph.children.OfType<VFXBlockSubgraphContext>().First();
+                            if (!controller.model.Accept(subgraphContext.compatibleContextType, subgraphContext.ownedType))
+                                continue;
+
                             DragAndDrop.AcceptDrag();
+                            if (view.HasCustomAttributeConflicts(graph.attributesManager.GetCustomAttributes()))
+                            {
+                                break;
+                            }
+
                             Vector2 mousePosition = m_BlockContainer.WorldToLocal(evt.mousePosition);
 
                             int blockIndex = GetDragBlockIndex(mousePosition);
@@ -514,13 +563,37 @@ namespace UnityEditor.VFX.UI
 
                     evt.StopPropagation();
                 }
+                else
+                {
+                    var data = DragAndDrop.GetGenericData("DragSelection");
+                    if (data is List<IParameterItem> items)
+                    {
+                        var attributeItems = GetDroppableAttributeItems(items.OfType<AttributeItem>()).ToArray();
+                        if (attributeItems.Length > 0)
+                        {
+                            var mousePosition = m_BlockContainer.WorldToLocal(evt.mousePosition);
+                            var blockIndex = GetDragBlockIndex(mousePosition);
+                            foreach (var attributeItem in attributeItems)
+                            {
+                                var setAttribute = controller.model.contextType != VFXContextType.Spawner
+                                    ? (VFXBlock)ScriptableObject.CreateInstance<SetAttribute>()
+                                    : ScriptableObject.CreateInstance<VFXSpawnerSetAttribute>();
+                                setAttribute.SetSettingValue("attribute", attributeItem.title);
+                                controller.model.AddChild(setAttribute, blockIndex);
+                            }
+
+                            DragAndDrop.AcceptDrag();
+                            evt.StopPropagation();
+                        }
+                    }
+                }
             }
 
             m_DragStarted = false;
             RemoveFromClassList("dropping");
         }
 
-        public void BlocksDropped(int blockIndex, IEnumerable<VFXBlockUI> draggedBlocks, bool copy)
+        private void BlocksDropped(int blockIndex, IEnumerable<VFXBlockUI> draggedBlocks, bool copy)
         {
             HashSet<VFXContextController> contexts = new HashSet<VFXContextController>();
             foreach (var draggedBlock in draggedBlocks)
@@ -546,14 +619,6 @@ namespace UnityEditor.VFX.UI
             m_DragStarted = false;
         }
 
-        public void RemoveBlock(VFXBlockUI block)
-        {
-            if (block == null)
-                return;
-
-            controller.RemoveBlock(block.controller.model);
-        }
-
         private VFXBlockUI InstantiateBlock(VFXBlockController blockController)
         {
             Profiler.BeginSample("VFXContextUI.InstantiateBlock");
@@ -570,7 +635,7 @@ namespace UnityEditor.VFX.UI
         Dictionary<VFXBlockController, VFXBlockUI> blocks = new Dictionary<VFXBlockController, VFXBlockUI>();
 
 
-        public void RefreshContext()
+        private void RefreshContext()
         {
             Profiler.BeginSample("VFXContextUI.RefreshContext");
             var blockControllers = controller.blockControllers;
@@ -682,7 +747,7 @@ namespace UnityEditor.VFX.UI
             }
         }
 
-        void AddBlock(Vector2 position, VFXModelDescriptor<VFXBlock> descriptor)
+        void AddBlock(Vector2 position, Variant variant)
         {
             int blockIndex = -1;
 
@@ -706,11 +771,11 @@ namespace UnityEditor.VFX.UI
 
             using (new GrowContext(this))
             {
-                controller.AddBlock(blockIndex, descriptor.CreateInstance(), true /* freshly created block, should init space */);
+                controller.AddBlock(blockIndex, (VFXBlock)variant.CreateInstance(), true /* freshly created block, should init space */);
             }
         }
 
-        public void OnCreateBlock(DropdownMenuAction evt)
+        private void OnCreateBlock(DropdownMenuAction evt)
         {
             Vector2 referencePosition = evt.eventInfo.mousePosition;
 
@@ -723,8 +788,7 @@ namespace UnityEditor.VFX.UI
 
             Vector2 screenPosition = view.ViewToScreenPosition(referencePosition);
 
-            var window = VFXViewWindow.GetWindow(view);
-            VFXFilterWindow.Show(window, referencePosition, screenPosition, m_BlockProvider);
+            VFXFilterWindow.Show(referencePosition, screenPosition, m_BlockProvider);
         }
 
         VFXBlockProvider m_BlockProvider = null;
@@ -749,11 +813,6 @@ namespace UnityEditor.VFX.UI
             }
         }
 
-        public IEnumerable<Port> GetAllAnchors(bool input, bool output)
-        {
-            return (IEnumerable<Port>)GetFlowAnchors(input, output);
-        }
-
         public IEnumerable<VFXFlowAnchor> GetFlowAnchors(bool input, bool output)
         {
             if (input)
@@ -768,55 +827,45 @@ namespace UnityEditor.VFX.UI
                 }
         }
 
-        public class VFXContextOnlyVFXNodeProvider : VFXNodeProvider
+        private class VFXContextOnlyVFXNodeProvider : VFXNodeProvider
         {
-            public VFXContextOnlyVFXNodeProvider(VFXViewController controller, Action<Descriptor, Vector2> onAddBlock, Func<Descriptor, bool> filter) :
+            public VFXContextOnlyVFXNodeProvider(VFXViewController controller, Action<Variant, Vector2> onAddBlock, Func<IVFXModelDescriptor, bool> filter) :
                 base(controller, onAddBlock, filter, new Type[] { typeof(VFXContext) })
             {
             }
-
-            protected override string GetCategory(Descriptor desc)
-            {
-                return string.Empty;
-            }
         }
 
-        bool ProviderFilter(VFXNodeProvider.Descriptor d)
+        bool ProviderFilter(IVFXModelDescriptor descriptor)
         {
-            VFXModelDescriptor desc = d.modelDescriptor as VFXModelDescriptor;
-            if (desc == null)
+            if (!descriptor.modelType.IsSubclassOf(typeof(VFXAbstractParticleOutput)))
                 return false;
-
-            if (!(desc.model is VFXAbstractParticleOutput))
-                return false;
-
+            var toContext = (VFXContext)descriptor.unTypedModel;
             foreach (var links in controller.model.inputFlowSlot.Select((t, i) => new { index = i, links = t.link }))
             {
                 foreach (var link in links.links)
                 {
-                    if (!VFXContext.CanLink(link.context, (VFXContext)desc.model, links.index, link.slotIndex))
+                    if (!VFXContext.CanLink(link.context, toContext, links.index, link.slotIndex))
                         return false;
                 }
             }
 
-            return (desc.model as VFXContext).contextType == VFXContextType.Output;
+            return toContext.contextType == VFXContextType.Output;
         }
 
         void OnConvertContext(DropdownMenuAction action)
         {
             VFXView view = this.GetFirstAncestorOfType<VFXView>();
-            var window = VFXViewWindow.GetWindow(view);
-            VFXFilterWindow.Show(window, action.eventInfo.mousePosition, view.ViewToScreenPosition(action.eventInfo.mousePosition), new VFXContextOnlyVFXNodeProvider(view.controller, ConvertContext, ProviderFilter));
+            VFXFilterWindow.Show(action.eventInfo.mousePosition, view.ViewToScreenPosition(action.eventInfo.mousePosition), new VFXContextOnlyVFXNodeProvider(view.controller, ConvertContext, ProviderFilter));
         }
 
-        void ConvertContext(VFXNodeProvider.Descriptor d, Vector2 mPos)
+        void ConvertContext(Variant variant, Vector2 mPos)
         {
             VFXView view = GetFirstAncestorOfType<VFXView>();
             VFXViewController viewController = controller.viewController;
             if (view == null) return;
 
             mPos = view.contentViewContainer.ChangeCoordinatesTo(view, controller.position);
-            var newNodeController = view.AddNode(d, mPos);
+            var newNodeController = view.AddNode(variant, mPos);
             var newContextController = newNodeController as VFXContextController;
             newContextController.model.label = controller.model.label;
 
@@ -826,7 +875,7 @@ namespace UnityEditor.VFX.UI
 
 
             //transfer settings
-            var contextType = controller.model.GetType();
+            List<KeyValuePair<string, object>> settings = new();
             foreach (var setting in newContextController.model.GetSettings(true))
             {
                 if (!newContextController.model.CanTransferSetting(setting))
@@ -841,8 +890,9 @@ namespace UnityEditor.VFX.UI
 
                 object value;
                 if (VFXConverter.TryConvertTo(sourceSetting.value, setting.field.FieldType, out value))
-                    newContextController.model.SetSettingValue(setting.field.Name, value);
+                    settings.Add(new(setting.field.Name, value));
             }
+            newContextController.model.SetSettingValues(settings);
 
             //transfer flow edges
             if (controller.flowInputAnchors.Count == 1)
@@ -923,7 +973,7 @@ namespace UnityEditor.VFX.UI
             {
                 OnRename();
                 e.StopPropagation();
-                e.PreventDefault();
+                focusController.IgnoreEvent(e);
             }
         }
 

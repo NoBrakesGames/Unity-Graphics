@@ -6,7 +6,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Version.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition-config/Runtime/ShaderConfig.cs.hlsl"
 
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/TextureXR.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/TextureXR.hlsl"
 // This must be included first before we declare any global constant buffer and will onyl affect ray tracing shaders
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariablesGlobal.hlsl"
 
@@ -167,12 +167,15 @@ TEXTURE2D_X(_RenderingLayerMaskTexture);
 TEXTURE2D_ARRAY(_ThicknessTexture);
 StructuredBuffer<uint> _ThicknessReindexMap;
 
+// Mipmap Streaming Debug
+TEXTURE2D(unity_MipmapStreaming_DebugTex);
+
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariablesXR.cs.hlsl"
 
 // In HDRP, all material samplers have the possibility of having a mip bias.
 // This mip bias is necessary for temporal upsamplers, since they render to a lower
 // resolution into a higher resolution target.
-#if defined(SHADEROPTIONS_GLOBAL_MIP_BIAS) && SHADEROPTIONS_GLOBAL_MIP_BIAS != 0
+#if defined(SHADEROPTIONS_GLOBAL_MIP_BIAS) && SHADEROPTIONS_GLOBAL_MIP_BIAS != 0 && defined(SUPPORT_GLOBAL_MIP_BIAS)
 
     //simple 2d textures bias manipulation
     #ifdef PLATFORM_SAMPLE_TEXTURE2D_BIAS
@@ -208,6 +211,14 @@ StructuredBuffer<uint> _ThicknessReindexMap;
             #define SAMPLE_TEXTURE2D_ARRAY_BIAS(textureName, samplerName, coord2, index, bias) \
                 PLATFORM_SAMPLE_TEXTURE2D_ARRAY_BIAS(textureName, samplerName, coord2, index, (bias + _GlobalMipBias))
         #endif //SAMPLE_TEXTURE2D_ARRAY_BIAS
+    #endif //PLATFORM_SAMPLE_TEXTURE2D_ARRAY_BIAS
+
+    #ifdef PLATFORM_SAMPLE_TEXTURE2D_ARRAY_GRAD
+        #ifdef SAMPLE_TEXTURE2D_ARRAY_GRAD
+            #undef SAMPLE_TEXTURE2D_ARRAY_GRAD
+            #define SAMPLE_TEXTURE2D_ARRAY_GRAD(textureName, samplerName, coord2, index, dpdx, dpdy)\
+                PLATFORM_SAMPLE_TEXTURE2D_ARRAY_GRAD(textureName, samplerName, coord2, index, (dpdx * _GlobalMipBiasPow2), (dpdy * _GlobalMipBiasPow2))
+        #endif
     #endif //PLATFORM_SAMPLE_TEXTURE2D_ARRAY_BIAS
 
     //2d texture cube arrays bias manipulation
@@ -263,7 +274,7 @@ float3 LoadCameraColor(uint2 pixelCoords, uint lod)
 
 float3 SampleCameraColor(float2 uv, float lod)
 {
-    return SAMPLE_TEXTURE2D_X_LOD(_ColorPyramidTexture, s_trilinear_clamp_sampler, uv * _RTHandleScaleHistory.xy, lod).rgb;
+    return SAMPLE_TEXTURE2D_X_LOD(_ColorPyramidTexture, s_trilinear_clamp_sampler, uv * _ColorPyramidUvScaleAndLimitCurrentFrame.xy, lod).rgb;
 }
 
 float3 LoadCameraColor(uint2 pixelCoords)
@@ -328,10 +339,15 @@ float SampleCustomDepth(float2 uv)
     return LoadCustomDepth(uint2(uv * _ScreenSize.xy));
 }
 
+bool IsSky(float deviceDepth)
+{
+    return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE; // We assume the sky is the part of the depth buffer that haven't been written.
+}
+
 bool IsSky(uint2 pixelCoord)
 {
     float deviceDepth = LoadCameraDepth(pixelCoord);
-    return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE; // We assume the sky is the part of the depth buffer that haven't been written.
+    return IsSky(deviceDepth);
 }
 
 bool IsSky(float2 uv)
@@ -395,6 +411,13 @@ float4x4 RevertCameraTranslationFromInverseMatrix(float4x4 inverseModelMatrix)
     #endif
 }
 
+float4x4 RevertCameraTranslationFromMatrix(float4x4 modelMatrix)
+{
+#if (SHADEROPTIONS_CAMERA_RELATIVE_RENDERING != 0)
+    modelMatrix._m03_m13_m23 += _WorldSpaceCameraPos.xyz;
+#endif
+    return modelMatrix;
+}
 
 void ApplyCameraRelativeXR(inout float3 positionWS)
 {
@@ -447,29 +470,7 @@ float GetIndirectSpecularMultiplier(uint renderingLayers)
 }
 
 // Functions to clamp UVs to use when RTHandle system is used.
-
-float2 ClampAndScaleUV(float2 UV, float2 texelSize, float numberOfTexels, float2 scale)
-{
-    float2 maxCoord = 1.0f - numberOfTexels * texelSize;
-    return min(UV, maxCoord) * scale;
-}
-
-float2 ClampAndScaleUV(float2 UV, float2 texelSize, float numberOfTexels)
-{
-    return ClampAndScaleUV(UV, texelSize, numberOfTexels, _RTHandleScale.xy);
-}
-
-// This is assuming half a texel offset in the clamp.
-float2 ClampAndScaleUVForBilinear(float2 UV, float2 texelSize)
-{
-    return ClampAndScaleUV(UV, texelSize, 0.5f);
-}
-
-// This is assuming full screen buffer and half a texel offset for the clamping.
-float2 ClampAndScaleUVForBilinear(float2 UV)
-{
-    return ClampAndScaleUV(UV, _ScreenSize.zw, 0.5f);
-}
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DynamicScalingClamping.hlsl"
 
 // This is assuming an upsampled texture used in post processing, with original screen size and a half a texel offset for the clamping.
 float2 ClampAndScaleUVForBilinearPostProcessTexture(float2 UV)
@@ -487,11 +488,6 @@ float2 ClampAndScaleUVForBilinearPostProcessTexture(float2 UV, float2 texelSize)
 float2 ClampAndScaleUVPostProcessTexture(float2 UV, float2 texelSize, float numberOfTexels)
 {
     return ClampAndScaleUV(UV, texelSize, numberOfTexels, _RTHandlePostProcessScale.xy);
-}
-
-float2 ClampAndScaleUVForPoint(float2 UV)
-{
-    return min(UV, 1.0f) * _RTHandleScale.xy;
 }
 
 float2 ClampAndScaleUVPostProcessTextureForPoint(float2 UV)
@@ -540,6 +536,10 @@ float4x4 GetRawUnityPrevWorldToObject() { return unity_MatrixPreviousMI; }
 #define UNITY_MATRIX_I_M       ApplyCameraTranslationToInverseMatrix(GetRawUnityWorldToObject())
 #define UNITY_PREV_MATRIX_M    ApplyCameraTranslationToMatrix(GetRawUnityPrevObjectToWorld())
 #define UNITY_PREV_MATRIX_I_M  ApplyCameraTranslationToInverseMatrix(GetRawUnityPrevWorldToObject())
+#define UNITY_MATRIX_MV        mul(UNITY_MATRIX_V, UNITY_MATRIX_M)
+#define UNITY_MATRIX_T_MV      transpose(UNITY_MATRIX_MV)
+#define UNITY_MATRIX_IT_MV     transpose(mul(UNITY_MATRIX_I_M, UNITY_MATRIX_I_V))
+#define UNITY_MATRIX_MVP       mul(UNITY_MATRIX_VP, UNITY_MATRIX_M)
 
 #endif
 
@@ -610,15 +610,15 @@ float4 UnpackVTFeedbackWithAlpha(float4 feedbackWithAlpha)
 #undef unity_MatrixPreviousM
 #undef unity_MatrixPreviousMI
 UNITY_DOTS_INSTANCING_START(BuiltinPropertyMetadata)
-    UNITY_DOTS_INSTANCED_PROP(float3x4, unity_ObjectToWorld)
-    UNITY_DOTS_INSTANCED_PROP(float3x4, unity_WorldToObject)
-    UNITY_DOTS_INSTANCED_PROP(float4,   unity_LightmapST)
-    UNITY_DOTS_INSTANCED_PROP(float4,   unity_LightmapIndex)
-    UNITY_DOTS_INSTANCED_PROP(float4,   unity_DynamicLightmapST)
-    UNITY_DOTS_INSTANCED_PROP(float3x4, unity_MatrixPreviousM)
-    UNITY_DOTS_INSTANCED_PROP(float3x4, unity_MatrixPreviousMI)
-    UNITY_DOTS_INSTANCED_PROP(SH,       unity_SHCoefficients)
-    UNITY_DOTS_INSTANCED_PROP(uint2,    unity_EntityId)
+    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float3x4, unity_ObjectToWorld)
+    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float3x4, unity_WorldToObject)
+    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float4,   unity_LightmapST)
+    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float4,   unity_LightmapIndex)
+    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float4,   unity_DynamicLightmapST)
+    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float3x4, unity_MatrixPreviousM)
+    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(float3x4, unity_MatrixPreviousMI)
+    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(SH,       unity_SHCoefficients)
+    UNITY_DOTS_INSTANCED_PROP_OVERRIDE_SUPPORTED(uint2,    unity_EntityId)
 UNITY_DOTS_INSTANCING_END(BuiltinPropertyMetadata)
 
 #define unity_LODFade               LoadDOTSInstancedData_LODFade()

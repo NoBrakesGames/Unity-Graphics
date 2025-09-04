@@ -1,4 +1,5 @@
 using UnityEditor.Rendering;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
@@ -11,7 +12,16 @@ namespace UnityEditor.Rendering.HighDefinition
         static void CreateMirrorGameObject(MenuCommand menuCommand)
         {
             GameObject plane = GameObject.CreatePrimitive(PrimitiveType.Plane);
-            GameObjectUtility.SetParentAndAlign(plane, menuCommand.context as GameObject);
+            GameObject parent = menuCommand.context as GameObject;
+            if (parent == null)
+            {
+                plane.transform.position = Vector3.zero;
+                StageUtility.PlaceGameObjectInCurrentStage(plane);
+            }
+            else
+            {
+                GameObjectUtility.SetParentAndAlign(plane, parent);
+            }
             Undo.RegisterCreatedObjectUndo(plane, "Create " + plane.name);
             Selection.activeObject = plane;
 
@@ -22,10 +32,13 @@ namespace UnityEditor.Rendering.HighDefinition
             // normal HD probes, but for planar reflections it can cause some undesirable default results.
             planarProbe.useInfluenceVolumeAsProxyVolume = false;
 
-            var material = HDRenderPipelineGlobalSettings.instance?.GetDefaultMirrorMaterial();
-            if (material)
+            if (GraphicsSettings.TryGetRenderPipelineSettings<HDRenderPipelineEditorMaterials>(out var defaultMaterials))
             {
-                plane.GetComponent<MeshRenderer>().sharedMaterial = material;
+                plane.GetComponent<MeshRenderer>().sharedMaterial = defaultMaterials.defaultMirrorMaterial;
+            }
+            else
+            {
+                Debug.LogWarning($"{plane.name} is missing the {nameof(MeshRenderer.sharedMaterial)} due to not being able to find {nameof(HDRenderPipelineEditorMaterials.defaultMirrorMaterial)}.");
             }
         }
 

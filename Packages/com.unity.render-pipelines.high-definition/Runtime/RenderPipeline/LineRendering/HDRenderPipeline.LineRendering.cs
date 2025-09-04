@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -18,6 +18,9 @@ namespace UnityEngine.Rendering.HighDefinition
 
         // Misc.
         private Material m_LineCompositePass;
+        private int m_LineCompositePassAllIndex;
+        private int m_LineCompositePassColorIndex;
+        private int m_LineCompositePassDepthMovecIndex;
         private static bool s_SupportLineRendering;
 
         void InitializeLineRendering()
@@ -27,27 +30,30 @@ namespace UnityEngine.Rendering.HighDefinition
             if (!s_SupportLineRendering)
                 return;
 
-            m_LineCompositePass = CoreUtils.CreateEngineMaterial(defaultResources.shaders.lineCompositePS);
+            m_LineCompositePass = CoreUtils.CreateEngineMaterial(runtimeShaders.lineCompositePS);
+            m_LineCompositePassAllIndex = m_LineCompositePass.FindPass("CompositeAll");
+            m_LineCompositePassColorIndex = m_LineCompositePass.FindPass("CompositeColorOnly");
+            m_LineCompositePassDepthMovecIndex = m_LineCompositePass.FindPass("CompositeDepthMovecOnly");
 
             m_PrefixSum = new GPUPrefixSum(new GPUPrefixSum.SystemResources
             {
-                computeAsset = defaultResources.shaders.gpuPrefixSumCS
+                computeAsset = runtimeShaders.gpuPrefixSumCS
             });
 
             m_Sorter = new GPUSort(new GPUSort.SystemResources
             {
-                computeAsset = defaultResources.shaders.gpuSortCS
+                computeAsset = runtimeShaders.gpuSortCS
             });
 
             LineRendering.Instance.Initialize(new LineRendering.SystemResources
             {
                 // Due to a lack of a "Core Resource" concept, we pass along the kernel assets as initialization parameters.
-                stagePrepareCS      = defaultResources.shaders.lineStagePrepareCS,
-                stageSetupSegmentCS = defaultResources.shaders.lineStageSetupSegmentCS,
-                stageShadingSetupCS = defaultResources.shaders.lineStageShadingSetupCS,
-                stageRasterBinCS    = defaultResources.shaders.lineStageRasterBinCS,
-                stageWorkQueue      = defaultResources.shaders.lineStageWorkQueueCS,
-                stageRasterFineCS   = defaultResources.shaders.lineStageRasterFineCS,
+                stagePrepareCS      = runtimeShaders.lineStagePrepareCS,
+                stageSetupSegmentCS = runtimeShaders.lineStageSetupSegmentCS,
+                stageShadingSetupCS = runtimeShaders.lineStageShadingSetupCS,
+                stageRasterBinCS    = runtimeShaders.lineStageRasterBinCS,
+                stageWorkQueue      = runtimeShaders.lineStageWorkQueueCS,
+                stageRasterFineCS   = runtimeShaders.lineStageRasterFineCS,
 
                 // Misc. Compute Utility
                 gpuSort      = m_Sorter,
@@ -58,7 +64,7 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 TextureDesc td = new TextureDesc(Vector2.one, true, true);
                 {
-                    td.colorFormat = format;
+                    td.format = format;
                     td.useMipMap = false;
                     td.clearBuffer = true;
                     td.clearColor = clearValue;
@@ -110,6 +116,8 @@ namespace UnityEngine.Rendering.HighDefinition
             public TextureHandle lineTargetColor;
             public TextureHandle lineTargetDepth;
             public TextureHandle lineTargetMV;
+
+            public float writeDepthAndMovecAlphaTreshold;
         }
 
         internal static bool LineRenderingIsEnabled(HDCamera hdCamera, out HighQualityLineRenderingVolumeComponent settings)
@@ -196,14 +204,17 @@ namespace UnityEngine.Rendering.HighDefinition
 
             LineRendering.Instance.Draw(new LineRendering.Arguments
             {
-                camera       = hdCamera.camera,
-                renderGraph  = renderGraph,
-                depthTexture = depthPrepassTexture,
-                settings     = systemSettings,
-                shadingAtlas = LineRendering.Instance.GetShadingAtlas(renderGraph, hdCamera.camera),
-                viewport     = new Vector2(hdCamera.actualWidth, hdCamera.actualHeight),
-                matrixIVP    = hdCamera.mainViewConstants.nonJitteredViewProjMatrix.inverse,
-                targets      = targets
+                camera         = hdCamera.camera,
+                cameraPosition = hdCamera.camera.transform.position,
+                cameraFrustum  = hdCamera.frustum,
+                renderGraph    = renderGraph,
+                depthTexture   = depthPrepassTexture,
+                settings       = systemSettings,
+                shadingAtlas   = LineRendering.Instance.GetShadingAtlas(renderGraph, hdCamera.camera),
+                viewport       = new Vector2(hdCamera.actualWidth, hdCamera.actualHeight),
+                matrixIVP      = hdCamera.mainViewConstants.nonJitteredViewProjMatrix.inverse,
+                targets        = targets,
+                viewCount = hdCamera.viewCount
             });
 
             PushFullScreenDebugTexture(renderGraph, m_LineColorBuffer, FullScreenDebugMode.HighQualityLines);
@@ -224,22 +235,35 @@ namespace UnityEngine.Rendering.HighDefinition
                 passData.mainTargetColor = builder.UseColorBuffer(colorBuffer, 0);
                 passData.mainTargetDepth = builder.UseDepthBuffer(depthBuffer, DepthAccess.ReadWrite);
 
-                if (motionVectorBuffer.IsValid())
+                if (motionVectorBuffer.IsValid() && hdCamera.frameSettings.IsEnabled(FrameSettingsField.MotionVectors))
                 {
                     // The motion vectors may be invalid in case of material debug view. So don't bind it in that case.
                     passData.mainTargetMV = builder.UseColorBuffer(motionVectorBuffer, 1);
                 }
+                else
+                    passData.mainTargetMV = TextureHandle.nullHandle;
 
                 passData.lineTargetColor = builder.ReadTexture(m_LineColorBuffer);
                 passData.lineTargetDepth = builder.ReadTexture(m_LineDepthBuffer);
                 passData.lineTargetMV    = builder.ReadTexture(m_LineMVBuffer);
+                passData.writeDepthAndMovecAlphaTreshold = settings.writeDepthAlphaThreshold.value;
 
                 builder.SetRenderFunc((LineRendererCompositeData passData, RenderGraphContext context) =>
                 {
                     passData.compositePass.SetTexture(HDShaderIDs._LineColorTexture,  passData.lineTargetColor);
                     passData.compositePass.SetTexture(HDShaderIDs._LineDepthTexture,  passData.lineTargetDepth);
                     passData.compositePass.SetTexture(HDShaderIDs._LineMotionTexture, passData.lineTargetMV);
-                    HDUtils.DrawFullScreen(context.cmd, passData.compositePass, new RenderTargetIdentifier[] { passData.mainTargetColor, passData.mainTargetMV }, passData.mainTargetDepth);
+                    passData.compositePass.SetFloat(HDShaderIDs._LineAlphaDepthWriteThreshold, passData.writeDepthAndMovecAlphaTreshold );
+                    if (passData.writeDepthAndMovecAlphaTreshold > 0)
+                    {
+                        HDUtils.DrawFullScreen(context.cmd, passData.compositePass, new RenderTargetIdentifier[] { passData.mainTargetColor}, passData.mainTargetDepth, null, m_LineCompositePassColorIndex); //color composite
+                        HDUtils.DrawFullScreen(context.cmd, passData.compositePass, new RenderTargetIdentifier[] { passData.mainTargetMV }, passData.mainTargetDepth, null, m_LineCompositePassDepthMovecIndex); //depth & movec composite
+                    }
+                    else
+                    {
+                        HDUtils.DrawFullScreen(context.cmd, passData.compositePass, new RenderTargetIdentifier[] { passData.mainTargetColor, passData.mainTargetMV }, passData.mainTargetDepth, null, m_LineCompositePassAllIndex); //composite all
+                    }
+
                 });
             }
         }

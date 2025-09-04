@@ -183,9 +183,14 @@ VaryingsType MotionVectorVS_Internal(VaryingsType varyingsType, AttributesMesh i
             AttributesMesh previousMesh = inputMesh;
             previousMesh.positionOS = effectivePositionOS;
 
+#ifdef USE_CUSTOMINTERP_SUBSTRUCT
+            // Create a dummy value here to avoid modifying the current custom interpolator values when calculting the previous mesh
+            // Since this value is never being used it should be removed by the shader compiler
+            VaryingsMeshType dummyVaryingsMesh = (VaryingsMeshType)0;
+#endif
             previousMesh = ApplyMeshModification(previousMesh, _LastTimeParameters.xyz
 #ifdef USE_CUSTOMINTERP_SUBSTRUCT
-                , varyingsType.vmesh
+                , dummyVaryingsMesh
 #endif
 #ifdef HAVE_VFX_MODIFICATION
                 , inputElement
@@ -225,10 +230,12 @@ VaryingsType MotionVectorVS_Internal(VaryingsType varyingsType, AttributesMesh i
             //previousMesh.positionOS is already in absolute world space
             previousPositionRWS = GetCameraRelativePositionWS(previousMesh.positionOS);
 #else
-            previousPositionRWS = TransformPreviousObjectToWorld(previousMesh.positionOS);
-#endif
 
-#else
+            previousPositionRWS = TransformPreviousObjectToWorld(previousMesh.positionOS);
+
+#endif // defined(HAVE_VFX_MODIFICATION) && VFX_WORLD_SPACE
+
+#else // HAVE_MESH_MODIFICATION
 
 #if defined(_ADD_CUSTOM_VELOCITY) // For shader graph custom velocity
             effectivePositionOS -= GetCustomVelocity(inputMesh
@@ -243,7 +250,7 @@ VaryingsType MotionVectorVS_Internal(VaryingsType varyingsType, AttributesMesh i
 #endif
 
             previousPositionRWS = TransformPreviousObjectToWorld(effectivePositionOS);
-#endif
+#endif // HAVE_MESH_MODIFICATION
 
 #ifdef ATTRIBUTES_NEED_NORMAL
             float3 normalWS = TransformPreviousObjectToWorldNormal(inputMesh.normalOS);
@@ -251,6 +258,7 @@ VaryingsType MotionVectorVS_Internal(VaryingsType varyingsType, AttributesMesh i
             float3 normalWS = float3(0.0, 0.0, 0.0);
 #endif
 
+             
 #if defined(HAVE_VERTEX_MODIFICATION)
             ApplyVertexModification(inputMesh, normalWS, previousPositionRWS, _LastTimeParameters.xyz);
 #endif

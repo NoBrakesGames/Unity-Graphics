@@ -6,12 +6,17 @@ using UnityEngine.Rendering.Universal;
 
 internal class SimpleShadowProvider : ShadowShape2DProvider
 {
-    public override bool IsShapeSource(in Component sourceComponent)
+    public override string ProviderName(string componentName)
+    {
+        return "Simple Shadow Provider";
+    }
+
+    public override bool IsShapeSource(Component sourceComponent)
     {
         return sourceComponent is Transform;
     }
 
-    public override void OnPersistantDataCreated(in Component sourceComponent, ShadowShape2D persistantShadowShape)
+    public override void OnPersistantDataCreated(Component sourceComponent, ShadowShape2D persistantShadowShape)
     {
         NativeArray<Vector3> vertices = new NativeArray<Vector3>(4, Allocator.Persistent);
         NativeArray<int> indices = new NativeArray<int>(8, Allocator.Persistent);
@@ -36,5 +41,5 @@ internal class SimpleShadowProvider : ShadowShape2DProvider
 
     }
 
-    public override void OnBeforeRender(in Component sourceComponent, in Bounds worldCullingBounds, ShadowShape2D persistantShadowShape) { }
+    public override void OnBeforeRender(Component sourceComponent, Bounds worldCullingBounds, ShadowShape2D persistantShadowShape) { }
 }

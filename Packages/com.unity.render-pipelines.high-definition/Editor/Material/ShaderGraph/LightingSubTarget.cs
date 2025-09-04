@@ -40,6 +40,11 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         public override void Setup(ref TargetSetupContext context)
         {
             context.AddAssetDependency(kSourceCodeGuid, AssetCollection.Flags.SourceDependency);
+            if (TargetsVFX())
+            {
+                var inspector = typeof(VFXShaderGraphGUILit).FullName;
+                context.AddCustomEditorForRenderPipeline(inspector, typeof(HDRenderPipelineAsset));
+            }
             base.Setup(ref context);
         }
 
@@ -57,7 +62,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             unchecked
             {
                 hash = hash * 23 + builtinData.alphaTestShadow.GetHashCode();
-                hash = hash * 23 + lightingData.receiveSSR.GetHashCode();
+                hash = hash * 23 + (!lightingData.receiveSSR).GetHashCode();
                 hash = hash * 23 + lightingData.receiveSSRTransparent.GetHashCode();
             }
 
@@ -97,10 +102,8 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         {
             base.CollectPassKeywords(ref pass);
 
-            pass.keywords.Add(CoreKeywordDescriptors.DisableDecals);
-            pass.keywords.Add(CoreKeywordDescriptors.DisableSSR);
-            pass.keywords.Add(CoreKeywordDescriptors.DisableSSRTransparent);
-            // pass.keywords.Add(CoreKeywordDescriptors.EnableGeometricSpecularAA);
+            if (!pass.IsShadow())
+                pass.keywords.Add(CoreKeywordDescriptors.DisableDecals);
 
             if (pass.lightMode == HDShaderPassNames.s_MotionVectorsStr)
                 pass.keywords.Add(CoreKeywordDescriptors.WriteDecalBufferMotionVector);
@@ -109,6 +112,9 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 
             if (pass.IsLightingOrMaterial())
             {
+                pass.keywords.Add(CoreKeywordDescriptors.DisableSSR);
+                if (pass.lightMode != HDShaderPassNames.s_GBufferStr)
+                    pass.keywords.Add(CoreKeywordDescriptors.DisableSSRTransparent);
                 pass.keywords.Add(CoreKeywordDescriptors.Lightmap);
                 pass.keywords.Add(CoreKeywordDescriptors.DirectionalLightmapCombined);
                 pass.keywords.Add(CoreKeywordDescriptors.ProbeVolumes);
@@ -119,12 +125,20 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                     pass.keywords.Add(CoreKeywordDescriptors.ShadowsShadowmask);
                     pass.keywords.Add(CoreKeywordDescriptors.Decals);
                     pass.keywords.Add(CoreKeywordDescriptors.DecalSurfaceGradient);
+                    pass.keywords.Add(CoreKeywordDescriptors.UseLegacyLightmaps);
                 }
+            }
+
+            if(pass.IsPathTracing() || pass.IsRayTracing())
+            {
+                pass.keywords.Add(CoreKeywordDescriptors.DecalsRayTracing);
+                pass.keywords.Add(CoreKeywordDescriptors.DecalSurfaceGradientRayTracing);
             }
 
             if (pass.IsForward())
             {
-                pass.keywords.Add(CoreKeywordDescriptors.Shadow);
+                pass.keywords.Add(CoreKeywordDescriptors.PunctualShadow);
+                pass.keywords.Add(CoreKeywordDescriptors.DirectionalShadow);
                 pass.keywords.Add(CoreKeywordDescriptors.AreaShadow);
                 pass.keywords.Add(CoreKeywordDescriptors.ScreenSpaceShadow);
 

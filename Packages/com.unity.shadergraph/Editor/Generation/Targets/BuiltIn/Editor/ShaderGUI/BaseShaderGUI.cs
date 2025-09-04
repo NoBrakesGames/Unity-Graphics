@@ -69,7 +69,7 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
             public static readonly GUIContent blendingMode = EditorGUIUtility.TrTextContent("Blending Mode",
                 "Controls how the color of the Transparent surface blends with the Material color in the background.");
             public static readonly GUIContent cullingText = EditorGUIUtility.TrTextContent("Render Face",
-                "Specifies which faces to cull from your geometry. Front culls front faces. Back culls backfaces. None means that both sides are rendered.");
+                "Specifies which faces to cull from your geometry. Front culls front faces. Back culls back faces. Both means that both sides are rendered.");
             public static readonly GUIContent zwriteText = EditorGUIUtility.TrTextContent("Depth Write",
                 "Controls whether the shader writes depth.  Auto will write only when the shader is opaque.");
             public static readonly GUIContent ztestText = EditorGUIUtility.TrTextContent("Depth Test",
@@ -209,8 +209,7 @@ namespace UnityEditor.Rendering.BuiltIn.ShaderGraph
             // If we find another value, add the the property set to 1 so we will know that the
             // user has explicitly selected a render queue and we should not override it.
             //
-            int rawRenderQueue = MaterialAccess.ReadMaterialRawRenderQueue(material);
-            if (rawRenderQueue == -1)
+            if (material.rawRenderQueue == -1)
             {
                 material.SetFloat(Property.QueueControl(), (float)QueueControl.Auto); // Automatic behavior - surface type override
             }

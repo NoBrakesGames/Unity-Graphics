@@ -39,7 +39,7 @@ namespace UnityEditor.Rendering.HighDefinition
             }
         }
 
-        public override string documentationURL => Documentation.GetPageLink("SGNode-HD-Scene-Depth");
+        public override string documentationURL => NodeUtils.GetDocumentationString("HD-Scene-Depth");
 
         public HDSceneDepthNode()
         {
@@ -95,7 +95,7 @@ namespace UnityEditor.Rendering.HighDefinition
         {
             if (generationMode.IsPreview())
             {
-                sb.AppendLine("$precision3 {0} = 0.0;", GetVariableNameForSlot(k_OutputSlotId));
+                sb.AppendLine("$precision {0} = 0.0;", GetVariableNameForSlot(k_OutputSlotId));
             }
             else
             {
@@ -108,7 +108,7 @@ namespace UnityEditor.Rendering.HighDefinition
                 if (depthSamplingMode == DepthSamplingMode.Linear01)
                     depth = $"Linear01Depth({depth}, _ZBufferParams)";
 
-                sb.AppendLine($"$precision3 {GetVariableNameForSlot(k_OutputSlotId)} = {depth};");
+                sb.AppendLine($"$precision {GetVariableNameForSlot(k_OutputSlotId)} = {depth};");
             }
         }
 

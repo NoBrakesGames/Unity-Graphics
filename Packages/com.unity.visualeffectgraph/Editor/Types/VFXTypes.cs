@@ -182,7 +182,7 @@ namespace UnityEditor.VFX
         public static AABox defaultValue = new AABox { size = Vector3.one };
     }
 
-    [VFXType, Serializable]
+    [VFXType(name:"Plane"), Serializable]
     struct Plane
     {
         public Plane(Vector3 direction) { position = Vector3.zero; normal = direction; }
@@ -195,7 +195,7 @@ namespace UnityEditor.VFX
         public static Plane defaultValue = new Plane { normal = Vector3.up };
     }
 
-    [VFXType, Serializable]
+    [VFXType(name:"Line"), Serializable]
     struct Line
     {
         [Tooltip("Sets the start position of the line."), VFXSpace(SpaceableType.Position)]
@@ -251,6 +251,11 @@ namespace UnityEditor.VFX
         }
 
         public static Position defaultValue = new Position { position = Vector3.zero };
+
+        public override string ToString()
+        {
+            return position.ToString();
+        }
     }
 
     [VFXType(VFXTypeAttribute.Usage.Default, "Direction"), Serializable]
@@ -270,6 +275,11 @@ namespace UnityEditor.VFX
         }
 
         public static DirectionType defaultValue = new DirectionType { direction = Vector3.up };
+
+        public override string ToString()
+        {
+            return direction.ToString();
+        }
     }
 
     [VFXType, Serializable]
@@ -289,6 +299,11 @@ namespace UnityEditor.VFX
         }
 
         public static Vector defaultValue = new Vector { vector = Vector3.zero };
+
+        public override string ToString()
+        {
+            return vector.ToString();
+        }
     }
 
     [VFXType, Serializable]
@@ -296,6 +311,9 @@ namespace UnityEditor.VFX
     {
         public int x;
         public int y;
+
+        public static implicit operator Vector2(FlipBook flipbook) => new Vector2(flipbook.x, flipbook.y);
+        public static implicit operator FlipBook(Vector2 v) => new FlipBook { x = Mathf.RoundToInt(v.x), y = Mathf.RoundToInt(v.y) };
 
         public static FlipBook defaultValue = new FlipBook { x = 4, y = 4 };
     }
@@ -348,8 +366,10 @@ namespace UnityEditor.VFX
         public float orthographicSize;
         [Min(0.0f), Tooltip("The aspect ratio is the proportional relationship between the camera’s width and height.")]
         public float aspectRatio;
-        [Min(0.0f), Tooltip("The width and height of the camera in pixels.")]
+        [Min(0.0f), Tooltip("The width and height of the final viewport of the camera in pixels, after upscaling if applicable.")]
         public Vector2 pixelDimensions;
+        [Min(0.0f), Tooltip("The width and height of the camera buffers in pixels, before upscaling if applicable.")]
+        public Vector2 scaledPixelDimensions;
         [Tooltip("The lens shift along the x and y directions.")]
         public Vector2 lensShift;
         [Tooltip("The depth buffer of the camera, containing the rendered depth information.")]
@@ -357,7 +377,16 @@ namespace UnityEditor.VFX
         [Tooltip("The color buffer of the camera, containing the rendered color information.")]
         public CameraBuffer colorBuffer;
 
-        public static CameraType defaultValue = new CameraType { transform = Transform.defaultValue, fieldOfView = 60.0f * Mathf.Deg2Rad, nearPlane = 0.3f, farPlane = 1000.0f, aspectRatio = 1.0f, lensShift = Vector2.zero, orthographicSize = 5.0f, pixelDimensions = new Vector2(1920, 1080) };
+        public static CameraType defaultValue = new CameraType {
+            transform = Transform.defaultValue,
+            fieldOfView = 60.0f * Mathf.Deg2Rad,
+            nearPlane = 0.3f, farPlane = 1000.0f,
+            aspectRatio = 1.0f,
+            lensShift = Vector2.zero,
+            orthographicSize = 5.0f,
+            pixelDimensions = new Vector2(1920, 1080),
+            scaledPixelDimensions = new Vector2(1920, 1080)
+        };
     }
 
     [VFXType, Serializable]

@@ -11,6 +11,7 @@
 TEXTURE2D_X(_InputTexture);
 RW_TEXTURE2D_X(CTYPE, _OutputTexture);
 
+#pragma multi_compile _ ENABLE_ALPHA
 #pragma multi_compile _ CLAMP_RINGING
 
 float4 _SharpenParams;
@@ -69,6 +70,8 @@ float3 GetSharpenedResult(float3 original, float2 UV)
 [numthreads(8, 8, 1)]
 void SharpenCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
+    UNITY_XR_ASSIGN_VIEW_INDEX(dispatchThreadId.z);
+
     float2 UV = (dispatchThreadId.xy + 0.5) * _PostProcessScreenSize.zw;
 
     float4 original = _InputTexture[COORD_TEXTURE2D_X(dispatchThreadId.xy)];

@@ -19,6 +19,7 @@ MonoBehaviour:
     ColorSpace: -1
     BuildPlatform: -2
     GraphicsDevice: 17
+    Architecture: 0
     XrSdk: None
     StereoModes: 0
     Reason: Needs fixing in OpenGL
@@ -28,33 +29,57 @@ MonoBehaviour:
     ColorSpace: -1
     BuildPlatform: -2
     GraphicsDevice: 17
+    Architecture: 0
     XrSdk: None
     StereoModes: 0
     Reason: Needs fixing in OpenGL
   - FilteredScene: {fileID: 0}
     FilteredScenes:
-    - {fileID: 102900000, guid: 5c51bb3f8f127fd4cbfa0fbdb9221b0e, type: 3}
+    - {fileID: 102900000, guid: 7599bce7824e37a4e98f14a6a979d514, type: 3}
     ColorSpace: -1
-    BuildPlatform: 2
-    GraphicsDevice: 16
+    BuildPlatform: 42
+    GraphicsDevice: 4
+    Architecture: 0
     XrSdk: None
     StereoModes: 0
-    Reason: https://jira.unity3d.com/browse/UUM-3312
+    Reason: UUM-27717
   - FilteredScene: {fileID: 0}
     FilteredScenes:
-    - {fileID: 102900000, guid: 381306730e4f1b141bf8e0e1c35f16e9, type: 3}
+    - {fileID: 102900000, guid: 7599bce7824e37a4e98f14a6a979d514, type: 3}
     ColorSpace: -1
-    BuildPlatform: -2
+    BuildPlatform: 43
     GraphicsDevice: 4
+    Architecture: 0
     XrSdk: None
     StereoModes: 0
-    Reason: ObjectSpace UV use is not-deterministic.Fix ShaderGraph.
+    Reason: UUM-27717
   - FilteredScene: {fileID: 0}
     FilteredScenes:
-    - {fileID: 0}
+    - {fileID: 102900000, guid: 9f750aafa54d07a43b7601615bb2c7ea, type: 3}
     ColorSpace: -1
-    BuildPlatform: -2
-    GraphicsDevice: 4
+    BuildPlatform: 13
+    GraphicsDevice: 11
+    Architecture: 0
+    XrSdk: None
+    StereoModes: 0
+    Reason: Post Process needs fixing
+  - FilteredScene: {fileID: 0}
+    FilteredScenes:
+    - {fileID: 102900000, guid: f2882940e2db8f344878e353fac92b48, type: 3}
+    ColorSpace: -1
+    BuildPlatform: 13
+    GraphicsDevice: 11
+    Architecture: 0
     XrSdk: 
     StereoModes: 0
-    Reason: 
+    Reason: No GPU Skinning
+  - FilteredScene: {fileID: 0}
+    FilteredScenes:
+    - {fileID: 102900000, guid: 320bc6f8378f61647959c52de7e45603, type: 3}
+    ColorSpace: -1
+    BuildPlatform: 13
+    GraphicsDevice: 11
+    Architecture: 0
+    XrSdk: None
+    StereoModes: 0
+    Reason: VFX not supported on certain GPUs on Android GLES3

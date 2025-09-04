@@ -28,10 +28,15 @@ namespace UnityEditor.Rendering.Universal
         public SerializedProperty mainLightShadowsSupportedProp { get; }
         public SerializedProperty mainLightShadowmapResolutionProp { get; }
 
+        public SerializedProperty shEvalModeProp { get; }
+
         internal SerializedProperty lightProbeSystem;
         internal SerializedProperty probeVolumeTextureSize;
         internal SerializedProperty probeVolumeBlendingTextureSize;
-        internal SerializedProperty supportProbeVolumeStreaming;
+        internal SerializedProperty supportProbeVolumeGPUStreaming;
+        internal SerializedProperty supportProbeVolumeDiskStreaming;
+        internal SerializedProperty supportProbeVolumeScenarios;
+        internal SerializedProperty supportProbeVolumeScenarioBlending;
         internal SerializedProperty probeVolumeSHBands;
 
         public SerializedProperty additionalLightsRenderingModeProp { get; }
@@ -67,13 +72,20 @@ namespace UnityEditor.Rendering.Universal
         public SerializedProperty useRenderingLayers { get; }
         public SerializedProperty supportsLightCookies { get; }
         public SerializedProperty debugLevelProp { get; }
-        public SerializedProperty enableRenderGraph { get; }
 
         public SerializedProperty volumeFrameworkUpdateModeProp { get; }
+        public SerializedProperty volumeProfileProp { get; }
 
         public SerializedProperty colorGradingMode { get; }
         public SerializedProperty colorGradingLutSize { get; }
+        public SerializedProperty allowPostProcessAlphaOutput { get; }
         public SerializedProperty useFastSRGBLinearConversion { get; }
+        public SerializedProperty supportDataDrivenLensFlare { get; }
+        public SerializedProperty supportScreenSpaceLensFlare { get; }
+
+        public SerializedProperty gpuResidentDrawerMode { get; }
+        public SerializedProperty smallMeshScreenPercentage { get; }
+        public SerializedProperty gpuResidentDrawerEnableOcclusionCullingInCameras { get; }
 
 #if ADAPTIVE_PERFORMANCE_2_0_0_OR_NEWER
         public SerializedProperty useAdaptivePerformance { get; }
@@ -103,10 +115,15 @@ namespace UnityEditor.Rendering.Universal
             fsrOverrideSharpness = serializedObject.FindProperty("m_FsrOverrideSharpness");
             fsrSharpness = serializedObject.FindProperty("m_FsrSharpness");
 
+            shEvalModeProp = serializedObject.FindProperty("m_ShEvalMode");
+
             lightProbeSystem = serializedObject.FindProperty("m_LightProbeSystem");
             probeVolumeTextureSize = serializedObject.FindProperty("m_ProbeVolumeMemoryBudget");
             probeVolumeBlendingTextureSize = serializedObject.FindProperty("m_ProbeVolumeBlendingMemoryBudget");
-            supportProbeVolumeStreaming = serializedObject.FindProperty("m_SupportProbeVolumeStreaming");
+            supportProbeVolumeGPUStreaming = serializedObject.FindProperty("m_SupportProbeVolumeGPUStreaming");
+            supportProbeVolumeDiskStreaming = serializedObject.FindProperty("m_SupportProbeVolumeDiskStreaming");
+            supportProbeVolumeScenarios = serializedObject.FindProperty("m_SupportProbeVolumeScenarios");
+            supportProbeVolumeScenarioBlending = serializedObject.FindProperty("m_SupportProbeVolumeScenarioBlending");
             probeVolumeSHBands = serializedObject.FindProperty("m_ProbeVolumeSHBands");
 
             mainLightRenderingModeProp = serializedObject.FindProperty("m_MainLightRenderingMode");
@@ -147,16 +164,23 @@ namespace UnityEditor.Rendering.Universal
             useRenderingLayers = serializedObject.FindProperty("m_SupportsLightLayers");
             supportsLightCookies = serializedObject.FindProperty("m_SupportsLightCookies");
             debugLevelProp = serializedObject.FindProperty("m_DebugLevel");
-            enableRenderGraph = serializedObject.FindProperty("m_EnableRenderGraph");
 
             volumeFrameworkUpdateModeProp = serializedObject.FindProperty("m_VolumeFrameworkUpdateMode");
+            volumeProfileProp = serializedObject.FindProperty("m_VolumeProfile");
 
             storeActionsOptimizationProperty = serializedObject.FindProperty("m_StoreActionsOptimization");
 
             colorGradingMode = serializedObject.FindProperty("m_ColorGradingMode");
             colorGradingLutSize = serializedObject.FindProperty("m_ColorGradingLutSize");
 
+            allowPostProcessAlphaOutput = serializedObject.FindProperty("m_AllowPostProcessAlphaOutput");
             useFastSRGBLinearConversion = serializedObject.FindProperty("m_UseFastSRGBLinearConversion");
+            supportDataDrivenLensFlare = serializedObject.FindProperty("m_SupportDataDrivenLensFlare");
+            supportScreenSpaceLensFlare = serializedObject.FindProperty("m_SupportScreenSpaceLensFlare");
+
+            gpuResidentDrawerMode = serializedObject.FindProperty("m_GPUResidentDrawerMode");
+            smallMeshScreenPercentage = serializedObject.FindProperty("m_SmallMeshScreenPercentage");
+            gpuResidentDrawerEnableOcclusionCullingInCameras = serializedObject.FindProperty("m_GPUResidentDrawerEnableOcclusionCullingInCameras");
 
 #if ADAPTIVE_PERFORMANCE_2_0_0_OR_NEWER
             useAdaptivePerformance = serializedObject.FindProperty("m_UseAdaptivePerformance");

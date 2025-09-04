@@ -55,6 +55,7 @@ Repositories.ini eol=lf
 *.7[zZ] filter=lfs diff=lfs merge=lfs -text
 *.[zZ]7 filter=lfs diff=lfs merge=lfs -text
 *.[tT][gG][zZ] filter=lfs diff=lfs merge=lfs -text
+*.[tT][aA][rR].[zZ][sS][tT] filter=lfs diff=lfs merge=lfs -text
 *.[gG][zZ] filter=lfs diff=lfs merge=lfs -text
 *.[jJ][aA][rR] filter=lfs diff=lfs merge=lfs -text
 *.[nN][uU][pP][kK][gG] filter=lfs diff=lfs merge=lfs -text
@@ -336,38 +337,6 @@ Editor/Resources/unity[[:space:]]editor[[:space:]]resources filter=lfs diff=lfs 
 **/SRP_SmokeTest/**/*.tiff filter=lfs diff=lfs merge=lfs -text
 **/SRP_SmokeTest/**/*.ttf filter=lfs diff=lfs merge=lfs -text
 **/SRP_SmokeTest/**/*.vfx filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.bytes filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.cube filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.dds filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.exp filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.FBX filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.fbx filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.hdr filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.jpg filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.png filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.psd filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.tga filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.tif filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.tiff filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.ttf filter=lfs diff=lfs merge=lfs -text
-**/UniversalGfxTestStereo/**/*.vfx filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.bytes filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.cube filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.dds filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.exp filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.FBX filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.fbx filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.hdr filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.jpg filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.png filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.psd filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.tga filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.tif filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.tiff filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.ttf filter=lfs diff=lfs merge=lfs -text
-**/UniversalUpgradeTest/**/*.vfx filter=lfs diff=lfs merge=lfs -text
 
 **/com.unity.template-hd/Assets/Scenes/SampleScene/LightingData.asset filter=lfs diff=lfs merge=lfs -text
 **/HDRP_PerformanceTests/Assets/Scenes/Lighting/Cloud.asset filter=lfs diff=lfs merge=lfs -text
@@ -391,3 +360,10 @@ Editor/Resources/unity[[:space:]]editor[[:space:]]resources filter=lfs diff=lfs 
 **/GfxTestProjectFolder/**/*.[cC][uU][bB][eE][mM][aA][pP] filter=lfs diff=lfs merge=lfs -text
 **/GfxTestProjectFolder/**/*.[pP][rR][xX] filter=lfs diff=lfs merge=lfs -text
 **/GfxTestProjectFolder/**/*.[dD][fF][oO][nN][tT] filter=lfs diff=lfs merge=lfs -text
+
+# memoryprofiler test snapshots
+**/com.unity.memoryprofiler.tests/**/*.[sS][nN][aA][pP] filter=lfs diff=lfs merge=lfs -text
+
+
+# buginfo tools
+/Tools/Unity.BugInfo.Coverage/bin/* filter=lfs diff=lfs merge=lfs -text

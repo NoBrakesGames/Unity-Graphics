@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Unity.Mathematics;
 using UnityEditor;
 
 namespace UnityEngine.Rendering
@@ -10,16 +11,14 @@ namespace UnityEngine.Rendering
     /// The volume settings
     /// </summary>
     /// <typeparam name="T">A <see cref="MonoBehaviour"/> with <see cref="IAdditionalData"/></typeparam>
-    public abstract partial class VolumeDebugSettings<T> : IVolumeDebugSettings2
+    public abstract partial class VolumeDebugSettings<T> : IVolumeDebugSettings
         where T : MonoBehaviour, IAdditionalData
     {
         /// <summary>Current volume component to debug.</summary>
         public int selectedComponent { get; set; } = 0;
 
-        private Camera m_SelectedCamera;
-
         /// <summary>Current camera to debug.</summary>
-        public Camera selectedCamera => m_SelectedCamera;
+        public Camera selectedCamera => selectedCameraIndex < 0 ? null : cameras.ElementAt(selectedCameraIndex);
 
         /// <summary>
         /// The selected camera index, use the property for better handling
@@ -29,21 +28,15 @@ namespace UnityEngine.Rendering
         /// <summary>Selected camera index.</summary>
         public int selectedCameraIndex
         {
-            get => m_SelectedCameraIndex;
+            get
+            {
+                var count = cameras.Count();
+                return count > 0 ? Math.Clamp(m_SelectedCameraIndex, 0, count-1) : -1;
+            }
             set
             {
-                m_SelectedCameraIndex = value;
-
                 var count = cameras.Count();
-                if (count != 0)
-                {
-                    m_SelectedCamera = m_SelectedCameraIndex < 0 || m_SelectedCameraIndex >= count ?
-                        cameras.First() : cameras.ElementAt(m_SelectedCameraIndex);
-                }
-                else
-                {
-                    m_SelectedCamera = null;
-                }
+                m_SelectedCameraIndex = Math.Clamp(value, 0, count-1);
             }
         }
 
@@ -80,7 +73,10 @@ namespace UnityEngine.Rendering
 
                     if (camera.cameraType != CameraType.Preview && camera.cameraType != CameraType.Reflection)
                     {
-                        if (camera.TryGetComponent<T>(out T additionalData))
+                        if (!camera.TryGetComponent<T>(out T additionalData))
+                            additionalData = camera.gameObject.AddComponent<T>();
+
+                        if (additionalData != null)
                             m_Cameras.Add(camera);
                     }
                 }
@@ -101,7 +97,7 @@ namespace UnityEngine.Rendering
         /// <summary>Type of the current component to debug.</summary>
         public Type selectedComponentType
         {
-            get => volumeComponentsPathAndType[selectedComponent - 1].Item2;
+            get => selectedComponent > 0 ? volumeComponentsPathAndType[selectedComponent - 1].Item2 : null;
             set
             {
                 var index = volumeComponentsPathAndType.FindIndex(t => t.Item2 == value);
@@ -110,15 +106,14 @@ namespace UnityEngine.Rendering
             }
         }
 
-        static List<(string, Type)> s_ComponentPathAndType;
-
         /// <summary>List of Volume component types.</summary>
-        public List<(string, Type)> volumeComponentsPathAndType => s_ComponentPathAndType ??= VolumeManager.GetSupportedVolumeComponents(targetRenderPipeline, GraphicsSettings.currentRenderPipelineAssetType);
+        public List<(string, Type)> volumeComponentsPathAndType => VolumeManager.instance.GetVolumeComponentsForDisplay(GraphicsSettings.currentRenderPipelineAssetType);
 
         /// <summary>
         /// Specifies the render pipeline for this volume settings
         /// </summary>
-        public abstract Type targetRenderPipeline { get; }
+        [Obsolete("This property is obsolete and kept only for not breaking user code. VolumeDebugSettings will use current pipeline when it needs to gather volume component types and paths. #from(23.2)", false)]
+        public virtual Type targetRenderPipeline { get; }
 
         internal VolumeParameter GetParameter(VolumeComponent component, FieldInfo field)
         {
@@ -270,21 +265,9 @@ namespace UnityEngine.Rendering
         /// <returns>The weight of the volume</returns>
         public float GetVolumeWeight(Volume volume)
         {
-            if (weights == null)
-                return 0;
-
-            float total = 0f, weight = 0f;
-            for (int i = 0; i < volumes.Length; i++)
-            {
-                weight = weights[i];
-                weight *= 1f - total;
-                total += weight;
-
-                if (volumes[i] == volume)
-                    return weight;
-            }
-
-            return 0f;
+            // TODO: Store the calculated weight in the stack for the volumes that have influence and return it here
+            var triggerPos = selectedCameraPosition;
+            return ComputeWeight(volume, triggerPos);
         }
 
         /// <summary>
@@ -294,14 +277,9 @@ namespace UnityEngine.Rendering
         /// <returns>If the volume has influence</returns>
         public bool VolumeHasInfluence(Volume volume)
         {
-            if (weights == null)
-                return false;
-
-            int index = Array.IndexOf(volumes, volume);
-            if (index == -1)
-                return false;
-
-            return weights[index] != 0f;
+            // TODO: Store the calculated weight in the stack for the volumes that have influence and return it here
+            var triggerPos = selectedCameraPosition;
+            return ComputeWeight(volume, triggerPos) > 0.0f;
         }
     }
 }

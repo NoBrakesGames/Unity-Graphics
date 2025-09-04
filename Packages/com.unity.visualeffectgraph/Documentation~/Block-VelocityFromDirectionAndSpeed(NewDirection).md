@@ -1,12 +1,15 @@
 # Velocity from Direction & Speed (New Direction)
 
+> [!IMPORTANT]
+> This feature is experimental. To use this feature, open the **Preferences** window, go to the **Visual Effects** tab, and enable **Experimental Operators/Blocks**.
+
 Menu Path : **Velocity > [Set/Add] Velocity from Direction & Speed (New Direction)**
 
 The **Velocity from Direction And Speed (New Direction)** Block calculates a velocity for the particle based on a blend ratio between a given direction, and the direction attribute.
 
 The Block then scales the final direction vector by a speed, and composes it with the velocity attribute.
 
-![](Images/Block-VelocityFromDirectionAndSpeed(NewDirection)Example.gif)
+<video title="Particles smoothly transition between emitting in an outward burst, and emitting as a trail." src="Images/Block-VelocityFromDirectionAndSpeed(NewDirection)Example.mp4" width="auto" height="auto" autoplay="true" loop="true" controls></video>
 
 ## Block compatibility
 

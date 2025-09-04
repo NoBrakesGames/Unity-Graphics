@@ -31,10 +31,12 @@ namespace UnityEngine.Rendering.Universal
             Version_Unserialized = 0,
             Version_1 = 1,
             Version_2 = 2,
-            Version_3 = 3
+            Version_3 = 3,
+            Version_4 = 4,
+            Version_5 = 5
         }
 
-        const ComponentVersions k_CurrentComponentVersion = ComponentVersions.Version_3;
+        const ComponentVersions k_CurrentComponentVersion = ComponentVersions.Version_5;
         [SerializeField] ComponentVersions m_ComponentVersion = ComponentVersions.Version_Unserialized;
 
         internal enum ShadowCastingSources
@@ -81,7 +83,7 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField] bool m_UseRendererSilhouette = true;
         [SerializeField] bool m_CastsShadows = true;
         [SerializeField] bool m_SelfShadows = false;
-        [Range(0,1)]
+        [Range(0, 1)]
         [SerializeField] float m_AlphaCutoff = 0.1f;
         [SerializeField] int[] m_ApplyToSortingLayers = null;
         [SerializeField] Vector3[] m_ShapePath = null;
@@ -95,12 +97,15 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField] internal ShadowMesh2D m_ShadowMesh;
         [SerializeField] ShadowCastingOptions m_CastingOption = ShadowCastingOptions.CastShadow;
 
+        [SerializeField] internal float m_PreviousTrimEdge = 0;
+        [SerializeField] internal int m_PreviousEdgeProcessing;
+        [SerializeField] internal int m_PreviousShadowCastingSource;
+        [SerializeField] internal Component m_PreviousShadowShape2DSource = null;
+
         internal ShadowCasterGroup2D m_ShadowCasterGroup = null;
         internal ShadowCasterGroup2D m_PreviousShadowCasterGroup = null;
-        internal int m_PreviousShadowCastingSource;
-        internal Component m_PreviousShadowShape2DSource = null;
-        internal float m_PreviousTrimEdge = 0;
-        internal int m_PreviousEdgeProcessing;
+
+
         internal bool m_ForceShadowMeshRebuild;
 
         internal EdgeProcessing edgeProcessing
@@ -162,7 +167,6 @@ namespace UnityEngine.Rendering.Universal
         internal Matrix4x4 m_CachedShadowMatrix;
         internal Matrix4x4 m_CachedInverseShadowMatrix;
         internal Matrix4x4 m_CachedLocalToWorldMatrix;
-
         internal int spriteMaterialCount => m_SpriteMaterialCount;
 
         internal override void CacheValues()
@@ -193,7 +197,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// If selfShadows is true, useRendererSilhoutte specifies that the renderer's sihouette should be considered part of the shadow. If selfShadows is false, useRendererSilhoutte specifies that the renderer's sihouette should be excluded from the shadow
         /// </summary>
-        [Obsolete("useRendererSilhoutte is deprecated. Use rendererSilhoutte instead")]
+        [Obsolete("useRendererSilhoutte is deprecated. Use selfShadows instead")]
         public bool useRendererSilhouette
         {
             set { m_UseRendererSilhouette = value; }
@@ -401,7 +405,7 @@ namespace UnityEngine.Rendering.Universal
         protected void OnEnable()
         {
             if (m_ShadowShape2DProvider != null)
-                m_ShadowShape2DProvider.Enabled(m_ShadowShape2DComponent);
+                m_ShadowShape2DProvider.Enabled(m_ShadowShape2DComponent, m_ShadowMesh);
 
             m_ShadowCasterGroup = null;
 
@@ -419,7 +423,7 @@ namespace UnityEngine.Rendering.Universal
             ShadowCasterGroup2DManager.RemoveFromShadowCasterGroup(this, m_ShadowCasterGroup);
 
             if (m_ShadowShape2DProvider != null)
-                m_ShadowShape2DProvider.Disabled(m_ShadowShape2DComponent);
+                m_ShadowShape2DProvider.Disabled(m_ShadowShape2DComponent, m_ShadowMesh);
 
 #if UNITY_EDITOR
             SortingLayer.onLayerAdded -= OnSortingLayerAdded;
@@ -613,7 +617,6 @@ namespace UnityEngine.Rendering.Universal
                 else
                     m_CastingOption = ShadowCastingOptions.NoShadow;
             }
-
             if(m_ComponentVersion < ComponentVersions.Version_3)
             {
                 m_ShadowMesh = null;

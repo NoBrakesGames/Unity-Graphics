@@ -6,10 +6,6 @@ using System.Linq;
 using UnityEngine.Assertions;
 using UnityEngine.Rendering.UI;
 
-#if UNITY_ANDROID || UNITY_IPHONE || UNITY_TVOS || UNITY_SWITCH
-using UnityEngine.UI;
-#endif
-
 namespace UnityEngine.Rendering
 {
     using UnityObject = UnityEngine.Object;
@@ -83,93 +79,6 @@ namespace UnityEngine.Rendering
         GameObject m_PersistentRoot;
         DebugUIHandlerPersistentCanvas m_RootUIPersistentCanvas;
 
-        // Knowing if the DebugWindows is open, is done by event as it is in another assembly.
-        // The DebugWindows is responsible to link its event to ToggleEditorUI.
-        bool m_EditorOpen = false;
-        /// <summary>
-        /// Is the debug editor window open.
-        /// </summary>
-        public bool displayEditorUI => m_EditorOpen;
-        /// <summary>
-        /// Toggle the debug window.
-        /// </summary>
-        /// <param name="open">State of the debug window.</param>
-        public void ToggleEditorUI(bool open) => m_EditorOpen = open;
-
-        private bool m_EnableRuntimeUI = true;
-
-        /// <summary>
-        /// Controls whether runtime UI can be enabled. When this is set to false, there will be no overhead
-        /// from debug GameObjects or runtime initialization.
-        /// </summary>
-        public bool enableRuntimeUI
-        {
-            get => m_EnableRuntimeUI;
-            set
-            {
-                if (value != m_EnableRuntimeUI)
-                {
-                    m_EnableRuntimeUI = value;
-                    DebugUpdater.SetEnabled(value);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Displays the runtime version of the debug window.
-        /// </summary>
-        public bool displayRuntimeUI
-        {
-            get => m_Root != null && m_Root.activeInHierarchy;
-            set
-            {
-                if (value)
-                {
-                    m_Root = UnityObject.Instantiate(Resources.Load<Transform>("DebugUICanvas")).gameObject;
-                    m_Root.name = "[Debug Canvas]";
-                    m_Root.transform.localPosition = Vector3.zero;
-                    m_RootUICanvas = m_Root.GetComponent<DebugUIHandlerCanvas>();
-
-#if UNITY_ANDROID || UNITY_IPHONE || UNITY_TVOS || UNITY_SWITCH
-                    var canvasScaler = m_Root.GetComponent<CanvasScaler>();
-                    canvasScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-#endif
-
-                    m_Root.SetActive(true);
-                }
-                else
-                {
-                    CoreUtils.Destroy(m_Root);
-                    m_Root = null;
-                    m_RootUICanvas = null;
-                }
-
-                onDisplayRuntimeUIChanged(value);
-                DebugUpdater.HandleInternalEventSystemComponents(value);
-            }
-        }
-
-        /// <summary>
-        /// Displays the persistent runtime debug window.
-        /// </summary>
-        public bool displayPersistentRuntimeUI
-        {
-            get => m_RootUIPersistentCanvas != null && m_PersistentRoot.activeInHierarchy;
-            set
-            {
-                if (value)
-                {
-                    EnsurePersistentCanvas();
-                }
-                else
-                {
-                    CoreUtils.Destroy(m_PersistentRoot);
-                    m_PersistentRoot = null;
-                    m_RootUIPersistentCanvas = null;
-                }
-            }
-        }
-
         /// <summary>
         /// Is any debug window or UI currently active.
         /// </summary>
@@ -235,7 +144,7 @@ namespace UnityEngine.Rendering
         /// <summary>
         /// Get hashcode state of the Debug Window.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>The calculated hashcode for the current state of the Debug Window.</returns>
         public int GetState()
         {
             int hash = 17;
@@ -339,6 +248,19 @@ namespace UnityEngine.Rendering
         }
 
         /// <summary>
+        /// Returns the panel display name
+        /// </summary>
+        /// <param name="panelIndex">The panelIndex for the panel to get the name</param>
+        /// <returns>The display name of the panel, or empty string otherwise</returns>
+        public string PanelDiplayName([DisallowNull] int panelIndex)
+        {
+            if (panelIndex < 0 || panelIndex > m_Panels.Count - 1)
+                return string.Empty;
+
+            return m_Panels[panelIndex].displayName;
+        }
+
+        /// <summary>
         /// Request DebugWindow to open the specified panel.
         /// </summary>
         /// <param name="index">Index of the debug window panel to activate.</param>
@@ -365,7 +287,7 @@ namespace UnityEngine.Rendering
         /// <param name="createIfNull">Create the panel if it does not exists.</param>
         /// <param name="groupIndex">Group index.</param>
         /// <param name="overrideIfExist">Replace an existing panel.</param>
-        /// <returns></returns>
+        /// <returns>The requested debug panel or null if it does not exist and createIfNull is set to false</returns>
         public DebugUI.Panel GetPanel(string displayName, bool createIfNull = false, int groupIndex = 0, bool overrideIfExist = false)
         {
             int panelIndex = PanelIndex(displayName);

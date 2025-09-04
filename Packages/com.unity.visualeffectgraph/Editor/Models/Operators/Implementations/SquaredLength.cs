@@ -1,11 +1,12 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
-using UnityEditor.VFX;
+
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
+    [VFXHelpURL("Operator-SquaredLength")]
     [VFXInfo(category = "Math/Vector")]
     class SquaredLength : VFXOperatorNumericUniform
     {
@@ -37,8 +38,7 @@ namespace UnityEditor.VFX.Operator
             }
         }
 
-        public override string libraryName { get { return "Squared Length"; } }
-        public override string name { get { return "Squared Length"; } }
+        public override string name => "Squared Length";
 
         protected override sealed VFXExpression[] BuildExpression(VFXExpression[] inputExpression)
         {

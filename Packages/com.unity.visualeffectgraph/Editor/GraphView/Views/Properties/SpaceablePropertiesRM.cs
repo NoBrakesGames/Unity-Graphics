@@ -1,8 +1,7 @@
 using UnityEngine;
 using UnityEngine.VFX;
 using UnityEngine.UIElements;
-using UnityEditor.VFX.UIElements;
-using VFXVector3Field = UnityEditor.VFX.UI.VFXVector3Field;
+
 using System;
 
 namespace UnityEditor.VFX.UI
@@ -10,54 +9,30 @@ namespace UnityEditor.VFX.UI
     class SpaceablePropertyRM<T> : PropertyRM<T>
     {
         static readonly bool s_UseDropDownMenu = true;
-        static readonly bool s_UseHovering = true;
 
-        void OnMouseHover(EventBase evt)
-        {
-            if (m_Button == null || !m_Button.enabledSelf)
-                return;
-
-            if (evt.eventTypeId == MouseEnterEvent.TypeId())
-                m_Button.AddToClassList("hovered");
-            else
-                m_Button.RemoveFromClassList("hovered");
-        }
+        Label m_Button;
 
         public SpaceablePropertyRM(IPropertyRMProvider controller, float labelWidth) : base(controller, labelWidth)
         {
-            m_Button = new VisualElement() { name = "spacebutton" };
+            if (!string.IsNullOrEmpty(controller.name))
+            {
+                var label = new Label(ObjectNames.NicifyVariableName(controller.name));
+                label.AddToClassList("label");
+                Add(label);
+            }
+            m_Button = new Label("\u25bc") { name = "spacebutton" };
             m_Button.AddManipulator(new Clickable(OnButtonClick));
             Add(m_Button);
             AddToClassList("spaceablepropertyrm");
-
-            if (s_UseHovering)
-            {
-                RegisterCallback<MouseEnterEvent>(OnMouseHover);
-                RegisterCallback<MouseLeaveEvent>(OnMouseHover);
-            }
         }
 
-        public override float GetPreferredControlWidth()
-        {
-            return 40;
-        }
-
-        public override float GetPreferredLabelWidth()
-        {
-            return base.GetPreferredLabelWidth() + spaceButtonWidth;
-        }
+        public override float GetPreferredControlWidth() => 40;
 
         private VFXSpace space
         {
-            get
-            {
-                return m_Provider.space;
-            }
+            get => m_Provider.space;
 
-            set
-            {
-                m_Provider.space = value;
-            }
+            set => m_Provider.space = value;
         }
 
         void ChangeSpace(object val)
@@ -93,16 +68,12 @@ namespace UnityEditor.VFX.UI
 
         public override void UpdateGUI(bool force)
         {
-            foreach (string name in Enum.GetNames(typeof(VFXSpace)))
-            {
-                if (space.ToString() != name)
-                    m_Button.RemoveFromClassList("space" + name);
-            }
-
-            m_Button.AddToClassList("space" + space.ToString());
+            m_Button.RemoveFromClassList(VFXSpace.World.ToString());
+            m_Button.RemoveFromClassList(VFXSpace.Local.ToString());
+            m_Button.RemoveFromClassList(VFXSpace.None.ToString());
+            m_Button.AddToClassList(space.ToString());
+            m_Button.tooltip = $"{space.ToString()} Space";
         }
-
-        VisualElement m_Button;
 
         protected override void UpdateEnabled()
         {
@@ -113,66 +84,41 @@ namespace UnityEditor.VFX.UI
         {
         }
 
-        private float spaceButtonWidth
-        {
-            get { return m_Button != null ? m_Button.layout.width + m_Button.resolvedStyle.marginLeft + m_Button.resolvedStyle.marginRight : 28; }
-        }
-
-        public override float effectiveLabelWidth
-        {
-            get
-            {
-                return m_labelWidth - spaceButtonWidth;
-            }
-        }
-
-        public override bool showsEverything { get { return false; } }
+        public override bool showsEverything => false;
     }
 
     abstract class Vector3SpaceablePropertyRM<T> : SpaceablePropertyRM<T>
     {
         public Vector3SpaceablePropertyRM(IPropertyRMProvider controller, float labelWidth) : base(controller, labelWidth)
         {
-            m_VectorField = new VFXLabeledField<VFXVector3Field, Vector3>(m_Label);
+            m_VectorField = new VFXVector3Field();
             m_VectorField.RegisterCallback<ChangeEvent<Vector3>>(OnValueChanged);
             m_VectorField.AddToClassList("fieldContainer");
+            m_VectorField.onValueDragFinished += ValueDragFinished;
+            m_VectorField.onValueDragStarted += ValueDragStarted;
 
-            m_VectorField.control.onValueDragFinished = ValueDragFinished;
-            m_VectorField.control.onValueDragStarted = ValueDragStarted;
             Add(m_VectorField);
-        }
-
-        protected void ValueDragFinished()
-        {
-            m_Provider.EndLiveModification();
-            hasChangeDelayed = false;
-            NotifyValueChanged();
-        }
-
-        protected void ValueDragStarted()
-        {
-            m_Provider.StartLiveModification();
         }
 
         public override float GetPreferredControlWidth()
         {
-            return 140;
+            return 200;
         }
 
         public abstract void OnValueChanged(ChangeEvent<Vector3> e);
 
-        protected VFXLabeledField<VFXVector3Field, Vector3> m_VectorField;
+        protected VFXVector3Field m_VectorField;
 
         protected override void UpdateEnabled()
         {
             base.UpdateEnabled();
-            m_VectorField.control.SetEnabled(propertyEnabled);
+            m_VectorField.SetEnabled(propertyEnabled);
         }
 
         protected override void UpdateIndeterminate()
         {
             base.UpdateEnabled();
-            m_VectorField.visible = !indeterminate;
+            m_VectorField.indeterminate = indeterminate;
         }
 
         public override bool showsEverything { get { return true; } }

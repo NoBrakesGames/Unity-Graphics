@@ -1,13 +1,8 @@
 using System;
 using System.Diagnostics;
-using System.Collections.Generic;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.RendererUtils;
-using System.Diagnostics.CodeAnalysis;
-using UnityEngine.Internal;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
-namespace UnityEngine.Experimental.Rendering
+namespace UnityEngine.Rendering
 {
     /// <summary>
     /// Render graph command buffer types inherit from this base class.
@@ -15,7 +10,10 @@ namespace UnityEngine.Experimental.Rendering
     /// </summary>
     public class BaseCommandBuffer
     {
-        internal protected CommandBuffer m_WrappedCommandBuffer;
+        /// <summary>
+        /// The instance of Unity's CommandBuffer that this class encapsulates, providing access to lower-level rendering commands.
+        /// </summary>
+        protected internal CommandBuffer m_WrappedCommandBuffer;
         internal RenderGraphPass m_ExecutingPass;
 
         // Users cannot directly create command buffers. The rendergraph creates them and passes them to callbacks.
@@ -32,62 +30,115 @@ namespace UnityEngine.Experimental.Rendering
         ///<summary>See (https://docs.unity3d.com/ScriptReference/Rendering.CommandBuffer-sizeInBytes.html)</summary>
         public int sizeInBytes => m_WrappedCommandBuffer.sizeInBytes;
 
-        internal protected void ThrowIfGlobalStateNotAllowed()
+        /// <summary>
+        /// Checks if modifying the global state is permitted by the currently executing render graph pass.
+        /// If such modifications are not allowed, an InvalidOperationException is thrown.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if the current render graph pass does not permit modifications to global state.
+        /// </exception>
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        protected internal void ThrowIfGlobalStateNotAllowed()
         {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if (m_ExecutingPass != null && !m_ExecutingPass.allowGlobalState) throw new InvalidOperationException("Modifying global state from this command buffer is not allowed. Please ensure your render graph pass allows modifying global state.");
-#endif
+            if (m_ExecutingPass != null && !m_ExecutingPass.allowGlobalState) throw new InvalidOperationException($"{m_ExecutingPass.name}: Modifying global state from this command buffer is not allowed. Please ensure your render graph pass allows modifying global state.");
         }
 
-        // Validation when it is unknown if the texture will be read or written
-        internal protected void ValidateTextureHandle(TextureHandle h)
+        /// <summary>
+        /// Checks if the Raster Command Buffer has set a valid render target.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Thrown if the there are no active render targets.</exception>
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        protected internal void ThrowIfRasterNotAllowed()
         {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if (m_ExecutingPass == null) return;
-
-            if (h.IsBuiltin()) return;
-
-            if (!m_ExecutingPass.IsRead(h.handle) && !m_ExecutingPass.IsWritten(h.handle))
-            {
-                throw new Exception("Pass " + m_ExecutingPass.name + " is trying to use a texture on the command buffer that was never registered with the pass builder. Please indicate the texture use to the pass builder.");
-            }
-            if (m_ExecutingPass.IsAttachment(h))
-            {
-                throw new Exception("Pass " + m_ExecutingPass.name + " is using a texture as a fragment attachment (UseTextureFragment/UseTextureFragmentDepth) but is also trying to bind it as regular texture. Please fix this pass. ");
-            }
-#endif
+            if (m_ExecutingPass != null && !m_ExecutingPass.HasRenderAttachments()) throw new InvalidOperationException($"{m_ExecutingPass.name}: Using raster commands from a pass with no active render target is not allowed as it will use an undefined render target state. Please set up pass render targets using SetRenderAttachments.");
         }
 
-        internal protected void ValidateTextureHandleRead(TextureHandle h)
+        /// <summary>
+        /// Ensures that the texture handle being used is valid for the currently executing render graph pass.
+        /// This includes checks to ensure that the texture handle is registered for read or write access
+        /// and is not being used incorrectly as a render target attachment.
+        /// </summary>
+        /// <param name="h">The TextureHandle to validate for the current pass.</param>
+        /// <exception cref="Exception">
+        /// Throws an exception if the texture handle is not properly registered for the pass or being used incorrectly.
+        /// </exception>
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        protected internal void ValidateTextureHandle(TextureHandle h)
         {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if (m_ExecutingPass == null) return;
+            if(RenderGraph.enableValidityChecks)
+            {
+                if (m_ExecutingPass == null) return;
 
-            if (!m_ExecutingPass.IsRead(h.handle))
-            {
-                throw new Exception("Pass " + m_ExecutingPass.name + " is trying to read a texture on the command buffer that was never registered with the pass builder. Please indicate the texture as read to the pass builder.");
+                if (h.IsBuiltin()) return;
+
+                if (!m_ExecutingPass.IsRead(h.handle) && !m_ExecutingPass.IsWritten(h.handle) && !m_ExecutingPass.IsTransient(h.handle))
+                {
+                    throw new Exception($"Pass '{m_ExecutingPass.name}' is trying to bind a texture on the command buffer that is not registered by its builder. Please indicate to the pass builder how the texture is used (UseTexture/CreateTransientTexture).");
+                }
+                if (m_ExecutingPass.IsAttachment(h))
+                {
+                        throw new Exception($"Pass '{m_ExecutingPass.name}' is trying to bind a texture on the command buffer that is already set as a fragment attachment (SetRenderAttachment/SetRenderAttachmentDepth). A texture cannot be used as both in one pass, please fix its usage in the pass builder.");
+                }
             }
-            if (m_ExecutingPass.IsAttachment(h))
-            {
-                throw new Exception("Pass " + m_ExecutingPass.name + " is using a texture as a fragment attachment (UseTextureFragment/UseTextureFragmentDepth) but is also trying to bind it as regular texture. Please fix this pass. ");
-            }
-#endif
         }
 
-        internal protected void ValidateTextureHandleWrite(TextureHandle h)
+        /// <summary>
+        /// Validates that the specified texture handle is registered for read access within the context of the current executing render graph pass.
+        /// Throws an exception if the texture is not registered for reading or is used incorrectly as a render target attachment.
+        /// </summary>
+        /// <param name="h">The TextureHandle to validate for read access.</param>
+        /// <exception cref="Exception">
+        /// Throws an exception if the texture handle is either not registered as a readable resource or misused as both an attachment and a regular texture.
+        /// </exception>
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        protected internal void ValidateTextureHandleRead(TextureHandle h)
         {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if (m_ExecutingPass == null) return;
+            if (RenderGraph.enableValidityChecks)
+            {
+                if (m_ExecutingPass == null) return;
 
-            if (!m_ExecutingPass.IsWritten(h.handle))
-            {
-                throw new Exception("Pass " + m_ExecutingPass.name + " is trying to write a texture on the command buffer that was never registered with the pass builder. Please indicate the texture as written to the pass builder.");
+                if (!m_ExecutingPass.IsRead(h.handle) && !m_ExecutingPass.IsTransient(h.handle))
+                {
+                    throw new Exception($"Pass '{m_ExecutingPass.name}' is trying to read a texture on the command buffer that is not registered by its builder. Please indicate to the pass builder that the texture is read (UseTexture/CreateTransientTexture).");
+                }
+                if (m_ExecutingPass.IsAttachment(h))
+                {
+                    throw new Exception($"Pass '{m_ExecutingPass.name}' is trying to bind a texture on the command buffer that is already set as a fragment attachment (SetRenderAttachment/SetRenderAttachmentDepth). A texture cannot be used as both in one pass, please fix its usage in the pass builder.");
+                }
             }
-            if (m_ExecutingPass.IsAttachment(h))
+        }
+
+        /// <summary>
+        /// Validates that the specified texture handle is registered for write access within the context of the current executing render graph pass.
+        /// Additionally, it checks that built-in textures are not being written to, and that the texture is not incorrectly used as a render target attachment.
+        /// An exception is thrown if any of these checks fail.
+        /// </summary>
+        /// <param name="h">The TextureHandle to validate for write access.</param>
+        /// <exception cref="Exception">
+        /// Throws an exception if the texture handle is not registered for writing, attempts to write to a built-in texture, or is misused as both a writeable resource and a render target attachment.
+        /// </exception>
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        protected internal void ValidateTextureHandleWrite(TextureHandle h)
+        {
+            if(RenderGraph.enableValidityChecks)
             {
-                throw new Exception("Pass " + m_ExecutingPass.name + " is using a texture as a fragment attachment (UseTextureFragment/UseTextureFragmentDepth) but is also trying to bind it as regular texture. Please fix this pass. ");
+                if (m_ExecutingPass == null) return;
+
+                if (h.IsBuiltin())
+                {
+                    throw new Exception("Pass '" + m_ExecutingPass.name + "' is trying to write to a built-in texture. This is not allowed built-in textures are small default resources like `white` or `black` that cannot be written to.");
+                }
+
+                if (!m_ExecutingPass.IsWritten(h.handle) && !m_ExecutingPass.IsTransient(h.handle))
+                {
+                    throw new Exception($"Pass '{m_ExecutingPass.name}' is trying to write a texture on the command buffer that is not registered by its builder. Please indicate to the pass builder that the texture is written (UseTexture/CreateTransientTexture).");
+                }
+                if (m_ExecutingPass.IsAttachment(h))
+                {
+                        throw new Exception($"Pass '{m_ExecutingPass.name}' is trying to bind a texture on the command buffer that is already set as a fragment attachment (SetRenderAttachment/SetRenderAttachmentDepth). A texture cannot be used as both in one pass, please fix its usage in the pass builder.");
+
+                }
             }
-#endif
         }
     }
 }

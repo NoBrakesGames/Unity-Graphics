@@ -4,8 +4,6 @@ Shader "Hidden/Universal/CoreBlit"
 
         #pragma target 2.0
         #pragma editor_sync_compilation
-        #pragma multi_compile _ DISABLE_TEXTURE2D_X_ARRAY
-        #pragma multi_compile _ BLIT_SINGLE_SLICE
         // Core.hlsl for XR dependencies
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
         #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
@@ -13,7 +11,9 @@ Shader "Hidden/Universal/CoreBlit"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Debug/DebuggingFullscreen.hlsl"
         // Color.hlsl for color space conversion
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+
         // Specialized blit with URP debug draw support and color space conversion support
+        // Keep in sync with BlitHDROverlay.shader
         half4 FragmentURPBlit(Varyings input, SamplerState blitsampler)
         {
             half4 color = FragBlit(input, blitsampler);
@@ -38,11 +38,13 @@ Shader "Hidden/Universal/CoreBlit"
     SubShader
     {
         Tags{ "RenderPipeline" = "UniversalPipeline" }
+        // Note: Keep shader pass names in sync with the ShaderPassNames enum in Blitter.cs
 
         // 0: Nearest
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "Nearest"
 
             HLSLPROGRAM
                 #pragma vertex Vert
@@ -54,6 +56,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "Bilinear"
 
             HLSLPROGRAM
                 #pragma vertex Vert
@@ -65,6 +68,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "NearestQuad"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -76,6 +80,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuad"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -87,6 +92,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "NearestQuadPadding"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -98,6 +104,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadPadding"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -105,10 +112,11 @@ Shader "Hidden/Universal/CoreBlit"
             ENDHLSL
         }
 
-        // 6: Nearest quad with padding
+        // 6: Nearest quad with padding and repeat
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "NearestQuadPaddingRepeat"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -116,10 +124,11 @@ Shader "Hidden/Universal/CoreBlit"
             ENDHLSL
         }
 
-        // 7: Bilinear quad with padding
+        // 7: Bilinear quad with padding and repeat
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadPaddingRepeat"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -131,6 +140,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadPaddingOctahedral"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -143,6 +153,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "NearestQuadPaddingAlphaBlend"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -155,6 +166,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "BilinearQuadPaddingAlphaBlend"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -163,10 +175,11 @@ Shader "Hidden/Universal/CoreBlit"
             ENDHLSL
         }
 
-        // 11: Nearest quad with padding alpha blend (6 with alpha blend)
+        // 11: Nearest quad with padding alpha blend repeat (6 with alpha blend)
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "NearestQuadPaddingAlphaBlendRepeat"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -175,10 +188,11 @@ Shader "Hidden/Universal/CoreBlit"
             ENDHLSL
         }
 
-        // 12: Bilinear quad with padding alpha blend (7 with alpha blend)
+        // 12: Bilinear quad with padding alpha blend repeat (7 with alpha blend)
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "BilinearQuadPaddingAlphaBlendRepeat"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -191,6 +205,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "BilinearQuadPaddingAlphaBlendOctahedral"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -203,6 +218,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "CubeToOctahedral"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -214,6 +230,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "CubeToOctahedralLuminance"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -225,6 +242,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "CubeToOctahedralAlpha"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -236,6 +254,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "CubeToOctahedralRed"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -247,6 +266,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadLuminance"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -258,6 +278,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadAlpha"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -269,6 +290,7 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadRed"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -280,8 +302,10 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "NearestCubeToOctahedralPadding"
 
             HLSLPROGRAM
+                #pragma multi_compile_local _ BLIT_DECODE_HDR
                 #pragma vertex VertQuadPadding
                 #pragma fragment FragOctahedralProjectNearestRepeat
             ENDHLSL
@@ -291,8 +315,10 @@ Shader "Hidden/Universal/CoreBlit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearCubeToOctahedralPadding"
 
             HLSLPROGRAM
+                #pragma multi_compile_local _ BLIT_DECODE_HDR
                 #pragma vertex VertQuadPadding
                 #pragma fragment FragOctahedralProjectBilinearRepeat
             ENDHLSL
@@ -301,6 +327,7 @@ Shader "Hidden/Universal/CoreBlit"
         // 23: Bilinear blit with debug draw and color space conversion support
         Pass
         {
+            Name "BilinearDebugDraw"
             ZWrite Off ZTest Always Blend Off Cull Off
 
             HLSLPROGRAM
@@ -319,6 +346,7 @@ Shader "Hidden/Universal/CoreBlit"
         // 24: Nearest blit with debug draw and color space conversion support
         Pass
         {
+            Name "NearestDebugDraw"
             ZWrite Off ZTest Always Blend Off Cull Off
 
             HLSLPROGRAM

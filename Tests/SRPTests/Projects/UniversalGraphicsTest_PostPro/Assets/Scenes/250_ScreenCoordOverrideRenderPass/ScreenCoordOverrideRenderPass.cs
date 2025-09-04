@@ -1,5 +1,6 @@
+using System;
 using UnityEngine;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
@@ -16,12 +17,13 @@ public class ScreenCoordOverrideRenderPass : ScriptableRenderPass
         m_Material = material;
     }
 
+    [Obsolete("This rendering path is for compatibility mode only (when Render Graph is disabled). Use Render Graph API instead.", false)]
     public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
     {
         var target = renderingData.cameraData.renderer.cameraColorTargetHandle;
         var descriptor = renderingData.cameraData.cameraTargetDescriptor;
         descriptor.depthBufferBits = 0;
-        RenderingUtils.ReAllocateIfNeeded(ref m_TempTex, descriptor, FilterMode.Point, TextureWrapMode.Clamp, name: "_TempTex");
+        RenderingUtils.ReAllocateHandleIfNeeded(ref m_TempTex, descriptor, FilterMode.Point, TextureWrapMode.Clamp, name: "_TempTex");
 
         var cmd = CommandBufferPool.Get(k_CommandBufferName);
 
@@ -45,11 +47,12 @@ public class ScreenCoordOverrideRenderPass : ScriptableRenderPass
         internal TextureHandle targetTex;
     }
 
-    public override void RecordRenderGraph(RenderGraph renderGraph, FrameResources frameResources, ref RenderingData renderingData)
+    public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
     {
-        UniversalRenderer renderer = (UniversalRenderer) renderingData.cameraData.renderer;
+        var resourceData = frameData.Get<UniversalResourceData>();
+        var cameraData = frameData.Get<UniversalCameraData>();
 
-        var camDesc = renderingData.cameraData.cameraTargetDescriptor;
+        var camDesc = cameraData.cameraTargetDescriptor;
         TextureDesc desc = new TextureDesc(camDesc.width, camDesc.height);//renderingData.cameraData.cameraTargetDescriptor;
 
         desc.dimension = camDesc.dimension;
@@ -64,24 +67,28 @@ public class ScreenCoordOverrideRenderPass : ScriptableRenderPass
 
         TextureHandle tempTex = renderGraph.CreateTexture(desc);
 
-        using (var builder = renderGraph.AddRenderPass<PassData>("Blit to TempTex", out var passData))
+        using (var builder = renderGraph.AddRasterRenderPass<PassData>("Blit to TempTex", out var passData))
         {
-            var target = renderer.activeColorTexture;
-            passData.tempTex = builder.UseColorBuffer(tempTex, 0);
-            passData.targetTex = builder.ReadTexture(target);
+            var target = resourceData.activeColorTexture;
+            passData.tempTex = tempTex;
+            builder.SetRenderAttachment(tempTex, 0, AccessFlags.Write);
+            passData.targetTex = target;
+            builder.UseTexture(target, AccessFlags.Read);
 
-            builder.SetRenderFunc((PassData data, RenderGraphContext rgContext) =>
+            builder.SetRenderFunc((PassData data, RasterGraphContext rgContext) =>
             {
                 Blitter.BlitTexture(rgContext.cmd, data.targetTex, new Vector4(1, 1, 0, 0), m_Material, 0);
             });
         }
-        using (var builder = renderGraph.AddRenderPass<PassData>("Blit to TargetTex", out var passData))
+        using (var builder = renderGraph.AddRasterRenderPass<PassData>("Blit to TargetTex", out var passData))
         {
-            var target = renderer.activeColorTexture;
-            passData.targetTex = builder.UseColorBuffer(target, 0);
-            passData.tempTex = builder.ReadTexture(tempTex);
+            var target = resourceData.activeColorTexture;
+            passData.targetTex = target;
+            builder.SetRenderAttachment(target, 0, AccessFlags.Write);
+            passData.tempTex = tempTex;
+            builder.UseTexture(tempTex, AccessFlags.Read);
 
-            builder.SetRenderFunc((PassData data, RenderGraphContext rgContext) =>
+            builder.SetRenderFunc((PassData data, RasterGraphContext rgContext) =>
             {
                 Blitter.BlitTexture(rgContext.cmd, data.tempTex, new Vector4(1, 1, 0, 0), 0.0f, false);
             });

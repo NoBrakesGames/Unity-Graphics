@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System;
 using UnityEngine.Serialization;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -52,6 +52,24 @@ namespace UnityEngine.Rendering.HighDefinition
         /// </summary>
         public TargetBuffer targetDepthBuffer;
 
+        // The actual depth buffer has to follow some constraints, and thus may not be the same result as the target
+        // depth buffer that the user has requested. Apply these constraints and return a result.
+        internal TargetBuffer getConstrainedDepthBuffer()
+        {
+            TargetBuffer depth = targetDepthBuffer;
+            if (depth == TargetBuffer.Camera &&
+                HDRenderPipeline.currentAsset.currentPlatformRenderPipelineSettings.dynamicResolutionSettings.enabled &&
+                currentHDCamera.allowDynamicResolution &&
+                injectionPoint == CustomPassInjectionPoint.AfterPostProcess)
+            {
+                // This custom pass is injected after postprocessing, and Dynamic Resolution Scaling is enabled, which
+                // means an upscaler is active. In this case, the camera color buffer is the full display resolution,
+                // but the camera depth buffer is a lower, pre-upscale resolution. So we cannot do depth testing here.
+                depth = TargetBuffer.None;
+            }
+            return depth;
+        }
+
         /// <summary>
         /// What clear to apply when the color and depth buffer are bound
         /// </summary>
@@ -78,13 +96,13 @@ namespace UnityEngine.Rendering.HighDefinition
         /// Mirror of the value in the CustomPassVolume where this custom pass is listed
         /// </summary>
         /// <value>The blend value that should be applied to the custom pass effect</value>
-        protected float fadeValue => owner.fadeValue;
+        protected float fadeValue => owner == null ? 0 : owner.fadeValue;
 
         /// <summary>
         /// Get the injection point in HDRP where this pass will be executed
         /// </summary>
         /// <value></value>
-        protected CustomPassInjectionPoint injectionPoint => owner.injectionPoint;
+        protected CustomPassInjectionPoint injectionPoint => owner == null ? CustomPassVolume.currentGlobalInjectionPoint : owner.injectionPoint;
 
         /// <summary>
         /// True if you want your custom pass to be executed in the scene view. False for game cameras only.
@@ -179,6 +197,7 @@ namespace UnityEngine.Rendering.HighDefinition
             public CullingResults cullingResult;
             public CullingResults cameraCullingResult;
             public HDCamera hdCamera;
+            public ShaderVariablesGlobal shaderVariablesGlobal;
         }
 
         RenderTargets ReadRenderTargets(in RenderGraphBuilder builder, in RenderTargets targets)
@@ -213,7 +232,7 @@ namespace UnityEngine.Rendering.HighDefinition
             return output;
         }
 
-        internal void ExecuteInternal(RenderGraph renderGraph, HDCamera hdCamera, CullingResults cullingResult, CullingResults cameraCullingResult, in RenderTargets targets, CustomPassVolume owner)
+        virtual internal void ExecuteInternal(RenderGraph renderGraph, HDCamera hdCamera, CullingResults cullingResult, CullingResults cameraCullingResult, in RenderTargets targets, CustomPassVolume owner)
         {
             this.owner = owner;
             this.currentRenderTarget = targets;
@@ -225,6 +244,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 passData.cullingResult = cullingResult;
                 passData.cameraCullingResult = cameraCullingResult;
                 passData.hdCamera = hdCamera;
+                passData.shaderVariablesGlobal = HDRenderPipeline.currentPipeline.GetShaderVariablesGlobalCB();
 
                 this.currentRenderTarget = ReadRenderTargets(builder, targets);
 
@@ -275,7 +295,7 @@ namespace UnityEngine.Rendering.HighDefinition
                             customPass.currentRenderTarget.customColorBuffer,
                             customPass.currentRenderTarget.customDepthBuffer,
                             ctx.renderGraphPool.GetTempMaterialPropertyBlock(),
-                            customPass.injectionPoint
+                            customPass.injectionPoint, data.shaderVariablesGlobal
                         );
 
                         customPass.isExecuting = true;
@@ -283,7 +303,7 @@ namespace UnityEngine.Rendering.HighDefinition
                         customPass.isExecuting = false;
 
                         // Set back the camera color buffer if we were using a custom buffer as target
-                        if (customPass.targetDepthBuffer != TargetBuffer.Camera)
+                        if (customPass.getConstrainedDepthBuffer() != TargetBuffer.Camera)
                             CoreUtils.SetRenderTarget(ctx.cmd, outputColorBuffer);
                     });
             }
@@ -320,16 +340,17 @@ namespace UnityEngine.Rendering.HighDefinition
         // This function must be only called from the ExecuteInternal method (requires current render target and current RT manager)
         void SetCustomPassTarget(CommandBuffer cmd)
         {
+            TargetBuffer depth = getConstrainedDepthBuffer();
             // In case all the buffer are set to none, we can't bind anything
-            if (targetColorBuffer == TargetBuffer.None && targetDepthBuffer == TargetBuffer.None)
+            if (targetColorBuffer == TargetBuffer.None && depth == TargetBuffer.None)
                 return;
 
             RTHandle colorBuffer = (targetColorBuffer == TargetBuffer.Custom) ? currentRenderTarget.customColorBuffer.Value : currentRenderTarget.colorBufferRG;
-            RTHandle depthBuffer = (targetDepthBuffer == TargetBuffer.Custom) ? currentRenderTarget.customDepthBuffer.Value : currentRenderTarget.depthBufferRG;
+            RTHandle depthBuffer = (depth == TargetBuffer.Custom) ? currentRenderTarget.customDepthBuffer.Value : currentRenderTarget.depthBufferRG;
 
-            if (targetColorBuffer == TargetBuffer.None && targetDepthBuffer != TargetBuffer.None)
+            if (targetColorBuffer == TargetBuffer.None && depth != TargetBuffer.None)
                 CoreUtils.SetRenderTarget(cmd, depthBuffer, clearFlags);
-            else if (targetColorBuffer != TargetBuffer.None && targetDepthBuffer == TargetBuffer.None)
+            else if (targetColorBuffer != TargetBuffer.None && depth == TargetBuffer.None)
                 CoreUtils.SetRenderTarget(cmd, colorBuffer, clearFlags);
             else
             {
@@ -547,7 +568,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="targetDepthBuffer">Target Depth buffer. Note: It's also the buffer which will do the Depth Test</param>
         /// <returns></returns>
         public static DrawRenderersCustomPass CreateDrawRenderersPass(RenderQueueType queue, LayerMask mask,
-            Material overrideMaterial, string overrideMaterialPassName = "Forward", SortingCriteria sorting = SortingCriteria.CommonOpaque,
+            Material overrideMaterial, string overrideMaterialPassName = "Forward", SortingCriteria sorting = HDUtils.k_OpaqueSortingCriteria,
             ClearFlag clearFlags = ClearFlag.None, TargetBuffer targetColorBuffer = TargetBuffer.Camera,
             TargetBuffer targetDepthBuffer = TargetBuffer.Camera)
         {

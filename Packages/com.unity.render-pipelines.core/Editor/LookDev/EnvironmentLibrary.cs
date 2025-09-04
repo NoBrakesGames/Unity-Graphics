@@ -12,7 +12,7 @@ namespace UnityEditor.Rendering.LookDev
     /// <summary>
     /// Class containing a collection of Environment
     /// </summary>
-    [CoreRPHelpURL("Environment-Library")]
+    [CoreRPHelpURL("Look-Dev-Environment-Library")]
     public class EnvironmentLibrary : ScriptableObject
     {
         [field: SerializeField]
@@ -25,6 +25,8 @@ namespace UnityEditor.Rendering.LookDev
         /// <summary>
         /// Indexer giving access to contained Environment
         /// </summary>
+        /// <param name="index">The zero-based index of the environment to retrieve.</param>
+        /// <value>The Environment object at the specified index.</value>
         public Environment this[int index] => environments[index];
 
         /// <summary>

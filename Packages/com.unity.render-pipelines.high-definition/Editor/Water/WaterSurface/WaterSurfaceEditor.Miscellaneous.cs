@@ -111,7 +111,8 @@ namespace UnityEditor.Rendering.HighDefinition
             {
                 using (new IndentLevelScope())
                 {
-                    EditorGUILayout.PropertyField(serialized.m_WaterCurrentDebugMode, k_WaterCurrentDebugMode);
+                    if (currentSurfaceType != WaterSurfaceType.Pool)
+                        EditorGUILayout.PropertyField(serialized.m_WaterCurrentDebugMode, k_WaterCurrentDebugMode);
                     EditorGUILayout.PropertyField(serialized.m_CurrentDebugMultiplier, k_CurrentDebugMultiplier);
                     serialized.m_CurrentDebugMultiplier.floatValue = Mathf.Max(serialized.m_CurrentDebugMultiplier.floatValue, 0.1f);
                 }
@@ -144,7 +145,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
                 if (!lightLayersEnabled)
                 {
-                    HDEditorUtils.QualitySettingsHelpBox("Enable 'Light Layers' in your HDRP Asset if you want defined which lights affect water surfaces. There is a performance cost of enabling this option.",
+                    HDEditorUtils.QualitySettingsHelpBox("Enable 'Light Layers' in your HDRP Asset if you want to control which lights affect water surfaces. There is a performance cost of enabling this option.",
                         MessageType.Info, HDRenderPipelineUI.ExpandableGroup.Lighting, "m_RenderPipelineSettings.supportLightLayers");
                     EditorGUILayout.Space();
                 }

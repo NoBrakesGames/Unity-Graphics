@@ -65,13 +65,15 @@ ps_output frag(ps_input i)
 	o.color = VFXApplyFog(o.color,i);
 	VFXClipFragmentColor(o.color.a,i);
 	o.color.a = saturate(o.color.a);
-	o.color = VFXTransformFinalColor(o.color);
+	o.color = VFXTransformFinalColor(o.color,i);
 
 	#if VFX_FEATURE_MOTION_VECTORS_FORWARD
 	${VFXComputeOutputMotionVector}
 	o.motionVector = encodedMotionVector;
 	o.motionVector.a = o.color.a < i.VFX_VARYING_ALPHATHRESHOLD ? 0.0f : 1.0f; //Independant clipping for motion vector pass
 	#endif
+
+    ${VFXUnlitDebugDisplay}
 
 	return o;
 }

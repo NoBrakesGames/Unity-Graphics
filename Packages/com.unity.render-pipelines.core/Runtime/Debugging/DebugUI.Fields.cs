@@ -12,7 +12,7 @@ namespace UnityEngine.Rendering
         /// <summary>
         /// Generic field - will be serialized in the editor if it's not read-only
         /// </summary>
-        /// <typeparam name="T"></typeparam>
+        /// <typeparam name="T">The type of data managed by the field.</typeparam>
         public abstract class Field<T> : Widget, IValueField
         {
             /// <summary>
@@ -239,6 +239,134 @@ namespace UnityEngine.Rendering
                 if (min != null) value = Mathf.Max(value, min());
                 if (max != null) value = Mathf.Min(value, max());
                 return value;
+            }
+        }
+
+        /// <summary>
+        /// Field that displays <see cref="RenderingLayerMask"/>
+        /// </summary>
+        public class RenderingLayerField : Field<RenderingLayerMask>, IContainer
+        {
+            static readonly NameAndTooltip s_RenderingLayerColors = new()
+            {
+                name = "Layers Color",
+                tooltip = "Select the display color for each Rendering Layer"
+            };
+
+            private string[] m_RenderingLayersNames = Array.Empty<string>();
+
+            private int m_DefinedRenderingLayersCount = -1;
+
+            private int maxRenderingLayerCount
+            {
+                get
+                {
+#if UNITY_EDITOR
+                    if (UnityEditor.Rendering.EditorGraphicsSettings.
+                        TryGetFirstRenderPipelineSettingsFromInterface<UnityEditor.Rendering.RenderingLayersLimitSettings>(out var settings))
+                        return Mathf.Min(settings.maxSupportedRenderingLayers, RenderingLayerMask.GetRenderingLayerCount());
+#endif
+
+                    return RenderingLayerMask.GetRenderingLayerCount();
+                }
+            }
+
+            private void Resize()
+            {
+                m_DefinedRenderingLayersCount = RenderingLayerMask.GetDefinedRenderingLayerCount();
+
+                // Fill layer names
+                m_RenderingLayersNames = new string[maxRenderingLayerCount];
+                for (int i = 0; i < maxRenderingLayerCount; i++)
+                {
+                    var definedLayerName = RenderingLayerMask.RenderingLayerToName(i);
+                    if (string.IsNullOrEmpty(definedLayerName))
+                        definedLayerName = $"Unused Rendering Layer {i}";
+                    m_RenderingLayersNames[i] = definedLayerName;
+                }
+
+                // Foldout + Color for each layer
+                m_RenderingLayersColors.Clear();
+                var layersColor = new DebugUI.Foldout()
+                {
+                    nameAndTooltip = s_RenderingLayerColors,
+                    flags = Flags.EditorOnly,
+                    parent = this,
+                };
+                m_RenderingLayersColors.Add(layersColor);
+
+                for (int i = 0; i < m_RenderingLayersNames.Length; i++)
+                {
+                    var index = i; // capture the variable for the color field index
+                    layersColor.children.Add(new DebugUI.ColorField
+                    {
+                        displayName = m_RenderingLayersNames[index],
+                        getter = () =>
+                        {
+                            Assert.IsNotNull(getRenderingLayerColor, "Please specify a method for getting the rendering layer color");
+                            return getRenderingLayerColor(index);
+                        },
+                        setter = value =>
+                        {
+                            Assert.IsNotNull(setRenderingLayerColor, "Please specify a method for setting the rendering layer color");
+                            setRenderingLayerColor(value, index);
+                        }
+                    });
+                }
+
+                GenerateQueryPath();
+            }
+
+            /// <summary>
+            /// Obtains the list of the available rendering layer names
+            /// </summary>
+            public string[] renderingLayersNames
+            {
+                get
+                {
+                    if (m_DefinedRenderingLayersCount != RenderingLayerMask.GetDefinedRenderingLayerCount())
+                    {
+                        Resize();
+                    }
+
+                    return m_RenderingLayersNames;
+                }
+            }
+
+            private ObservableList<Widget> m_RenderingLayersColors = new ObservableList<Widget>();
+
+            /// <summary>
+            /// Gets the list of widgets representing the rendering layer colors.
+            /// </summary>
+            public ObservableList<Widget> children
+            {
+                get
+                {
+                    if (m_DefinedRenderingLayersCount != RenderingLayerMask.GetDefinedRenderingLayerCount())
+                    {
+                        Resize();
+                    }
+
+                    return m_RenderingLayersColors;
+                }
+            }
+
+            /// <summary>
+            /// Obtains the color in a given index
+            /// </summary>
+            public Func<int, Vector4> getRenderingLayerColor { get; set; }
+            /// <summary>
+            /// Sets the color for a given index
+            /// </summary>
+            public Action<Vector4, int> setRenderingLayerColor { get; set; }
+
+            internal override void GenerateQueryPath()
+            {
+                base.GenerateQueryPath();
+
+                int numChildren = children.Count;
+                for (int i = 0; i < numChildren; i++)
+                    children[i].GenerateQueryPath();
             }
         }
 
@@ -609,6 +737,41 @@ namespace UnityEngine.Rendering
             /// Style used to render displayName.
             /// </summary>
             public Style style = Style.Info;
+
+            /// <summary>
+            /// Message Callback to feed the new message to the widget
+            /// </summary>
+            public Func<string> messageCallback = null;
+
+            /// <summary>
+            /// This obtains the message from the display name or from the message callback if it is not null
+            /// </summary>
+            public string message => messageCallback == null ? displayName : messageCallback();
+        }
+
+        /// <summary>
+        /// Widget that will show into the Runtime UI only
+        /// Warning the user if the Runtime Debug Shaders variants are being stripped from the build.
+        /// </summary>
+        public class RuntimeDebugShadersMessageBox : MessageBox
+        {
+            /// <summary>
+            /// Constructs a <see cref="RuntimeDebugShadersMessageBox"/>
+            /// </summary>
+            public RuntimeDebugShadersMessageBox()
+            {
+                displayName =
+                    "Warning: the debug shader variants are missing. Ensure that the \"Strip Runtime Debug Shaders\" option is disabled in the SRP Graphics Settings.";
+                style = DebugUI.MessageBox.Style.Warning;
+                isHiddenCallback = () =>
+                {
+#if !UNITY_EDITOR
+                    if (GraphicsSettings.TryGetRenderPipelineSettings<ShaderStrippingSetting>(out var shaderStrippingSetting))
+                        return !shaderStrippingSetting.stripRuntimeDebugShaders;
+#endif
+                    return true;
+                };
+            }
         }
     }
 }

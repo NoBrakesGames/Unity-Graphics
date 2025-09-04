@@ -54,9 +54,9 @@ namespace UnityEditor.VFX.Test
 
         }
 
-        private VFXAttribute Attrib1 = new VFXAttribute("attrib1", VFXValueType.Float);
-        private VFXAttribute Attrib2 = new VFXAttribute("attrib2", VFXValueType.Float2);
-        private VFXAttribute Attrib3 = new VFXAttribute("attrib3", VFXValueType.Float3);
+        private VFXAttribute Attrib1 = new VFXAttribute("attrib1", VFXValueType.Float, string.Empty);
+        private VFXAttribute Attrib2 = new VFXAttribute("attrib2", VFXValueType.Float2, string.Empty);
+        private VFXAttribute Attrib3 = new VFXAttribute("attrib3", VFXValueType.Float3, string.Empty);
 
         [SetUp]
         public void Setup()
@@ -174,7 +174,11 @@ namespace UnityEditor.VFX.Test
         [Test]
         public void SetAttribute_Default_Value_Is_Taken_Into_Account_Scale()
         {
+            var graph = ScriptableObject.CreateInstance<VFXGraph>();
+            var updateCtx = ScriptableObject.CreateInstance<VFXBasicUpdate>();
+            graph.AddChild(updateCtx);
             var setAttribute = ScriptableObject.CreateInstance<Block.SetAttribute>();
+            updateCtx.AddChild(setAttribute);
             setAttribute.SetSettingValue("attribute", "scale"); //variadic
 
             var scaleReference = new Vector3((float)VFXAttribute.ScaleX.value.GetContent(), (float)VFXAttribute.ScaleY.value.GetContent(), (float)VFXAttribute.ScaleZ.value.GetContent());
@@ -200,42 +204,56 @@ namespace UnityEditor.VFX.Test
             Assert.IsFalse(setAttribute.attributes.Any(o => o.attrib.name == VFXAttribute.Seed.name));
         }
 
-        [TestCase("name with space", true)]
-        [TestCase("1startWithNumber", true)]
-        [TestCase("Special*Character", true)]
-        [TestCase("ValidName", false)]
-        public void SetCustomAttribute_Name_Validation(string name, bool shouldRaiseError)
+        [TestCase("name with space", ExpectedResult = "namewithspace")]
+        [TestCase("1startWithNumber", ExpectedResult = "startWithNumber")]
+        [TestCase("Special*Character", ExpectedResult = "SpecialCharacter")]
+        [TestCase("ValidName", ExpectedResult = "ValidName")]
+        public string SetCustomAttribute_Name_Validation(string name)
         {
-            CheckCustomAttributeName<SetCustomAttribute>(name, shouldRaiseError);
+            return CheckCustomAttributeName<SetAttribute>(name);
         }
 
-        [TestCase("name with space", true)]
-        [TestCase("1startWithNumber", true)]
-        [TestCase("Special*Character", true)]
-        [TestCase("ValidName", false)]
-        public void GetCustomAttribute_Name_Validation(string name, bool shouldRaiseError)
+        [TestCase("name with space", ExpectedResult = "namewithspace")]
+        [TestCase("1startWithNumber", ExpectedResult = "startWithNumber")]
+        [TestCase("Special*Character", ExpectedResult = "SpecialCharacter")]
+        [TestCase("ValidName", ExpectedResult = "ValidName")]
+        public string GetCustomAttribute_Name_Validation(string name)
         {
-            CheckCustomAttributeName<GetCustomAttribute>(name, shouldRaiseError);
+            return CheckCustomAttributeName<VFXAttributeParameter>(name);
         }
 
-        private void CheckCustomAttributeName<T>(string name, bool shouldRaiseError) where T : VFXModel
+        [Test, Description("Cover regression UUM_83849")]
+        public void Sanitize_Custom_Attribute_With_Same_Name_As_BuiltIn()
+        {
+            var kSourceAsset = "Assets/AllTests/Editor/Tests/Repro_UUM_83849.vfx_";
+            var graph = VFXTestCommon.CopyTemporaryGraph(kSourceAsset);
+            Assert.IsNotNull(graph);
+
+            var initialize = graph.GetGraph().children.OfType<VFXBasicInitialize>().Single();
+            Assert.IsNotNull(initialize);
+
+            Assert.AreEqual(5u, initialize.children.Count());
+            Assert.AreEqual(5u, initialize.children.OfType<SetAttribute>().Count());
+            var sizeExpected = (string)initialize.children.First().GetSetting("attribute").value;
+            var customExpected = (string)initialize.children.Last().GetSetting("attribute").value;
+            Assert.AreEqual(VFXAttribute.Size.name, sizeExpected);
+            Assert.AreEqual("Seed_1", customExpected);
+
+            var customAttribute = graph.customAttributes.SingleOrDefault(o => o.attributeName == customExpected);
+            Assert.IsNotNull(customAttribute);
+
+            var getAttributeOp = graph.GetGraph().children.OfType<VFXAttributeParameter>().Single();
+            Assert.AreEqual("Seed_1", getAttributeOp.attribute);
+        }
+
+        private string CheckCustomAttributeName<T>(string name) where T : VFXModel
         {
             var graph = VFXTestCommon.MakeTemporaryGraph();
             var window = VFXViewWindow.GetWindow(graph, true);
             window.LoadResource(graph.visualEffectResource);
-            VFXModel modelWithError = null;
-            window.graphView.errorManager.onRegisterError += (model, origin, error, errorType, description) =>
-            {
-                Assert.IsNull(modelWithError, "The error seems to have been raise more than once");
-                if (errorType == VFXErrorType.Error)
-                {
-                    modelWithError = model;
-                }
-            };
 
-
+            graph.TryAddCustomAttribute(name, VFXValueType.Boolean, string.Empty, false, out var attribute);
             var customAttributeNode = ScriptableObject.CreateInstance<T>();
-            customAttributeNode.SetSettingValue("attribute", name);
             if (customAttributeNode is VFXOperator)
             {
                 graph.AddChild(customAttributeNode);
@@ -243,21 +261,13 @@ namespace UnityEditor.VFX.Test
             else
             {
                 var updateContext = ScriptableObject.CreateInstance<VFXBasicUpdate>();
-                updateContext.AddChild(customAttributeNode);
                 graph.AddChild(updateContext);
+                updateContext.AddChild(customAttributeNode);
             }
-
+            customAttributeNode.SetSettingValue("attribute", attribute.name);
             customAttributeNode.RefreshErrors();
 
-            Assert.AreEqual(shouldRaiseError, customAttributeNode == modelWithError);
-            if (shouldRaiseError)
-            {
-                Assert.AreEqual(customAttributeNode, modelWithError, $"A custom attribute with a name like '{name}' must raised an error feedback");
-            }
-            else
-            {
-                Assert.IsNull(modelWithError, $"A custom attribute name like '{name}' should not raise any error feedback");
-            }
+            return attribute.name;
         }
     }
 }

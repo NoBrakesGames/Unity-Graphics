@@ -2,7 +2,6 @@ using UnityEngine;
 
 namespace UnityEditor.Rendering
 {
-    /// <summary> Camera UI Shared Properties among SRP</summary>
     public static partial class CameraUI
     {
         /// <summary>
@@ -54,9 +53,6 @@ namespace UnityEditor.Rendering
                 /// exposureTarget content
                 /// </summary>
                 public static readonly GUIContent exposureTarget = EditorGUIUtility.TrTextContent("Exposure Target", "The object used as a target for centering the Exposure's Procedural Mask metering mode when target object option is set (See Exposure Volume Component).");
-
-                /// <summary>Unity does not support dithering with HDR display output.</summary>
-                public static readonly string unsupportedDitheringWithHDROutputWarning = L10n.Tr("Unity does not support dithering with HDR display output.");
             }
         }
     }

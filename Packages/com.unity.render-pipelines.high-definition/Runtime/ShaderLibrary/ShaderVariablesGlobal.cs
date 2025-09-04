@@ -10,7 +10,7 @@ namespace UnityEngine.Rendering.HighDefinition
         PBRSky = 2,
         RayTracing = 3,
         RayTracingLightLoop = 4,
-        RayTracingEnvLightReflectionData = 5,
+        WorldEnvLightReflectionData = 5,
         APV = APVConstantBufferRegister.GlobalRegister,
     }
 
@@ -51,6 +51,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public Matrix4x4 _CameraViewProjMatrix;
         public Matrix4x4 _InvViewProjMatrix;
         public Matrix4x4 _NonJitteredViewProjMatrix;
+        public Matrix4x4 _NonJitteredInvViewProjMatrix;
         public Matrix4x4 _PrevViewProjMatrix; // non-jittered
         public Matrix4x4 _PrevInvViewProjMatrix; // non-jittered
 
@@ -61,7 +62,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public Vector4 _ScreenSize;                 // { w, h, 1 / w, 1 / h }
         public Vector4 _PostProcessScreenSize;      // { w, h, 1.0 / w, 1.0 / h }
 
-        // Those two uniforms are specific to the RTHandle system
+        // Those four uniforms are specific to the RTHandle system
         public Vector4 _RTHandleScale;                      // { w / RTHandle.maxWidth, h / RTHandle.maxHeight } : xy = currFrame, zw = prevFrame
         public Vector4 _RTHandleScaleHistory;               // Same as above but the RTHandle handle size is that of the history buffer
         public Vector4 _RTHandlePostProcessScale;           // { postProcessWidth / RTHandle.maxWidth, postProcessWidth / RTHandle.maxHeight } : xy = currFrame, zw = prevFrame
@@ -87,6 +88,11 @@ namespace UnityEngine.Rendering.HighDefinition
         // w = 1/far plane
         public Vector4 _ProjectionParams;
 
+        // Parameters used to linearize the Z buffer
+        // Correctly handles oblique projection matrices
+        // https://jcgt.org/published/0005/04/03/paper.pdf
+        public Vector4 _InvProjParams;
+
         // x = orthographic camera's width
         // y = orthographic camera's height
         // z = unused
@@ -105,7 +111,7 @@ namespace UnityEngine.Rendering.HighDefinition
         [HLSLArray(6, typeof(Vector4))]
         public fixed float _ShadowFrustumPlanes[6 * 4];     // { (a, b, c) = N, d = -dot(N, P) } [L, R, T, B, N, F]
 
-        // TAA Frame Index ranges from 0 to 7.
+        // TAA Frame Index ranges from 0 to 1023.
         public Vector4 _TaaFrameInfo;               // { taaSharpenStrength, unused, taaFrameIndex, taaEnabled ? 1 : 0 }
 
         // Current jitter strength (0 if TAA is disabled)
@@ -121,6 +127,8 @@ namespace UnityEngine.Rendering.HighDefinition
         public Vector4 _LastTimeParameters;         // { t, sin(t), cos(t) }
 
         // Volumetric lighting / Fog.
+        public Vector4 _PlanetCenterRadius;
+        public Vector4 _PlanetUpAltitude;
         public int _FogEnabled;
         public int _PBRFogEnabled;
         public int _EnableVolumetricFog;
@@ -129,7 +137,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public float _FogColorMode;
         public float _GlobalMipBias;
         public float _GlobalMipBiasPow2;
-        public float _Pad0;
+        public uint _RayTracingCheckerIndex;
         public Vector4 _MipFogParameters;
         public Vector4 _HeightFogBaseScattering;
         public float _HeightFogBaseExtinction;
@@ -157,22 +165,40 @@ namespace UnityEngine.Rendering.HighDefinition
         public Vector4 _CachedShadowAtlasSize;
         public Vector4 _CachedAreaShadowAtlasSize;
 
-        // Water Line
+        // Water
         public Vector4 _BoundsSS;
         public float _UpDirectionX;
         public float _UpDirectionY;
         public float _BufferStride;
-        public int _EnableUnderwater;
+        public int _EnableWater;
 
+        public Vector4 _WaterAmbientProbe;
+        public Vector4 _UnderWaterScatteringExtinction;
+        public Vector4 _UnderWaterUpHeight;
+        public int _UnderWaterSurfaceIndex;
+        public float _UnderWaterCausticsIntensity;
+        public float _UnderWaterCausticsPlaneBlendDistance;
+        public float _UnderWaterCausticsTilingFactor;
+        public Matrix4x4 _UnderWaterSurfaceTransform_Inverse;
+        public float _UnderWaterCausticsMaxLOD;
+        public float _UnderWaterCausticsShadowIntensity;
+        public float _UnderWaterCausticsRegionSize;
+        public int _CustomOutputForCustomPass;
+
+        public int _PreRefractionPass;
         public int _SpecularFade;
         public uint _EnableRenderingLayers;
         public int _ReflectionsMode;
-        public int _UnusedPadding2;
 
         public uint _DirectionalLightCount;
         public uint _PunctualLightCount;
         public uint _AreaLightCount;
         public uint _EnvLightCount;
+
+        public uint _WorldDirectionalLightCount;
+        public uint _WorldPunctualLightCount;
+        public uint _WorldAreaLightCount;
+        public uint _WorldEnvLightCount;
 
         public int _EnvLightSkyEnabled;
         public uint _CascadeShadowCount;
@@ -275,5 +301,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public uint _EnableComputeThickness;
         public float _VolumetricCloudsFallBackValue;
         public Vector4 _VolumetricCloudsShadowOriginToggle;
+        public Vector4 _ColorPyramidUvScaleAndLimitCurrentFrame;
+        public Vector4 _ColorPyramidUvScaleAndLimitPrevFrame;
     }
 }

@@ -1,9 +1,9 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Bitwise")]
+    [VFXHelpURL("Operator-BitwiseLeftShift")]
+    [VFXInfo(name = "Left Shift", category = "Bitwise")]
     class BitwiseLeftShift : VFXOperator
     {
         override public string name { get { return "Left Shift"; } }

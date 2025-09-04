@@ -1,5 +1,5 @@
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -25,8 +25,8 @@ namespace UnityEngine.Rendering.HighDefinition
 
         void InitializeSubsurfaceScatteringRT()
         {
-            ComputeShader rayTracingSubSurfaceCS = m_GlobalSettings.renderPipelineRayTracingResources.subSurfaceRayTracingCS;
-            ComputeShader deferredRayTracingCS = m_GlobalSettings.renderPipelineRayTracingResources.deferredRaytracingCS;
+            ComputeShader rayTracingSubSurfaceCS = rayTracingResources.subSurfaceRayTracingCS;
+            ComputeShader deferredRayTracingCS = rayTracingResources.deferredRayTracingCS;
 
             m_SSSClearTextureKernel = rayTracingSubSurfaceCS.FindKernel("ClearTexture");
             m_RaytracingDiffuseDeferredKernel = deferredRayTracingCS.FindKernel("RaytracingDiffuseDeferred");
@@ -99,9 +99,9 @@ namespace UnityEngine.Rendering.HighDefinition
                 passData.rtDeferredLightingKernel = m_RaytracingDiffuseDeferredKernel;
 
                 // other required parameters
-                passData.rayTracingSubSurfaceRT = m_GlobalSettings.renderPipelineRayTracingResources.subSurfaceRayTracingRT;
-                passData.rayTracingSubSurfaceCS = m_GlobalSettings.renderPipelineRayTracingResources.subSurfaceRayTracingCS;
-                passData.deferredRayTracingCS = m_GlobalSettings.renderPipelineRayTracingResources.deferredRaytracingCS;
+                passData.rayTracingSubSurfaceRT = rayTracingResources.subSurfaceRayTracingRT;
+                passData.rayTracingSubSurfaceCS = rayTracingResources.subSurfaceRayTracingCS;
+                passData.deferredRayTracingCS = rayTracingResources.deferredRayTracingCS;
                 passData.accelerationStructure = RequestAccelerationStructure(hdCamera);
                 passData.lightCluster = RequestLightCluster();
                 passData.shaderVariablesRayTracingCB = m_ShaderVariablesRayTracingCB;
@@ -111,17 +111,17 @@ namespace UnityEngine.Rendering.HighDefinition
                 passData.normalBuffer = builder.ReadTexture(normalBuffer);
                 passData.sssColor = builder.ReadTexture(sssColor);
                 passData.intermediateBuffer0 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Intermediate Texture 0" });
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Intermediate Texture 0" });
                 passData.intermediateBuffer1 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Intermediate Texture 1" });
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Intermediate Texture 1" });
                 passData.intermediateBuffer2 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Intermediate Texture 2" });
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Intermediate Texture 2" });
                 passData.intermediateBuffer3 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Intermediate Texture 3" });
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Intermediate Texture 3" });
                 passData.directionBuffer = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Distance buffer" });
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Distance buffer" });
                 passData.outputBuffer = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
-                { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Ray Traced SSS" }));
+                { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Ray Traced SSS" }));
 
                 builder.SetRenderFunc(
                     (TraceRTSSSPassData data, RenderGraphContext ctx) =>
@@ -205,7 +205,8 @@ namespace UnityEngine.Rendering.HighDefinition
             filterParams.occluderMotionRejection = false;
             filterParams.receiverMotionRejection = true;
             filterParams.exposureControl = false;
-            filterParams.fullResolution = true;
+            filterParams.resolutionMultiplier = 1.0f;
+            filterParams.historyResolutionMultiplier = 1.0f;
 
             return GetTemporalFilter().Denoise(renderGraph, hdCamera, filterParams,
                 rayTracedSSS, renderGraph.defaultResources.blackTextureXR, historyBuffer,
@@ -255,7 +256,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 passData.combineSSSKernel = passData.validSSGI ? m_CombineSubSurfaceWithGIKernel : m_CombineSubSurfaceKernel;
 
                 // Other parameters
-                passData.rayTracingSubSurfaceCS = m_GlobalSettings.renderPipelineRayTracingResources.subSurfaceRayTracingCS;
+                passData.rayTracingSubSurfaceCS = rayTracingResources.subSurfaceRayTracingCS;
                 passData.combineLightingMat = m_CombineLightingPass;
 
                 passData.depthStencilBuffer = builder.UseDepthBuffer(depthStencilBuffer, DepthAccess.Read);

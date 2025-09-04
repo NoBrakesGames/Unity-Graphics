@@ -2,7 +2,7 @@
 
 ## Description
 
-There are a number of **Data Types** in [Shader Graph](Shader-Graph.md). Each **Port** on a [Node](Node.md) has an associated **Data Type** that defines what edges can be connected to it. The **Data Types** have colors for usability, these colors are applied to ports and edges of that **Data Type**.
+There are a number of **Data Types** in [Shader Graph](index.md). Each **Port** on a [Node](Node.md) has an associated **Data Type** that defines what edges can be connected to it. The **Data Types** have colors for usability, these colors are applied to ports and edges of that **Data Type**.
 
 Some **Data Types** have associated [Property Types](Property-Types.md) for exposing these values to the [Inspector](https://docs.unity3d.com/Manual/UsingTheInspector.html) for [Materials](https://docs.unity3d.com/Manual/class-Material.html) that use the shader.
 
@@ -31,7 +31,7 @@ Some **Data Types** have associated [Property Types](Property-Types.md) for expo
 
 ## Promoting/Truncating
 
-All **Vector** types can be promoted or truncated to match any **Vector** type [Port](Port.md). This behaviour occurs only when the [Port](Port.md) in question is not of type **Dynamic Vector**. When truncating, excess channels are simply removed. When promoting, the extra required channels are filled by default values. These values values are (0, 0, 0, 1).
+All **Vector** types can be promoted or truncated to match any **Vector** type [Port](Port.md). This behaviour occurs only when the [Port](Port.md) in question is not of type **Dynamic Vector**. When truncating, excess channels are simply removed. When promoting, the extra required channels are filled by default values. These values are (0, 0, 0, 1).
 
 ## Dynamic Data Types
 

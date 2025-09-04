@@ -41,7 +41,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         protected virtual bool supportForward => false;
         protected virtual bool supportLighting => false;
         protected virtual bool supportDistortion => false;
-        protected override bool supportRaytracing => true;
+        protected override bool supportRaytracing => !TargetsVFX() || TargetVFXSupportsRaytracing();
 
         protected override int ComputeMaterialNeedsUpdateHash()
         {
@@ -55,16 +55,6 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         public override void Setup(ref TargetSetupContext context)
         {
             context.AddAssetDependency(kSourceCodeGuid, AssetCollection.Flags.SourceDependency);
-
-            if (TargetsVFX())
-            {
-                string inspector;
-                if (supportLighting)
-                    inspector = typeof(VFXShaderGraphGUILit).FullName;
-                else
-                    inspector = typeof(VFXShaderGraphGUIUnlit).FullName;
-                context.AddCustomEditorForRenderPipeline(inspector, typeof(HDRenderPipelineAsset));
-            }
 
             base.Setup(ref context);
         }
@@ -106,7 +96,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                     // Common "surface" passes
                     HDShaderPasses.GenerateShadowCaster(supportLighting, TargetsVFX(), systemData.tessellation),
                     HDShaderPasses.GenerateMETA(supportLighting, TargetsVFX()),
-                    HDShaderPasses.GenerateScenePicking(TargetsVFX(), systemData.tessellation),
+                    HDShaderPasses.GenerateScenePicking(supportLighting, TargetsVFX(), systemData.tessellation),
                     HDShaderPasses.GenerateSceneSelection(supportLighting, TargetsVFX(), systemData.tessellation),
                     HDShaderPasses.GenerateMotionVectors(supportLighting, supportForward, TargetsVFX(), systemData.tessellation),
                     { HDShaderPasses.GenerateBackThenFront(supportLighting, TargetsVFX(), systemData.tessellation), new FieldCondition(HDFields.TransparentBackFace, true)},
@@ -127,7 +117,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                 if (supportForward)
                 {
                     passes.Add(HDShaderPasses.GenerateDepthForwardOnlyPass(supportLighting, TargetsVFX(), systemData.tessellation));
-                    passes.Add(HDShaderPasses.GenerateForwardOnlyPass(supportLighting, TargetsVFX(), systemData.tessellation, systemData.debugSymbols));
+                    passes.Add(HDShaderPasses.GenerateForwardOnlyPass(supportLighting, TargetsVFX(), systemData.tessellation));
                 }
 
                 if (supportDistortion)
@@ -179,14 +169,19 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             if (pass.IsDepthOrMV())
                 pass.keywords.Add(CoreKeywordDescriptors.WriteMsaaDepth);
 
-            pass.keywords.Add(CoreKeywordDescriptors.SurfaceTypeTransparent);
+            if (pass.RequiresTransparentSurfaceTypeKeyword())
+                pass.keywords.Add(CoreKeywordDescriptors.SurfaceTypeTransparent);
             pass.keywords.Add(CoreKeywordDescriptors.DoubleSided, new FieldCondition(HDFields.Unlit, false));
             pass.keywords.Add(CoreKeywordDescriptors.DepthOffset, new FieldCondition(HDFields.DepthOffset, true));
             pass.keywords.Add(CoreKeywordDescriptors.ConservativeDepthOffset, new FieldCondition(HDFields.ConservativeDepthOffset, true));
 
-            pass.keywords.Add(CoreKeywordDescriptors.AddPrecomputedVelocity);
-            pass.keywords.Add(CoreKeywordDescriptors.TransparentWritesMotionVector);
-            pass.keywords.Add(CoreKeywordDescriptors.FogOnTransparent);
+            if (pass.IsMotionVector() || pass.IsForward())
+                pass.keywords.Add(CoreKeywordDescriptors.AddPrecomputedVelocity);
+
+            if (pass.RequiresTransparentMVKeyword())
+                pass.keywords.Add(CoreKeywordDescriptors.TransparentWritesMotionVector);
+            if (pass.RequiresFogOnTransparentKeyword())
+                pass.keywords.Add(CoreKeywordDescriptors.FogOnTransparent);
 
             if (pass.NeedsDebugDisplay())
                 pass.keywords.Add(CoreKeywordDescriptors.DebugDisplay);
@@ -265,7 +260,6 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 
             context.AddField(HDFields.TessellationFactor, systemData.tessellation);
             context.AddField(HDFields.TessellationDisplacement, systemData.tessellation);
-            context.AddField(HDFields.LineWidth, target.supportLineRendering);
         }
 
         protected void AddDistortionFields(ref TargetFieldContext context)
@@ -308,7 +302,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             context.AddBlock(HDBlockFields.VertexDescription.TessellationFactor, systemData.tessellation);
             context.AddBlock(HDBlockFields.VertexDescription.TessellationDisplacement, systemData.tessellation);
 
-            context.AddBlock(HDBlockFields.SurfaceDescription.LineWidth, target.supportLineRendering);
+            context.AddBlock(HDBlockFields.VertexDescription.Width, target.supportLineRendering);
         }
 
         protected void AddDistortionBlocks(ref TargetActiveBlockContext context)
@@ -391,18 +385,32 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             HDSubShaderUtilities.AddDoubleSidedProperty(collector, systemData.doubleSidedMode);
             HDSubShaderUtilities.AddPrePostPassProperties(collector, builtinData.transparentDepthPrepass, builtinData.transparentDepthPostpass);
 
+            collector.AddShaderProperty(new BooleanShaderProperty
+            {
+                value = builtinData.transparentPerPixelSorting,
+                hidden = true,
+                overrideHLSLDeclaration = true,
+                hlslDeclarationOverride = HLSLDeclaration.DoNotDeclare,
+                overrideReferenceName = kPerPixelSorting,
+            });
+
+            // This adds utility properties for mipmap streaming debugging, only to HLSL since there's no need to expose ShaderLab properties
+            // This is, by definition, HLSLDeclaration.UnityPerMaterial
+            collector.AddShaderProperty(MipmapStreamingShaderProperties.kDebugTex);
+
             // Add all shader properties required by the inspector
             HDSubShaderUtilities.AddBlendingStatesShaderProperties(
                 collector,
                 systemData.surfaceType,
-                systemData.blendMode,
+                systemData.blendingMode,
                 systemData.sortPriority,
                 systemData.transparentZWrite,
                 systemData.transparentCullMode,
                 systemData.opaqueCullMode,
                 systemData.zTest,
                 builtinData.backThenFrontRendering,
-                builtinData.transparencyFog
+                builtinData.transparencyFog,
+                systemData.renderQueueType
             );
 
             // Add all shader properties required by the inspector for Tessellation
@@ -419,7 +427,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             material.SetFloat(kDoubleSidedNormalMode, (int)systemData.doubleSidedMode);
             material.SetFloat(kDoubleSidedEnable, systemData.doubleSidedMode != DoubleSidedMode.Disabled ? 1 : 0);
             material.SetFloat(kAlphaCutoffEnabled, systemData.alphaTest ? 1 : 0);
-            material.SetFloat(kBlendMode, (int)systemData.blendMode);
+            material.SetFloat(kBlendMode, (int)systemData.blendingMode);
             material.SetFloat(kEnableFogOnTransparent, builtinData.transparencyFog ? 1.0f : 0.0f);
             material.SetFloat(kZTestTransparent, (int)systemData.zTest);
             material.SetFloat(kTransparentCullMode, (int)systemData.transparentCullMode);

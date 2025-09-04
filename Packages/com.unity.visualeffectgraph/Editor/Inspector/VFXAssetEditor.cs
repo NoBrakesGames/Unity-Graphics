@@ -10,8 +10,7 @@ using UnityEngine.VFX;
 using UnityEditor.Callbacks;
 using UnityEditor.VFX;
 using UnityEditor.VFX.UI;
-using UnityEngine.Experimental.Rendering;
-
+using UnityEngine.UIElements;
 using UnityObject = UnityEngine.Object;
 
 
@@ -89,7 +88,7 @@ class VFXExternalShaderProcessor : AssetPostprocessor
 
 [CustomEditor(typeof(VisualEffectAsset))]
 [CanEditMultipleObjects]
-class VisualEffectAssetEditor : Editor
+class VisualEffectAssetEditor : UnityEditor.Editor
 {
 #if UNITY_2021_1_OR_NEWER
     [OnOpenAsset(OnOpenAssetAttributeMode.Validate)]
@@ -172,10 +171,8 @@ class VisualEffectAssetEditor : Editor
 
         if (VFXViewWindow.GetAllWindows().All(x => x.graphView?.controller?.graph.visualEffectResource.GetInstanceID() != m_CurrentGraph.visualEffectResource.GetInstanceID() || !x.hasFocus))
         {
-            using var reporter = new VFXCompileErrorReporter(new VFXErrorManager());
-            VFXGraph.compileReporter = reporter;
+            // Do we need a compileReporter here?
             AssetDatabase.ImportAsset(AssetDatabase.GetAssetPath(m_CurrentGraph.visualEffectResource));
-            VFXGraph.compileReporter = null;
         }
     }
 
@@ -183,9 +180,10 @@ class VisualEffectAssetEditor : Editor
     {
         var context = m_OutputContexts[index] as VFXContext;
 
-        var systemName = context.GetGraph().systemNames.GetUniqueSystemName(context.GetData());
+        var contextData = context.GetData();
+        var systemName = contextData ? context.GetGraph().systemNames.GetUniqueSystemName(contextData) : string.Empty;
         var contextLetter = context.letter;
-        var contextName = string.IsNullOrEmpty(context.label) ? context.libraryName : context.label;
+        var contextName = string.IsNullOrEmpty(context.label) ? context.name.Replace('\n', ' ') : context.label;
         var fullName = string.Format("{0}{1}/{2}", systemName, contextLetter != '\0' ? "/" + contextLetter : string.Empty, contextName.Replace('\n', ' '));
 
         EditorGUI.LabelField(rect, EditorGUIUtility.TempContent(fullName));

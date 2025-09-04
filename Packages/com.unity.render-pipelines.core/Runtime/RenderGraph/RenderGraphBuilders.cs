@@ -1,18 +1,20 @@
 using System;
-using System.Collections.Generic;
-using UnityEngine.Rendering;
+using System.Diagnostics;
+using UnityEngine.Experimental.Rendering;
+using static UnityEngine.Rendering.RenderGraphModule.RenderGraph;
 
-namespace UnityEngine.Experimental.Rendering.RenderGraphModule
+namespace UnityEngine.Rendering.RenderGraphModule
 {
     // This is a class making it a struct wouldn't help as we pas it around as an interface which means it would be boxed/unboxed anyway
     // Publicly this class has different faces to help the users with different pass types through type safety but internally
     // we just have a single implementation for all builders
-    internal class RenderGraphBuilders : IBaseRenderGraphBuilder, IComputeRenderGraphBuilder, IRasterRenderGraphBuilder, ILowLevelRenderGraphBuilder
+    internal class RenderGraphBuilders : IBaseRenderGraphBuilder, IComputeRenderGraphBuilder, IRasterRenderGraphBuilder, IUnsafeRenderGraphBuilder
     {
         RenderGraphPass m_RenderPass;
         RenderGraphResourceRegistry m_Resources;
         RenderGraph m_RenderGraph;
         bool m_Disposed;
+
 
         public RenderGraphBuilders()
         {
@@ -24,17 +26,25 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         public void Setup(RenderGraphPass renderPass, RenderGraphResourceRegistry resources, RenderGraph renderGraph)
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             // If the object is not disposed yet this is an error as the pass is not finished (only in the dispose we register it with the rendergraph)
             // This is likely cause by a user not doing a clean using and then forgetting to manually dispose the object.
             if (m_Disposed != true)
             {
                 throw new Exception("Please finish building the previous pass first by disposing the pass builder object before adding a new pass.");
             }
-
+#endif
             m_RenderPass = renderPass;
             m_Resources = resources;
             m_RenderGraph = renderGraph;
             m_Disposed = false;
+
+            renderPass.useAllGlobalTextures = false;
+
+            if (renderPass.type == RenderGraphPassType.Raster)
+            {
+                CommandBuffer.ThrowOnSetRenderTarget = true;
+            }
         }
 
 
@@ -45,42 +55,57 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
 
         public void AllowPassCulling(bool value)
         {
+            // This pass cannot be culled if it allows global state modifications
+            if (value && m_RenderPass.allowGlobalState)
+                return;
+
             m_RenderPass.AllowPassCulling(value);
         }
 
         public void AllowGlobalStateModification(bool value)
         {
             m_RenderPass.AllowGlobalState(value);
+
+            // This pass cannot be culled if it allows global state modifications
+            if (value)
+            {
+                AllowPassCulling(false);
+            }
+        }
+
+        /// <summary>
+        /// Enable foveated rendering for this pass.
+        /// </summary>
+        /// <param name="value">True to enable foveated rendering.</param>
+        public void EnableFoveatedRasterization(bool value)
+        {
+            m_RenderPass.EnableFoveatedRasterization(value);
         }
 
         public BufferHandle CreateTransientBuffer(in BufferDesc desc)
         {
             var result = m_Resources.CreateBuffer(desc, m_RenderPass.index);
-            m_RenderPass.AddTransientResource(result.handle);
+            UseResource(result.handle, AccessFlags.Write | AccessFlags.Read, isTransient: true);
             return result;
         }
 
         public BufferHandle CreateTransientBuffer(in BufferHandle computebuffer)
         {
             var desc = m_Resources.GetBufferResourceDesc(computebuffer.handle);
-            var result = m_Resources.CreateBuffer(desc, m_RenderPass.index);
-            m_RenderPass.AddTransientResource(result.handle);
-            return result;
+            return CreateTransientBuffer(desc);
         }
 
         public TextureHandle CreateTransientTexture(in TextureDesc desc)
         {
             var result = m_Resources.CreateTexture(desc, m_RenderPass.index);
-            m_RenderPass.AddTransientResource(result.handle);
+            UseResource(result.handle, AccessFlags.Write | AccessFlags.Read, isTransient: true);
             return result;
         }
 
         public TextureHandle CreateTransientTexture(in TextureHandle texture)
         {
             var desc = m_Resources.GetTextureResourceDesc(texture.handle);
-            var result = m_Resources.CreateTexture(desc, m_RenderPass.index);
-            m_RenderPass.AddTransientResource(result.handle);
-            return result;
+            return CreateTransientTexture(desc);
         }
 
         public void Dispose()
@@ -93,43 +118,48 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             if (m_Disposed)
                 return;
 
-            if (disposing)
+            try
             {
-                m_RenderGraph.OnPassAdded(m_RenderPass);
-            }
 
-            m_Disposed = true;
+                if (disposing)
+                {
+                    // Use all globals simply means this... we do a UseTexture on all globals so the pass has the correct dependencies.
+                    // This of course goes to show how bad an idea shader-system wide globals really are dependency/lifetime tracking wise :-)
+                    if (m_RenderPass.useAllGlobalTextures)
+                    {
+                        foreach (var texture in m_RenderGraph.AllGlobals())
+                        {
+                            this.UseTexture(texture, AccessFlags.Read);
+                        }
+                    }
+
+                    // Set globals on the graph fronted side so subsequent passes can have pass dependencies on these global texture handles
+                    foreach (var t in m_RenderPass.setGlobalsList)
+                    {
+                        m_RenderGraph.SetGlobal(t.Item1, t.Item2);
+                    }
+
+                    m_RenderGraph.OnPassAdded(m_RenderPass);
+                }
+            }
+            finally
+            {
+                if (m_RenderPass.type == RenderGraphPassType.Raster)
+                {
+                    CommandBuffer.ThrowOnSetRenderTarget = false;
+                }
+
+                m_RenderPass = null;
+                m_Resources = null;
+                m_RenderGraph = null;
+                m_Disposed = true;
+            }
         }
 
-        private ResourceHandle UseResource(in ResourceHandle handle, IBaseRenderGraphBuilder.AccessFlags flags)
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        private void ValidateWriteTo(in ResourceHandle handle)
         {
-            CheckResource(handle);
-
-            // If we are not discarding the resource, add a "read" dependency on the current version
-            // this "Read" is a bit of a misnomer it really means more like "Preserve existing content or read"
-            if ((flags & IBaseRenderGraphBuilder.AccessFlags.Discard) == 0)
-            {
-                ResourceHandle versioned;
-                if (!handle.IsVersioned)
-                {
-                    versioned = m_Resources.GetLatestVersionHandle(handle);
-                }
-                else
-                {
-                    versioned = handle;
-                }
-                m_RenderPass.AddResourceRead(versioned);
-            }
-            else
-            {
-                // We are discarding it but we still read it, so we add a dependency on version "0" of this resource
-                if ((flags & IBaseRenderGraphBuilder.AccessFlags.Read) != 0)
-                {
-                    m_RenderPass.AddResourceRead(m_Resources.GetZeroVersionedHandle(handle));
-                }
-            }
-
-            if ((flags & IBaseRenderGraphBuilder.AccessFlags.Write) != 0)
+            if (RenderGraph.enableValidityChecks)
             {
                 // Write by design generates a new version of the resource. However
                 // you could in theory write to v2 of the resource while there is already
@@ -162,6 +192,55 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
                     var name = m_Resources.GetRenderGraphResourceName(handle);
                     throw new InvalidOperationException($"Trying to write a resource twice in a pass. You can only write the same resource once within a pass (pass {m_RenderPass.name} resource{name}).");
                 }
+            }
+        }
+
+        private ResourceHandle UseResource(in ResourceHandle handle, AccessFlags flags, bool isTransient = false)
+        {
+            CheckResource(handle);
+
+            // If we are not discarding the resource, add a "read" dependency on the current version
+            // this "Read" is a bit of a misnomer it really means more like "Preserve existing content or read"
+            if ((flags & AccessFlags.Discard) == 0)
+            {
+                ResourceHandle versioned;
+                if (!handle.IsVersioned)
+                {
+                    versioned = m_Resources.GetLatestVersionHandle(handle);
+                }
+                else
+                {
+                    versioned = handle;
+                }
+
+                if (isTransient)
+                {
+                    m_RenderPass.AddTransientResource(versioned);
+                    return GetLatestVersionHandle(handle);
+                }
+
+                m_RenderPass.AddResourceRead(versioned);
+                m_Resources.IncrementReadCount(handle);
+
+                if ((flags & AccessFlags.Read) == 0)
+                {
+                    // Flag the resource as being an "implicit read" so that we can distinguish it from a user-specified read
+                    m_RenderPass.implicitReadsList.Add(versioned);
+                }
+            }
+            else
+            {
+                // We are discarding it but we still read it, so we add a dependency on version "0" of this resource
+                if ((flags & AccessFlags.Read) != 0)
+                {
+                    m_RenderPass.AddResourceRead(m_Resources.GetZeroVersionedHandle(handle));
+                    m_Resources.IncrementReadCount(handle);
+                }
+            }
+
+            if ((flags & AccessFlags.Write) != 0)
+            {
+                ValidateWriteTo(handle);
                 m_RenderPass.AddResourceWrite(m_Resources.GetNewVersionedHandle(handle));
                 m_Resources.IncrementWriteCount(handle);
             }
@@ -169,110 +248,216 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             return GetLatestVersionHandle(handle);
         }
 
-        public BufferHandle UseBuffer(in BufferHandle input, IBaseRenderGraphBuilder.AccessFlags flags)
+        public BufferHandle UseBuffer(in BufferHandle input, AccessFlags flags)
         {
-            if ((flags & IBaseRenderGraphBuilder.AccessFlags.GrabRead) != 0)
-            {
-                throw new ArgumentException("GrabRead is only valid on UseTexture");
-            }
-            return new BufferHandle(UseResource(input.handle, flags));
+            UseResource(input.handle, flags);
+            return input;
         }
 
-        // UseTexture and UseTextureFragment are currently forced to be mutually exclusive in the same pass
+        // UseTexture and SetRenderAttachment are currently forced to be mutually exclusive in the same pass
         // check this.
         // We currently ignore the version. In theory there might be some cases that are actually allowed with versioning
         // for ample UseTexture(myTexV1, read) UseFragment(myTexV2, ReadWrite) as they are different versions
         // but for now we don't allow any of that.
-        private void CheckNotUseFragment(TextureHandle tex, IBaseRenderGraphBuilder.AccessFlags flags)
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        private void CheckNotUseFragment(TextureHandle tex)
         {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if (flags == IBaseRenderGraphBuilder.AccessFlags.GrabRead)
+            if(RenderGraph.enableValidityChecks)
             {
-                return;
-            }
-
-
-            bool usedAsFragment = false;
-            usedAsFragment = (m_RenderPass.depthBuffer.handle.index == tex.handle.index);
-            if (!usedAsFragment)
-            {
-                for (int i = 0; i <= m_RenderPass.colorBufferMaxIndex; i++)
+                bool usedAsFragment = false;
+                usedAsFragment = (m_RenderPass.depthAccess.textureHandle.IsValid() && m_RenderPass.depthAccess.textureHandle.handle.index == tex.handle.index);
+                if (!usedAsFragment)
                 {
-                    if (m_RenderPass.depthBuffer.handle.index == tex.handle.index)
+                    for (int i = 0; i <= m_RenderPass.colorBufferMaxIndex; i++)
                     {
-                        usedAsFragment = true;
+                        if (m_RenderPass.colorBufferAccess[i].textureHandle.IsValid() && m_RenderPass.colorBufferAccess[i].textureHandle.handle.index == tex.handle.index)
+                        {
+                            usedAsFragment = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (usedAsFragment)
+                {
+                    var name = m_Resources.GetRenderGraphResourceName(tex.handle);
+                    throw new ArgumentException($"Trying to UseTexture on a texture that is already used through SetRenderAttachment. Consider updating your code. (pass {m_RenderPass.name} resource{name}).");
+                }
+            }
+        }
+
+        public void UseTexture(in TextureHandle input, AccessFlags flags)
+        {
+            CheckNotUseFragment(input);
+            UseResource(input.handle, flags);
+        }
+
+        public void UseGlobalTexture(int propertyId, AccessFlags flags)
+        {
+            var h = m_RenderGraph.GetGlobal(propertyId);
+            if (h.IsValid())
+            {
+                UseTexture(h, flags);
+            }
+            else
+            {
+                throw new ArgumentException($"Trying to read global texture property {propertyId} but no previous pass in the graph assigned a value to this global.");
+            }
+        }
+
+        public void UseAllGlobalTextures(bool enable)
+        {
+            m_RenderPass.useAllGlobalTextures = enable;
+        }
+
+        public void SetGlobalTextureAfterPass(in TextureHandle input, int propertyId)
+        {
+            m_RenderPass.setGlobalsList.Add(ValueTuple.Create(input, propertyId));
+        }
+
+        // Shared validation between SetRenderAttachment/SetRenderAttachmentDepth
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        private void CheckUseFragment(TextureHandle tex, bool isDepth)
+        {
+            if(RenderGraph.enableValidityChecks)
+            {
+                // We ignore the version as we don't allow mixing UseTexture/UseFragment between different versions
+                // even though it should theoretically work (and we might do so in the future) for now we're overly strict.
+                bool alreadyUsed = false;
+
+                //TODO: Check grab textures here and allow if it's grabbed. For now
+                // SetRenderAttachment()
+                // UseTexture(grab)
+                // will work but not the other way around
+                for (int i = 0; i < m_RenderPass.resourceReadLists[tex.handle.iType].Count; i++)
+                {
+                    if (m_RenderPass.resourceReadLists[tex.handle.iType][i].index == tex.handle.index)
+                    {
+                        alreadyUsed = true;
                         break;
                     }
                 }
-            }
 
-            if (usedAsFragment)
-            {
-                var name = m_Resources.GetRenderGraphResourceName(tex.handle);
-                throw new ArgumentException($"Trying to UseTexture on a texture that is already used through UseTextureFragment. Consider using a Grab access mode or update your code. (pass {m_RenderPass.name} resource{name}).");
-            }
-#endif
-        }
-
-        public TextureHandle UseTexture(in TextureHandle input, IBaseRenderGraphBuilder.AccessFlags flags)
-        {
-            CheckUseFragment(input, flags);
-            TextureHandle h = new TextureHandle();
-            h.handle = UseResource(input.handle, flags);
-            return h;
-        }
-
-        // Shared validation between UseTextureFragment/UseTextureFragmentDepth
-        private void CheckUseFragment(TextureHandle tex, IBaseRenderGraphBuilder.AccessFlags flags)
-        {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if ((flags & IBaseRenderGraphBuilder.AccessFlags.GrabRead) == IBaseRenderGraphBuilder.AccessFlags.GrabRead)
-            {
-                throw new ArgumentException("GrabRead is only valid on UseTexture");
-            }
-
-            // We ignore the version as we don't allow mixing UseTexture/UseFragment between different versions
-            // even though it should theoretically work (and we might do so in the future) for now we're overly strict.,
-            bool alreadyUsed = false;
-
-            for (int i = 0; i < m_RenderPass.resourceWriteLists[tex.handle.iType].Count; i++)
-            {
-                if (m_RenderPass.resourceWriteLists[tex.handle.iType][i].index == tex.handle.index)
+                for (int i = 0; i < m_RenderPass.resourceWriteLists[tex.handle.iType].Count; i++)
                 {
-                    alreadyUsed = true;
-                    break;
+                    if (m_RenderPass.resourceWriteLists[tex.handle.iType][i].index == tex.handle.index)
+                    {
+                        alreadyUsed = true;
+                        break;
+                    }
+                }
+
+                if (alreadyUsed)
+                {
+                    var name = m_Resources.GetRenderGraphResourceName(tex.handle);
+                    throw new InvalidOperationException($"Trying to SetRenderAttachment on a texture that is already used through UseTexture/SetRenderAttachment. Consider updating your code. (pass '{m_RenderPass.name}' resource '{name}').");
+                }
+
+                m_Resources.GetRenderTargetInfo(tex.handle, out var info);
+
+                // The old path is full of invalid uses that somehow work (or seemt to work) so we skip the tests if not using actual native renderpass
+                if (m_RenderGraph.nativeRenderPassesEnabled)
+                {
+                    if (isDepth)
+                    {
+                        if (!GraphicsFormatUtility.IsDepthFormat(info.format))
+                        {
+                            var name = m_Resources.GetRenderGraphResourceName(tex.handle);
+                            throw new InvalidOperationException($"Trying to SetRenderAttachmentDepth on a texture that has a color format {info.format}. Use a texture with a depth format instead. (pass '{m_RenderPass.name}' resource '{name}').");
+                        }
+                    }
+                    else
+                    {
+                        if (GraphicsFormatUtility.IsDepthFormat(info.format))
+                        {
+                            var name = m_Resources.GetRenderGraphResourceName(tex.handle);
+                            throw new InvalidOperationException($"Trying to SetRenderAttachment on a texture that has a depth format. Use a texture with a color format instead. (pass '{m_RenderPass.name}' resource '{name}').");
+                        }
+                    }
+                }
+
+                foreach (var globalTex in m_RenderPass.setGlobalsList)
+                {
+                    if (globalTex.Item1.handle.index == tex.handle.index)
+                    {
+                        throw new InvalidOperationException("Trying to SetRenderAttachment on a texture that is currently set on a global texture slot. Shaders might be using the texture using samplers. You should ensure textures are not set as globals when using them as fragment attachments.");
+                    }
                 }
             }
-
-            if (alreadyUsed)
-            {
-                var name = m_Resources.GetRenderGraphResourceName(tex.handle);
-                throw new InvalidOperationException($"Trying to UseTextureFragment on a texture that is already used through UseTexture/UseTextureFragment. Consider using a Grab access mode or update your code. (pass {m_RenderPass.name} resource{name}).");
-            }
-#endif
         }
 
-        public TextureHandle UseTextureFragment(TextureHandle tex, int index, IBaseRenderGraphBuilder.AccessFlags flags)
+        public void SetRenderAttachment(TextureHandle tex, int index, AccessFlags flags, int mipLevel, int depthSlice)
         {
-            CheckUseFragment(tex, flags);
-            var result = UseResource(tex.handle, flags);
+            CheckUseFragment(tex, false);
+            ResourceHandle result = UseResource(tex.handle, flags);
             // Note the version for the attachments is a bit arbitrary so we just use the latest for now
             // it doesn't really matter as it's really the Read/Write lists that determine that
             // This is just to keep track of the handle->mrt index mapping
-            var th = new TextureHandle(result);
-            m_RenderPass.SetColorBufferRaw(th, index);
-            return th;
+            var th = new TextureHandle();
+            th.handle = result;
+            m_RenderPass.SetColorBufferRaw(th, index, flags, mipLevel, depthSlice);
         }
 
-        public TextureHandle UseTextureFragmentDepth(TextureHandle tex, IBaseRenderGraphBuilder.AccessFlags flags)
+        public void SetInputAttachment(TextureHandle tex, int index, AccessFlags flags, int mipLevel, int depthSlice)
         {
-            CheckUseFragment(tex, flags);
-            var result = UseResource(tex.handle, flags);
+            CheckFrameBufferFetchEmulationIsSupported(tex);
+
+            CheckUseFragment(tex, false);
+            ResourceHandle result = UseResource(tex.handle, flags);
+            // Note the version for the attachments is a bit arbitrary so we just use the latest for now
+            // it doesn't really matter as it's really the Read/Write lists that determine that
+            // This is just to keep track of the handle->mrt index mapping
+            var th = new TextureHandle();
+            th.handle = result;
+            m_RenderPass.SetFragmentInputRaw(th, index, flags, mipLevel, depthSlice);
+        }
+
+        public void SetRenderAttachmentDepth(TextureHandle tex, AccessFlags flags, int mipLevel, int depthSlice)
+        {
+            CheckUseFragment(tex, true);
+            ResourceHandle result = UseResource(tex.handle, flags);
             // Note the version for the attachments is a bit arbitrary so we just use the latest for now
             // it doesn't really matter as it's really the Read/Write lists that determine that
             // This is just to keep track to bind this handle as a depth texture.
-            m_RenderPass.SetDepthBufferRaw(new TextureHandle(GetLatestVersionHandle(tex.handle)));
-            return new TextureHandle(result);
+            var th = new TextureHandle();
+            th.handle = result;
+            m_RenderPass.SetDepthBufferRaw(th, flags, mipLevel, depthSlice);
+        }
+
+        public TextureHandle SetRandomAccessAttachment(TextureHandle input, int index, AccessFlags flags = AccessFlags.Read)
+        {
+            CheckNotUseFragment(input);
+            ResourceHandle result = UseResource(input.handle, flags);
+
+            // Note the version for the attachments is a bit arbitrary so we just use the latest for now
+            // it doesn't really matter as it's really the Read/Write lists that determine that
+            // This is just to keep track of the resources to bind before execution
+            var th = new TextureHandle();
+            th.handle = result;
+            m_RenderPass.SetRandomWriteResourceRaw(th.handle, index, false, flags);
+            return input;
+        }
+
+        public BufferHandle UseBufferRandomAccess(BufferHandle input, int index, AccessFlags flags = AccessFlags.Read)
+        {
+            var h = UseBuffer(input, flags);
+
+            // Note the version for the attachments is a bit arbitrary so we just use the latest for now
+            // it doesn't really matter as it's really the Read/Write lists that determine that
+            // This is just to keep track of the resources to bind before execution
+            m_RenderPass.SetRandomWriteResourceRaw(h.handle, index, true, flags);
+            return input;
+        }
+
+        public BufferHandle UseBufferRandomAccess(BufferHandle input, int index, bool preserveCounterValue, AccessFlags flags = AccessFlags.Read)
+        {
+            var h = UseBuffer(input, flags);
+
+            // Note the version for the attachments is a bit arbitrary so we just use the latest for now
+            // it doesn't really matter as it's really the Read/Write lists that determine that
+            // This is just to keep track of the resources to bind before execution
+            m_RenderPass.SetRandomWriteResourceRaw(h.handle, index, preserveCounterValue, flags);
+            return input;
         }
 
         public void SetRenderFunc<PassData>(BaseRenderFunc<PassData, ComputeGraphContext> renderFunc) where PassData : class, new()
@@ -285,9 +470,9 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             ((RasterRenderGraphPass<PassData>)m_RenderPass).renderFunc = renderFunc;
         }
 
-        public void SetRenderFunc<PassData>(BaseRenderFunc<PassData, LowLevelGraphContext> renderFunc) where PassData : class, new()
+        public void SetRenderFunc<PassData>(BaseRenderFunc<PassData, UnsafeGraphContext> renderFunc) where PassData : class, new()
         {
-            ((LowLevelRenderGraphPass<PassData>)m_RenderPass).renderFunc = renderFunc;
+            ((UnsafeRenderGraphPass<PassData>)m_RenderPass).renderFunc = renderFunc;
         }
 
         public void UseRendererList(in RendererListHandle input)
@@ -306,28 +491,49 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             return m_Resources.GetLatestVersionHandle(handle);
         }
 
-        void CheckResource(in ResourceHandle res, bool dontCheckTransientReadWrite = false)
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        void CheckResource(in ResourceHandle res, bool checkTransientReadWrite = false)
         {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if (res.IsValid())
+            if(RenderGraph.enableValidityChecks)
             {
-                int transientIndex = m_Resources.GetRenderGraphResourceTransientIndex(res);
-                // We have dontCheckTransientReadWrite here because users may want to use UseColorBuffer/UseDepthBuffer API to benefit from render target auto binding. In this case we don't want to raise the error.
-                if (transientIndex == m_RenderPass.index && !dontCheckTransientReadWrite)
+                if (res.IsValid())
                 {
-                    Debug.LogError($"Trying to read or write a transient resource at pass {m_RenderPass.name}.Transient resource are always assumed to be both read and written.");
+                    int transientIndex = m_Resources.GetRenderGraphResourceTransientIndex(res);
+                    // We have dontCheckTransientReadWrite here because users may want to use UseColorBuffer/UseDepthBuffer API to benefit from render target auto binding. In this case we don't want to raise the error.
+                    if (transientIndex == m_RenderPass.index && checkTransientReadWrite)
+                    {
+                        Debug.LogError($"Trying to read or write a transient resource at pass {m_RenderPass.name}.Transient resource are always assumed to be both read and written.");
+                    }
+
+                    if (transientIndex != -1 && transientIndex != m_RenderPass.index)
+                    {
+                        throw new ArgumentException($"Trying to use a transient {res.type} (pass index {transientIndex}) in a different pass (pass index {m_RenderPass.index}).");
+                    }
+                }
+                else
+                {
+                    throw new ArgumentException($"Trying to use an invalid resource (pass {m_RenderPass.name}).");
+                }
+            }
+        }
+
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        void CheckFrameBufferFetchEmulationIsSupported(in TextureHandle tex)
+        {
+            if (enableValidityChecks)
+            {
+                if (!Util.RenderGraphUtils.IsFramebufferFetchEmulationSupportedOnCurrentPlatform())
+                {
+                    throw new InvalidOperationException($"This API is not supported on the current platform: {SystemInfo.graphicsDeviceType}");
                 }
 
-                if (transientIndex != -1 && transientIndex != m_RenderPass.index)
+                if (!Util.RenderGraphUtils.IsFramebufferFetchEmulationMSAASupportedOnCurrentPlatform())
                 {
-                    throw new ArgumentException($"Trying to use a transient texture (pass index {transientIndex}) in a different pass (pass index {m_RenderPass.index}).");
+                    var sourceInfo = m_RenderGraph.GetRenderTargetInfo(tex);
+                    if (sourceInfo.bindMS)
+                        throw new InvalidOperationException($"This API is not supported with MSAA attachments on the current platform: {SystemInfo.graphicsDeviceType}");
                 }
             }
-            else
-            {
-                throw new ArgumentException($"Trying to use an invalid resource (pass {m_RenderPass.name}).");
-            }
-#endif
         }
     }
 }

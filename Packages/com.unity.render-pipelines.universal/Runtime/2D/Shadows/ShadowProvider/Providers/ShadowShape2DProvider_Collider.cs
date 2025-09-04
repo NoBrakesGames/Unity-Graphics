@@ -90,7 +90,8 @@ namespace UnityEngine.Rendering.Universal
                 m_ShadowShapeMinMaxBounds = new List<MinMaxBounds>();
 
             // Fetch collider space.
-            var colliderSpace = collider.localToWorldMatrix;
+            var attachedBody = collider.attachedRigidbody;
+            var colliderSpace = attachedBody ? attachedBody.transform.localToWorldMatrix : Matrix4x4.identity;
 
             // If the shape hash has changed, grab a new potential visible geometry group.
             var shapeHash = collider.GetShapeHash();
@@ -135,7 +136,7 @@ namespace UnityEngine.Rendering.Universal
             }
             else
             {
-                // If the collider space nor the culling bounds have not changed then finsih.
+                // If the collider space nor the culling bounds have not changed then finish.
                 if (colliderSpace.Equals(m_LastColliderSpace) &&
                     CompareApproximately(ref m_LastWorldCullingBounds, ref worldCullingBounds))
                 {
@@ -344,16 +345,16 @@ namespace UnityEngine.Rendering.Universal
         //============================================================================================================
         //                                                  Public
         //============================================================================================================
-        public override bool IsShapeSource(in Component sourceComponent) { return sourceComponent is Collider2D; }
+        public override bool IsShapeSource(Component sourceComponent) { return sourceComponent is Collider2D; }
 
-        public override void OnPersistantDataCreated(in Component sourceComponent, ShadowShape2D persistantShadowShapeData)
+        public override void OnPersistantDataCreated(Component sourceComponent, ShadowShape2D persistantShadowShapeData)
         {
             m_ShadowStateHash = default;
             m_ShadowCombinedShapeMinMaxBounds = default;
             m_LastColliderSpace = Matrix4x4.identity;
         }
 
-        public override void OnBeforeRender(in Component sourceComponent, in Bounds worldCullingBounds, ShadowShape2D persistantShadowShape)
+        public override void OnBeforeRender(Component sourceComponent, Bounds worldCullingBounds, ShadowShape2D persistantShadowShape)
         {
             Collider2D collider = (Collider2D)sourceComponent;
             CalculateShadows(collider, persistantShadowShape, worldCullingBounds);

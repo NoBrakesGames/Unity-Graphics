@@ -1,23 +1,15 @@
 using System.Collections.Generic;
 using System.Linq;
-using UnityEditor.VFX.Block;
+
 using UnityEngine;
-using UnityEngine.VFX;
 
 namespace UnityEditor.VFX
 {
-    [VFXInfo]
+    [VFXHelpURL("Context-OutputParticleMesh")]
+    [VFXInfo(name = "Output Particle|Unlit|Mesh", category = "#2Output Basic")]
     class VFXMeshOutput : VFXShaderGraphParticleOutput, IVFXMultiMeshOutput
     {
-        public override string name
-        {
-            get
-            {
-                if (shaderName != string.Empty)
-                    return $"Output Particle {shaderName} Mesh";
-                return "Output Particle Mesh";
-            }
-        }
+        public override string name => "Output Particle".AppendLabel("Unlit", false) + "\nMesh";
         public override string codeGeneratorTemplate { get { return RenderPipeTemplate("VFXParticleMeshes"); } }
         public override VFXTaskType taskType { get { return VFXTaskType.ParticleMeshOutput; } }
         public override bool supportsUV { get { return GetOrRefreshShaderGraphObject() == null; } }
@@ -37,47 +29,19 @@ namespace UnityEditor.VFX
                 VFXOutputUpdate.Features features = base.outputUpdateFeatures;
                 if (!HasStrips(true)) // TODO make it compatible with strips
                 {
-                    if (MeshCount > 1)
+                    if (meshCount > 1)
                         features |= VFXOutputUpdate.Features.MultiMesh;
                     if (lod)
                         features |= VFXOutputUpdate.Features.LOD;
-                    if (HasSorting() && VFXOutputUpdate.HasFeature(features, VFXOutputUpdate.Features.IndirectDraw) || needsOwnSort)
-                    {
-                        if (VFXSortingUtility.IsPerCamera(sortMode))
-                            features |= VFXOutputUpdate.Features.CameraSort;
-                        else
-                            features |= VFXOutputUpdate.Features.Sort;
-                    }
+                }
+                if (HasSorting() && VFXOutputUpdate.HasFeature(features, VFXOutputUpdate.Features.IndirectDraw) || needsOwnSort)
+                {
+                    if (VFXSortingUtility.IsPerCamera(sortMode))
+                        features |= VFXOutputUpdate.Features.CameraSort;
+                    else
+                        features |= VFXOutputUpdate.Features.Sort;
                 }
                 return features;
-            }
-        }
-
-        public override IEnumerable<VFXAttributeInfo> attributes
-        {
-            get
-            {
-                yield return new VFXAttributeInfo(VFXAttribute.Position, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.Color, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.Alpha, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.Alive, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AxisX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AxisY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AxisZ, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AngleX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AngleY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AngleZ, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.PivotX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.PivotY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.PivotZ, VFXAttributeMode.Read);
-
-                yield return new VFXAttributeInfo(VFXAttribute.Size, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.ScaleX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.ScaleY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.ScaleZ, VFXAttributeMode.Read);
-
-                if (usesFlipbook)
-                    yield return new VFXAttributeInfo(VFXAttribute.TexIndex, VFXAttributeMode.Read);
             }
         }
 
@@ -96,7 +60,7 @@ namespace UnityEditor.VFX
                 foreach (var property in base.inputProperties)
                     yield return property;
 
-                foreach (var property in VFXMultiMeshHelper.GetInputProperties(MeshCount, outputUpdateFeatures))
+                foreach (var property in VFXMultiMeshHelper.GetInputProperties(meshCount, outputUpdateFeatures))
                     yield return property;
 
                 if (GetOrRefreshShaderGraphObject() == null)
@@ -152,7 +116,7 @@ namespace UnityEditor.VFX
             {
                 case VFXDeviceTarget.CPU:
                 {
-                    foreach (var name in VFXMultiMeshHelper.GetCPUExpressionNames(MeshCount))
+                    foreach (var name in VFXMultiMeshHelper.GetCPUExpressionNames(meshCount))
                         mapper.AddExpression(inputSlots.First(s => s.name == name).GetExpression(), name, -1);
                     break;
                 }
@@ -163,14 +127,36 @@ namespace UnityEditor.VFX
             return mapper;
         }
 
-        internal override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal override void GenerateErrors(VFXErrorReporter report)
         {
-            base.GenerateErrors(manager);
+            base.GenerateErrors(report);
             var dataParticle = GetData() as VFXDataParticle;
             if (dataParticle != null && dataParticle.boundsMode != BoundsSettingMode.Manual)
-                manager.RegisterError("WarningBoundsComputation", VFXErrorType.Warning, $"Bounds computation have no sense of what the scale of the output mesh is," +
+                report.RegisterError("WarningBoundsComputation", VFXErrorType.Warning, $"Bounds computation have no sense of what the scale of the output mesh is," +
                     $" so the resulted computed bounds can be too small or big" +
-                    $" Please use padding to mitigate this discrepancy.");
+                    $" Please use padding to mitigate this discrepancy.", this);
         }
+
+        public override IEnumerable<VFXExpression> instancingSplitCPUExpressions
+        {
+            get
+            {
+                foreach (var exp in base.instancingSplitCPUExpressions)
+                    yield return exp;
+
+                // Only single mesh, multi-mesh will be patched later
+                if (meshCount == 1)
+                {
+                    foreach (var name in VFXMultiMeshHelper.GetCPUExpressionNames(1))
+                    {
+                        var exp = inputSlots.First(s => s.name == name).GetExpression();
+                        if (exp != null && !exp.IsAny(VFXExpression.Flags.Constant))
+                            yield return exp;
+                    }
+                }
+            }
+        }
+
+
     }
 }

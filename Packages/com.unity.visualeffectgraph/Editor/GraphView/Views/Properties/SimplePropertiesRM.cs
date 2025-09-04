@@ -1,47 +1,103 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
+
 using UnityEngine;
 using UnityEngine.UIElements;
-using EnumField = UnityEditor.VFX.UIElements.VFXEnumField;
 
 namespace UnityEditor.VFX.UI
 {
-    class EnumPropertyRM : SimplePropertyRM<int>
+    sealed class EnumPropertyRM : PropertyRM<Enum>
     {
+        private readonly EnumField m_EnumField;
+
         public EnumPropertyRM(IPropertyRMProvider controller, float labelWidth) : base(controller, labelWidth)
         {
+            m_EnumField = new EnumField(ObjectNames.NicifyVariableName(m_Provider.name), (Enum)m_Provider.value);
+            m_EnumField.RegisterCallback<ChangeEvent<Enum>>(OnValueChange);
+            Add(m_EnumField);
+            SetLabelWidth(labelWidth);
         }
 
-        public override float GetPreferredControlWidth()
+        private void OnValueChange(ChangeEvent<Enum> evt)
         {
-            int min = 120;
-            foreach (var str in Enum.GetNames(provider.portType))
+            provider.value = evt.newValue;
+        }
+
+        public override float GetPreferredControlWidth() => 120;
+        protected override void UpdateEnabled() => m_EnumField.SetEnabled(propertyEnabled);
+        protected override void UpdateIndeterminate() => m_EnumField.showMixedValue = indeterminate;
+        public override void UpdateGUI(bool force) => m_EnumField.SetValueWithoutNotify(m_Value);
+        public override bool showsEverything => true;
+    }
+
+    [Serializable]
+    struct MultipleValuesChoice<T> where T: class
+    {
+        [SerializeField]
+        private T selection;
+        [SerializeField]
+        private int selectedIndex;
+
+        public List<T> values { get; set; }
+
+        public void SetSelection(T value)
+        {
+            selectedIndex = values?.IndexOf(value) ?? -1;
+
+            if (selectedIndex >= 0)
             {
-                Vector2 size = m_Field.Q<TextElement>().MeasureTextSize(str, 0, VisualElement.MeasureMode.Undefined, 0, VisualElement.MeasureMode.Undefined);
-
-                size.x += 60;
-                if (min < size.x)
-                    min = (int)size.x;
+                selection = value;
             }
-            if (min > 200)
-                min = 200;
-
-
-            return min;
         }
 
-        public override ValueControl<int> CreateField()
+        public T GetSelection()
         {
-            var field = new EnumField(m_Label, m_Provider.portType);
-            field.OnDisplayMenu = OnDisplayMenu;
+            return selection;
+        }
+    }
 
-            return field;
+    class ListPropertyRM : PropertyRM<MultipleValuesChoice<string>>
+    {
+        private DropdownField m_Field;
+        public ListPropertyRM(IPropertyRMProvider controller, float labelWidth) : base(controller, labelWidth)
+        {
+            var choices = (MultipleValuesChoice<string>)m_Provider.value;
+            m_Field = new DropdownField(ObjectNames.NicifyVariableName(controller.name), choices.values ?? new List<string>(), 0, FormatSelectedValueCallback);
+            m_Field.RegisterValueChangedCallback(OnValueChanged);
+            Add(m_Field);
         }
 
-        void OnDisplayMenu(EnumField field)
+        private void OnValueChanged(ChangeEvent<string> evt)
         {
-            field.filteredOutValues = provider.filteredOutEnumerators;
+            m_Value.SetSelection(evt.newValue);
+            NotifyValueChanged();
+        }
+
+        public override float GetPreferredControlWidth() => 120;
+        protected override void UpdateEnabled() => m_Field.SetEnabled(propertyEnabled);
+        protected override void UpdateIndeterminate() => m_Field.showMixedValue = indeterminate;
+
+        public override void UpdateGUI(bool force)
+        {
+            if (m_Value.values?.Count > 0)
+            {
+                m_Field.choices = m_Value.values;
+                m_Field.SetEnabled(true);
+                m_Field.value = m_Value.GetSelection();
+            }
+            else
+            {
+                m_Field.value = null;
+                m_Field.SetEnabled(false);
+            }
+        }
+
+        public override bool showsEverything => false;
+
+        private string FormatSelectedValueCallback(string selection)
+        {
+
+            return selection;
         }
     }
 
@@ -49,27 +105,20 @@ namespace UnityEditor.VFX.UI
     {
         public Matrix4x4PropertyRM(IPropertyRMProvider controller, float labelWidth) : base(controller, labelWidth)
         {
-            m_FieldParent.style.flexDirection = FlexDirection.Row;
-
-            fieldControl.onValueDragFinished = () => ValueDragFinished();
-            fieldControl.onValueDragStarted = () => ValueDragStarted();
+            fieldControl.onValueDragFinished += ValueDragFinished;
+            fieldControl.onValueDragStarted += ValueDragStarted;
         }
 
-        public override float GetPreferredControlWidth()
+        public override float GetPreferredControlWidth() => 260;
+
+        protected override void UpdateIndeterminate()
         {
-            return 260;
+            ((VFXMatrix4x4Field)field).indeterminate = indeterminate;
         }
 
-        protected void ValueDragFinished()
+        public override INotifyValueChanged<Matrix4x4> CreateField()
         {
-            m_Provider.EndLiveModification();
-            hasChangeDelayed = false;
-            NotifyValueChanged();
-        }
-
-        protected void ValueDragStarted()
-        {
-            m_Provider.StartLiveModification();
+            return new VFXMatrix4x4Field(ObjectNames.NicifyVariableName(provider.name));
         }
     }
 
@@ -79,9 +128,16 @@ namespace UnityEditor.VFX.UI
         {
         }
 
-        public override float GetPreferredControlWidth()
+        public override float GetPreferredControlWidth() => 100;
+
+        protected override void UpdateIndeterminate()
         {
-            return 100;
+            ((VFXFlipBookField)field).indeterminate = indeterminate;
+        }
+
+        public override INotifyValueChanged<FlipBook> CreateField()
+        {
+            return new VFXFlipBookField(ObjectNames.NicifyVariableName(provider.name));
         }
     }
 }

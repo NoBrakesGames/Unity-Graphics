@@ -9,18 +9,27 @@ namespace UnityEditor.VFX
 {
     class InlineTypeProvider : VariantProvider
     {
-        protected sealed override Dictionary<string, object[]> variants { get; } = new()
-        {
-            { "m_Type", GetValidTypes().Select(o => new SerializableType(o)).ToArray() }
-        };
-
         private static IEnumerable<Type> GetValidTypes()
         {
             return VFXLibrary.GetSlotsType().Where(x => VFXLibrary.GetAttributeFromSlotType(x)?.usages.HasFlag(VFXTypeAttribute.Usage.ExcludeFromProperty) != true);
         }
+
+        public override IEnumerable<Variant> GetVariants()
+        {
+            foreach (var validType in GetValidTypes())
+            {
+                yield return new Variant(
+                    validType.UserFriendlyName(),
+                    "Inline",
+                    typeof(VFXInlineOperator),
+                    new [] { new KeyValuePair<string, object>("m_Type", new SerializableType(validType)) }
+                );
+
+            }
+        }
     }
 
-    [VFXInfo(category = "Inline", variantProvider = typeof(InlineTypeProvider))]
+    [VFXInfo(variantProvider = typeof(InlineTypeProvider))]
     class VFXInlineOperator : VFXOperator
     {
         [SerializeField, VFXSetting(VFXSettingAttribute.VisibleFlags.None)]
@@ -64,17 +73,17 @@ namespace UnityEditor.VFX
             return inputExpression;
         }
 
-        internal override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal override void GenerateErrors(VFXErrorReporter report)
         {
-            base.GenerateErrors(manager);
+            base.GenerateErrors(report);
 
             var type = this.type;
             if (Deprecated.s_Types.Contains(type))
             {
-                manager.RegisterError(
+                report.RegisterError(
                     "DeprecatedTypeInlineOperator",
                     VFXErrorType.Warning,
-                    string.Format("The structure of the '{0}' has changed, the position property has been moved to a transform type. You should consider to recreate this operator.", type));
+                    string.Format("The structure of the '{0}' has changed, the position property has been moved to a transform type. You should consider to recreate this operator.", type), this);
             }
         }
 

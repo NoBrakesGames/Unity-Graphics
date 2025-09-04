@@ -6,34 +6,41 @@ using UnityEngine.VFX;
 
 namespace UnityEditor.VFX
 {
-    class DynamicBuiltInVariant : VariantProvider
+    class DynamicBuiltInVariantProvider : VariantProvider
     {
-        protected sealed override Dictionary<string, object[]> variants { get; } = BuildVariants();
-
-        private static Dictionary<string, object[]> BuildVariants()
+        private static readonly Dictionary<string, string[]> s_BuiltInParameterCategoryMap = new Dictionary<string, string[]>
         {
-            var builtInFlag =
-                Enum.GetValues(typeof(VFXDynamicBuiltInParameter.BuiltInFlag))
-                    .Cast<VFXDynamicBuiltInParameter.BuiltInFlag>()
-                    .Where(o => o != VFXDynamicBuiltInParameter.BuiltInFlag.None)
-                    .Concat(
-                        new[]
-                        {
-                            VFXDynamicBuiltInParameter.s_allVFXTime,
-                            VFXDynamicBuiltInParameter.s_allGameTime
-                        });
+            { "Time", new[] { "time", "rate" } },
+            { "Math/Geometry", new[] { "world" } },
+        };
 
-            return new Dictionary<string, object[]>
+        public override IEnumerable<Variant> GetVariants()
+        {
+            var builtInFlags = Enum.GetValues(typeof(VFXDynamicBuiltInParameter.BuiltInFlag))
+                .Cast<VFXDynamicBuiltInParameter.BuiltInFlag>()
+                .Where(x => x != VFXDynamicBuiltInParameter.BuiltInFlag.None)
+                .Concat(
+                    new[]
+                    {
+                        VFXDynamicBuiltInParameter.s_allVFXTime,
+                        VFXDynamicBuiltInParameter.s_allGameTime
+                    });
+
+            foreach (var flag in builtInFlags)
             {
-                {
-                    "m_BuiltInParameters",
-                    builtInFlag.Cast<object>().ToArray()
-                }
-            };
+                var name = flag.ToString();
+                var category = s_BuiltInParameterCategoryMap.FirstOrDefault(x => x.Value.Any(y => name.Contains(y, StringComparison.OrdinalIgnoreCase))).Key;
+
+                yield return new Variant(
+                    VFXDynamicBuiltInParameter.BuildName(flag),
+                    string.IsNullOrEmpty(category) ? "Utility" : category,
+                    typeof(VFXDynamicBuiltInParameter),
+                    new[] {new KeyValuePair<string, object>("m_BuiltInParameters", flag)});
+            }
         }
     }
 
-    [VFXInfo(category = "BuiltIn", variantProvider = typeof(DynamicBuiltInVariant))]
+    [VFXInfo(variantProvider = typeof(DynamicBuiltInVariantProvider))]
     class VFXDynamicBuiltInParameter : VFXOperator
     {
         [Flags]
@@ -158,23 +165,31 @@ namespace UnityEditor.VFX
             }
         }
 
-        override public string name
+        public override string name => BuildName(m_BuiltInParameters);
+
+        public static string BuildName(BuiltInFlag flag)
         {
-            get
+            if (flag == BuiltInFlag.None)
+                return "Built-In Properties (None)";
+            if (SplitFlags(flag).ToArray() is { Length: 1 } flags)
+                return s_BuiltInInfo[flags[0]].operatorName;
+            if ((flag & ~s_allVFXTime) == 0)
+                return "VFX Time";
+            if ((flag & ~s_allGameTime) == 0)
+                return "Game Time";
+
+            return "Built-In Properties";
+        }
+
+        private static IEnumerable<BuiltInFlag> SplitFlags(BuiltInFlag flags)
+        {
+            foreach (BuiltInFlag flag in Enum.GetValues(typeof(BuiltInFlag)))
             {
-                if (m_BuiltInParameters == BuiltInFlag.None)
-                    return "Built-In Properties (None)";
+                if (flag == BuiltInFlag.None)
+                    continue;
 
-                if (builtInParameterEnumerable.Count() == 1)
-                    return s_BuiltInInfo[builtInParameterEnumerable.First()].operatorName;
-
-                if ((m_BuiltInParameters & ~s_allVFXTime) == 0) //This is only a set of VFX Time
-                    return "VFX Time";
-
-                if ((m_BuiltInParameters & ~s_allGameTime) == 0) //This is only a set of Game Time
-                    return "Game Time";
-
-                return "Built-In Properties";
+                if ((flags & flag) != 0)
+                    yield return flag;
             }
         }
 

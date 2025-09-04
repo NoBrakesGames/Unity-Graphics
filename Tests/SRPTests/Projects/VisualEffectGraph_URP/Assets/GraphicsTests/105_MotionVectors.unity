@@ -406,7 +406,7 @@ MonoBehaviour:
   m_TaaSettings:
     quality: 3
     frameInfluence: 0.1
-    jitterScale: 1
+    jitterScale: 0
     mipBias: 0
     varianceClampScale: 0.9
     contrastAdaptiveSharpening: 0
@@ -442,11 +442,12 @@ MonoBehaviour:
   ImageComparisonSettings:
     TargetWidth: 1024
     TargetHeight: 1024
+    TargetMSAASamples: 1
     PerPixelCorrectnessThreshold: 0
     PerPixelGammaThreshold: 0.003921569
     PerPixelAlphaThreshold: 0.003921569
     RMSEThreshold: 0
-    AverageCorrectnessThreshold: 0.005
+    AverageCorrectnessThreshold: 0.0005
     IncorrectPixelsThreshold: 0.0000038146973
     UseHDR: 0
     UseBackBuffer: 0
@@ -559,7 +560,7 @@ Transform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &1505558168
 Animator:
-  serializedVersion: 6
+  serializedVersion: 7
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -578,6 +579,7 @@ Animator:
   m_HasTransformHierarchy: 1
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0
 --- !u!1 &1587677062
 GameObject:
   m_ObjectHideFlags: 0

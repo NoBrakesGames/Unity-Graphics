@@ -10,12 +10,11 @@ using UnityEngine.Rendering.HighDefinition;
 namespace UnityEditor.Rendering.HighDefinition
 {
     [SRPFilter(typeof(HDRenderPipeline))]
-    [Title("Utility", "High Definition Render Pipeline", "Water", "ComputeVertexData_Water")]
     class ComputeVertexData_Water : AbstractMaterialNode, IGeneratesBodyCode, IMayRequirePosition, IMayRequireNormal
     {
         public ComputeVertexData_Water()
         {
-            name = "Compute Water Vertex Data";
+            name = "Compute Water Vertex Data (Legacy)";
             UpdateNodeAfterDeserialization();
         }
 
@@ -45,11 +44,11 @@ namespace UnityEditor.Rendering.HighDefinition
         {
             if (generationMode == GenerationMode.ForReals)
             {
-                sb.AppendLine("$precision3 {0} = GetWaterVertexPosition(IN.WorldSpacePosition);",
+                sb.AppendLine("$precision3 {0} = IN.ObjectSpacePosition;",
                   GetVariableNameForSlot(kPositionOSOutputSlotId),
                   CoordinateSpace.Object.ToVariableName(InterpolatorType.Position));
 
-                sb.AppendLine("$precision3 {0} = GetWaterVertexNormal(IN.WorldSpaceNormal);",
+                sb.AppendLine("$precision3 {0} = IN.ObjectSpaceNormal;",
                   GetVariableNameForSlot(kNormalOSOutputSlotId),
                   CoordinateSpace.Object.ToVariableName(InterpolatorType.Position));
             }
@@ -71,6 +70,11 @@ namespace UnityEditor.Rendering.HighDefinition
         public NeededCoordinateSpace RequiresNormal(ShaderStageCapability stageCapability = ShaderStageCapability.Vertex)
         {
             return NeededCoordinateSpace.World;
+        }
+
+        public override void ValidateNode()
+        {
+            owner.messageManager?.AddOrAppendError(owner, objectId, new ShaderMessage("This node is deprecated and will be released in a future version. Please refer to the Water Samples for the new version.", ShaderCompilerMessageSeverity.Warning));
         }
     }
 }

@@ -4,7 +4,7 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -12,12 +12,11 @@ namespace UnityEngine.Rendering.HighDefinition
     {
         internal struct HDShadowAtlasInitParameters
         {
-            internal HDRenderPipelineRuntimeResources renderPipelineResources;
+            internal HDRenderPipeline renderPipeline;
             internal RenderGraph renderGraph;
             internal bool useSharedTexture;
             internal int width;
             internal int height;
-            internal int atlasShaderID;
             internal int maxShadowRequests;
             internal string name;
             internal bool isShadowCache;
@@ -30,15 +29,14 @@ namespace UnityEngine.Rendering.HighDefinition
             internal RenderTextureFormat format;
             internal ConstantBuffer<ShaderVariablesGlobal> cb;
 
-            internal HDShadowAtlasInitParameters(HDRenderPipelineRuntimeResources renderPipelineResources, RenderGraph renderGraph, bool useSharedTexture, int width, int height, int atlasShaderID,
+            internal HDShadowAtlasInitParameters(HDRenderPipeline renderPipeline, RenderGraph renderGraph, bool useSharedTexture, int width, int height,
                                                  Material clearMaterial, int maxShadowRequests, HDShadowInitParameters initParams, ConstantBuffer<ShaderVariablesGlobal> cb)
             {
-                this.renderPipelineResources = renderPipelineResources;
+                this.renderPipeline = renderPipeline;
                 this.renderGraph = renderGraph;
                 this.useSharedTexture = useSharedTexture;
                 this.width = width;
                 this.height = height;
-                this.atlasShaderID = atlasShaderID;
                 this.clearMaterial = clearMaterial;
                 this.maxShadowRequests = maxShadowRequests;
                 this.initParams = initParams;
@@ -79,8 +77,7 @@ namespace UnityEngine.Rendering.HighDefinition
         string m_MomentCopyName;
         string m_IntermediateSummedAreaName;
         string m_SummedAreaName;
-        int m_AtlasShaderID;
-        HDRenderPipelineRuntimeResources m_RenderPipelineResources;
+        HDRenderPipeline m_RenderPipeline;
 
         // Moment shadow data
         BlurAlgorithm m_BlurAlgorithm;
@@ -126,10 +123,9 @@ namespace UnityEngine.Rendering.HighDefinition
             m_MomentCopyName = m_Name + "MomentCopy";
             m_IntermediateSummedAreaName = m_Name + "IntermediateSummedArea";
             m_SummedAreaName = m_Name + "SummedAreaFinal";
-            m_AtlasShaderID = initParams.atlasShaderID;
             m_ClearMaterial = initParams.clearMaterial;
             m_BlurAlgorithm = initParams.blurAlgorithm;
-            m_RenderPipelineResources = initParams.renderPipelineResources;
+            m_RenderPipeline = initParams.renderPipeline;
             m_IsACacheForShadows = initParams.isShadowCache;
 
             m_GlobalConstantBuffer = initParams.cb;
@@ -145,13 +141,13 @@ namespace UnityEngine.Rendering.HighDefinition
         TextureDesc GetMomentAtlasDesc(string name)
         {
             return new TextureDesc(width / 2, height / 2)
-            { colorFormat = GraphicsFormat.R32G32_SFloat, useMipMap = true, autoGenerateMips = false, name = name, enableRandomWrite = true };
+            { format = GraphicsFormat.R32G32_SFloat, useMipMap = true, autoGenerateMips = false, name = name, enableRandomWrite = true };
         }
 
         TextureDesc GetImprovedMomentAtlasDesc()
         {
             return new TextureDesc(width, height)
-            { colorFormat = GraphicsFormat.R32G32B32A32_SFloat, name = m_MomentName, enableRandomWrite = true, clearColor = Color.black };
+            { format = GraphicsFormat.R32G32B32A32_SFloat, name = m_MomentName, enableRandomWrite = true, clearColor = Color.black };
         }
 
         internal TextureDesc GetAtlasDesc()
@@ -279,38 +275,129 @@ namespace UnityEngine.Rendering.HighDefinition
             new Vector4(0.06297021f, 0.0f, 0.0f, 0.0f),
         };
 
-        class RenderShadowMapsPassData
+        class RenderShadowMapsCommonPassData
         {
             public TextureHandle atlasTexture;
-
             public ShaderVariablesGlobal globalCBData;
             public ConstantBuffer<ShaderVariablesGlobal> globalCB;
+            public NativeList<HDShadowRequestHandle> shadowRequests;
+            public bool isRenderingOnACache;
+        }
+
+        class RenderShadowMapsPassData : RenderShadowMapsCommonPassData
+        {
             public ShadowDrawingSettings shadowDrawSettings;
-            public NativeList<HDShadowRequestHandle>    shadowRequests;
             public Material clearMaterial;
             public bool debugClearAtlas;
-            public bool isRenderingOnACache;
+        }
+
+        private void SetCommonRenderPassData(RenderShadowMapsCommonPassData passData, in RenderGraphBuilder builder, RenderGraph renderGraph, in ShaderVariablesGlobal globalCBData)
+        {
+            passData.globalCBData = globalCBData;
+            passData.globalCB = m_GlobalConstantBuffer;
+            passData.shadowRequests = m_ShadowRequests;
+            passData.isRenderingOnACache = m_IsACacheForShadows;
+
+            // Only in case of regular shadow map do we render directly in the output texture of the atlas.
+            if (m_BlurAlgorithm == BlurAlgorithm.EVSM || m_BlurAlgorithm == BlurAlgorithm.IM)
+                passData.atlasTexture = builder.WriteTexture(GetShadowMapDepthTexture(renderGraph));
+            else
+                passData.atlasTexture = builder.WriteTexture(GetOutputTexture(renderGraph));
+        }
+
+        struct RenderShadowMapsCommonState
+        {
+            public bool shouldSkipRequest;
+            public bool mixedInDynamicAtlas;
+
+            public static RenderShadowMapsCommonState NewDefault()
+            {
+                return new RenderShadowMapsCommonState
+                {
+                    shouldSkipRequest = true
+                };
+            }
+        }
+
+        private static RenderShadowMapsCommonState CommonPerShadowRequestUpdate(CommandBuffer cmd, RenderShadowMapsCommonPassData data, in HDShadowRequest shadowRequest, in HDShadowRequestHandle shadowRequestHandle, ref Vector4[] planesScratchpad, ref UnsafeList<float4> frustumPlanesStorageUnsafe)
+        {
+            RenderShadowMapsCommonState commonState = RenderShadowMapsCommonState.NewDefault();
+            commonState.shouldSkipRequest = shadowRequest.shadowMapType != ShadowMapType.CascadedDirectional ? !shadowRequest.shouldRenderCachedComponent && data.isRenderingOnACache :
+                                !shadowRequest.shouldRenderCachedComponent && shadowRequest.shouldUseCachedShadowData;
+
+            if (shadowRequest.shadowMapType == ShadowMapType.CascadedDirectional && shadowRequest.isMixedCached)
+            {
+                commonState.shouldSkipRequest = !shadowRequest.shouldRenderCachedComponent && data.isRenderingOnACache;
+            }
+
+            if (commonState.shouldSkipRequest)
+                return commonState;
+
+            commonState.mixedInDynamicAtlas = false;
+#if UNITY_2021_1_OR_NEWER
+            if (shadowRequest.isMixedCached)
+            {
+                commonState.mixedInDynamicAtlas = !data.isRenderingOnACache;
+            }
+#endif
+
+            cmd.SetGlobalDepthBias(1.0f, shadowRequest.slopeBias);
+            cmd.SetViewport(data.isRenderingOnACache ? shadowRequest.cachedAtlasViewport : shadowRequest.dynamicAtlasViewport);
+
+            cmd.SetGlobalFloat(HDShaderIDs._ZClip, shadowRequest.zClip ? 1.0f : 0.0f);
+
+            // Setup matrices for shadow rendering:
+            Matrix4x4 view = shadowRequest.cullingSplit.view;
+            // For dynamic objects to be read in the same "space" as the cached ones we need to take cache translation delta in consideration.
+            // otherwise the dynamic objects won't stay attached to casters as camera moves.
+            if (commonState.mixedInDynamicAtlas && shadowRequest.shadowMapType == ShadowMapType.CascadedDirectional)
+            {
+                view *= Matrix4x4.Translate(shadowRequest.cachedShadowData.cacheTranslationDelta);
+            }
+            Matrix4x4 viewProjection = shadowRequest.cullingSplit.deviceProjectionYFlip * view;
+            data.globalCBData._ViewMatrix = view;
+            data.globalCBData._InvViewMatrix = view.inverse;
+            data.globalCBData._ProjMatrix = shadowRequest.cullingSplit.deviceProjectionYFlip;
+            data.globalCBData._InvProjMatrix = shadowRequest.cullingSplit.deviceProjectionYFlip.inverse;
+            data.globalCBData._ViewProjMatrix = viewProjection;
+            data.globalCBData._InvViewProjMatrix = viewProjection.inverse;
+            data.globalCBData._SlopeScaleDepthBias = -shadowRequest.slopeBias;
+            data.globalCBData._GlobalMipBias = 0.0f;
+            data.globalCBData._GlobalMipBiasPow2 = 1.0f;
+
+
+            data.globalCB.PushGlobal(cmd, data.globalCBData, HDShaderIDs._ShaderVariablesGlobal);
+
+
+            for (int i = 0; i < HDShadowRequest.frustumPlanesCount; i++)
+            {
+                planesScratchpad[i] = frustumPlanesStorageUnsafe[shadowRequestHandle.storageIndexForFrustumPlanes + i];
+            }
+
+            cmd.SetGlobalVectorArray(HDShaderIDs._ShadowFrustumPlanes, planesScratchpad);
+
+            return commonState;
+        }
+
+        private static void ResetDepthState(CommandBuffer cmd)
+        {
+            cmd.SetGlobalFloat(HDShaderIDs._ZClip, 1.0f);   // Re-enable zclip globally
+            cmd.SetGlobalDepthBias(0.0f, 0.0f);             // Reset depth bias.
         }
 
         public static Vector4[] frustumPlanesScratchpad = new Vector4[HDShadowRequest.frustumPlanesCount];
         internal unsafe TextureHandle RenderShadowMaps(RenderGraph renderGraph, CullingResults cullResults, in ShaderVariablesGlobal globalCBData, FrameSettings frameSettings, string shadowPassName)
         {
+            TextureHandle atlasTexture;
+
             using (var builder = renderGraph.AddRenderPass<RenderShadowMapsPassData>("Render Shadow Maps", out var passData, ProfilingSampler.Get(HDProfileId.RenderShadowMaps)))
             {
-                passData.globalCBData = globalCBData;
-                passData.globalCB = m_GlobalConstantBuffer;
-                passData.shadowRequests = m_ShadowRequests;
+                SetCommonRenderPassData(passData, builder, renderGraph, globalCBData);
+
                 passData.clearMaterial = m_ClearMaterial;
                 passData.debugClearAtlas = m_LightingDebugSettings.clearShadowAtlas;
                 passData.shadowDrawSettings = new ShadowDrawingSettings(cullResults, 0);
                 passData.shadowDrawSettings.useRenderingLayerMaskTest = frameSettings.IsEnabled(FrameSettingsField.LightLayers);
-                passData.isRenderingOnACache = m_IsACacheForShadows;
-
-                // Only in case of regular shadow map do we render directly in the output texture of the atlas.
-                if (m_BlurAlgorithm == BlurAlgorithm.EVSM || m_BlurAlgorithm == BlurAlgorithm.IM)
-                    passData.atlasTexture = builder.WriteTexture(GetShadowMapDepthTexture(renderGraph));
-                else
-                    passData.atlasTexture = builder.WriteTexture(GetOutputTexture(renderGraph));
 
                 builder.SetRenderFunc(
                     (RenderShadowMapsPassData data, RenderGraphContext ctx) =>
@@ -331,23 +418,15 @@ namespace UnityEngine.Rendering.HighDefinition
                         foreach (var shadowRequestHandle in data.shadowRequests)
                         {
                             ref var shadowRequest = ref requestStorageUnsafe.ElementAt(shadowRequestHandle.storageIndexForShadowRequest);
-                            bool shouldSkipRequest = shadowRequest.shadowMapType != ShadowMapType.CascadedDirectional ? !shadowRequest.shouldRenderCachedComponent && data.isRenderingOnACache :
-                                !shadowRequest.shouldRenderCachedComponent && shadowRequest.shouldUseCachedShadowData;
-
-                            if (shadowRequest.shadowMapType == ShadowMapType.CascadedDirectional && shadowRequest.isMixedCached)
-                            {
-                                shouldSkipRequest = !shadowRequest.shouldRenderCachedComponent && data.isRenderingOnACache;
-                            }
-
-                            if (shouldSkipRequest)
+                            var commonState = CommonPerShadowRequestUpdate(ctx.cmd, data, shadowRequest, shadowRequestHandle, ref planesScratchpad, ref frustumPlanesStorageUnsafe);
+                            if (commonState.shouldSkipRequest)
                                 continue;
 
-                            bool mixedInDynamicAtlas = false;
     #if UNITY_2021_1_OR_NEWER
                             if (shadowRequest.isMixedCached)
                             {
-                                mixedInDynamicAtlas = !data.isRenderingOnACache;
-                                data.shadowDrawSettings.objectsFilter = mixedInDynamicAtlas ? ShadowObjectsFilter.DynamicOnly : ShadowObjectsFilter.StaticOnly;
+                                commonState.mixedInDynamicAtlas = !data.isRenderingOnACache;
+                                data.shadowDrawSettings.objectsFilter = commonState.mixedInDynamicAtlas ? ShadowObjectsFilter.DynamicOnly : ShadowObjectsFilter.StaticOnly;
                             }
                             else
                             {
@@ -355,58 +434,26 @@ namespace UnityEngine.Rendering.HighDefinition
                             }
     #endif
 
-                            ctx.cmd.SetGlobalDepthBias(1.0f, shadowRequest.slopeBias);
-                            ctx.cmd.SetViewport(data.isRenderingOnACache ? shadowRequest.cachedAtlasViewport : shadowRequest.dynamicAtlasViewport);
-
-                            ctx.cmd.SetGlobalFloat(HDShaderIDs._ZClip, shadowRequest.zClip ? 1.0f : 0.0f);
-
-                            if (!mixedInDynamicAtlas)
+                            if (!commonState.mixedInDynamicAtlas)
                                 CoreUtils.DrawFullScreen(ctx.cmd, data.clearMaterial, null, 0);
 
                             data.shadowDrawSettings.lightIndex = shadowRequest.lightIndex;
-
-                            // Setup matrices for shadow rendering:
-                            Matrix4x4 view = shadowRequest.cullingSplit.view;
-                            // For dynamic objects to be read in the same "space" as the cached ones we need to take cache translation delta in consideration.
-                            // otherwise the dynamic objects won't stay attached to casters as camera moves.
-                            if (mixedInDynamicAtlas && shadowRequest.shadowMapType == ShadowMapType.CascadedDirectional)
-                            {
-                                view *= Matrix4x4.Translate(shadowRequest.cachedShadowData.cacheTranslationDelta);
-                            }
-                            Matrix4x4 viewProjection = shadowRequest.cullingSplit.deviceProjectionYFlip * view;
-                            data.globalCBData._ViewMatrix = view;
-                            data.globalCBData._InvViewMatrix = view.inverse;
-                            data.globalCBData._ProjMatrix = shadowRequest.cullingSplit.deviceProjectionYFlip;
-                            data.globalCBData._InvProjMatrix = shadowRequest.cullingSplit.deviceProjectionYFlip.inverse;
-                            data.globalCBData._ViewProjMatrix = viewProjection;
-                            data.globalCBData._InvViewProjMatrix = viewProjection.inverse;
-                            data.globalCBData._SlopeScaleDepthBias = -shadowRequest.slopeBias;
-                            data.globalCBData._GlobalMipBias = 0.0f;
-                            data.globalCBData._GlobalMipBiasPow2 = 1.0f;
-
-
-                            data.globalCB.PushGlobal(ctx.cmd, data.globalCBData, HDShaderIDs._ShaderVariablesGlobal);
-
-
-                            for (int i = 0; i < HDShadowRequest.frustumPlanesCount; i++)
-                            {
-                                planesScratchpad[i] = frustumPlanesStorageUnsafe[shadowRequestHandle.storageIndexForFrustumPlanes + i];
-                            }
-
-                            ctx.cmd.SetGlobalVectorArray(HDShaderIDs._ShadowFrustumPlanes, planesScratchpad);
+                            data.shadowDrawSettings.splitIndex = shadowRequest.cullingSplit.splitIndex;
 
                             //TODO(ddebaets) as the shadowDrawSettings are modified in this loop, we generate this RL very last minute
                             // We might want to refactor this and create the RL ahead of time (especially if we ever allow AsyncPrepare on them)
                             var rl = ctx.renderContext.CreateShadowRendererList(ref data.shadowDrawSettings);
                             ctx.cmd.DrawRendererList(rl);
                         }
-                        ctx.cmd.SetGlobalFloat(HDShaderIDs._ZClip, 1.0f);   // Re-enable zclip globally
-                        ctx.cmd.SetGlobalDepthBias(0.0f, 0.0f);             // Reset depth bias.
+
+                        ResetDepthState(ctx.cmd);
                     });
 
                 m_ShadowMapOutput = passData.atlasTexture;
-                return passData.atlasTexture;
+                atlasTexture = passData.atlasTexture;
             }
+
+            return atlasTexture;
         }
 
         class EVSMBlurMomentsPassData
@@ -424,7 +471,7 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             using (var builder = renderGraph.AddRenderPass<EVSMBlurMomentsPassData>("EVSM Blur Moments", out var passData, ProfilingSampler.Get(HDProfileId.RenderEVSMShadowMaps)))
             {
-                passData.evsmShadowBlurMomentsCS = m_RenderPipelineResources.shaders.evsmBlurCS;
+                passData.evsmShadowBlurMomentsCS = m_RenderPipeline.runtimeShaders.evsmBlurCS;
                 passData.shadowRequests = m_ShadowRequests;
                 passData.isRenderingOnACache = m_IsACacheForShadows;
                 passData.atlasTexture = builder.ReadTexture(inputAtlas);
@@ -550,13 +597,13 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 passData.shadowRequests = m_ShadowRequests;
                 passData.isRenderingOnACache = m_IsACacheForShadows;
-                passData.imShadowBlurMomentsCS = m_RenderPipelineResources.shaders.momentShadowsCS;
+                passData.imShadowBlurMomentsCS = m_RenderPipeline.runtimeShaders.momentShadowsCS;
                 passData.atlasTexture = builder.ReadTexture(atlasTexture);
                 passData.momentAtlasTexture = builder.WriteTexture(GetOutputTexture(renderGraph));
                 passData.intermediateSummedAreaTexture = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(width, height)
-                { colorFormat = GraphicsFormat.R32G32B32A32_SInt, name = m_IntermediateSummedAreaName, enableRandomWrite = true, clearBuffer = true, clearColor = Color.black }));
+                { format = GraphicsFormat.R32G32B32A32_SInt, name = m_IntermediateSummedAreaName, enableRandomWrite = true, clearBuffer = true, clearColor = Color.black }));
                 passData.summedAreaTexture = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(width, height)
-                { colorFormat = GraphicsFormat.R32G32B32A32_SInt, name = m_SummedAreaName, enableRandomWrite = true, clearColor = Color.black }));
+                { format = GraphicsFormat.R32G32B32A32_SInt, name = m_SummedAreaName, enableRandomWrite = true, clearColor = Color.black }));
 
                 builder.SetRenderFunc(
                     (IMBlurMomentPassData data, RenderGraphContext ctx) =>
@@ -622,7 +669,7 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             if (m_ShadowRequests.Length == 0)
             {
-                return renderGraph.defaultResources.whiteTexture;
+                return renderGraph.defaultResources.defaultShadowTexture;
             }
 
             if (m_BlurAlgorithm == BlurAlgorithm.EVSM)

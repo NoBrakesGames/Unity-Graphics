@@ -4,6 +4,7 @@ using UnityEngine.LowLevel;
 using UnityEngine.PlayerLoop;
 using System;
 using System.Runtime.InteropServices;
+using Unity.Collections;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -61,10 +62,7 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             int count = GetNeededBufferCount();
             if (count > 0)
-            {
-                globalIndirectBuffer = new GraphicsBuffer(GraphicsBuffer.Target.IndirectArguments, count, sizeof(GraphicsBuffer.IndirectDrawArgs));
-                globalIndirectionBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, count, sizeof(uint));
-            }
+                AllocateIndirectBuffers(count);
 
             int maxVolumeCountTimesViewCount = maxLocalVolumetricFogs * 2;
             volumetricMaterialDataBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, maxVolumeCountTimesViewCount, Marshal.SizeOf(typeof(VolumetricMaterialRenderingData)));
@@ -76,9 +74,9 @@ namespace UnityEngine.Rendering.HighDefinition
                 0, 3, 4,
                 0, 4, 5
             });
-            
+
             // Because SRP rendering happens too late, we need to force the draw calls to update
-            RegisterLocalVolumetricFogLateUpdate.PrepareFogDrawCalls();
+            RegisterLocalVolumetricFogEarlyUpdate.PrepareFogDrawCalls();
         }
 
         /// <summary>
@@ -101,9 +99,20 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 globalIndirectBuffer.Release();
                 globalIndirectionBuffer.Release();
-                globalIndirectBuffer = new GraphicsBuffer(GraphicsBuffer.Target.IndirectArguments, bufferCount, sizeof(GraphicsBuffer.IndirectDrawArgs));
-                globalIndirectionBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, bufferCount, sizeof(uint));
+                AllocateIndirectBuffers(bufferCount);
             }
+        }
+
+        unsafe void AllocateIndirectBuffers(int count)
+        {
+            globalIndirectBuffer = new GraphicsBuffer(GraphicsBuffer.Target.IndirectArguments, count, sizeof(GraphicsBuffer.IndirectDrawIndexedArgs));
+            globalIndirectionBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, count, sizeof(uint));
+
+            // Initialize with zeros to prevent weird behaviours
+            var zeros = new NativeArray<byte>(count * Mathf.Max(sizeof(GraphicsBuffer.IndirectDrawIndexedArgs), sizeof(uint)), Allocator.Temp, NativeArrayOptions.ClearMemory);
+            globalIndirectBuffer.SetData(zeros, 0, 0, count * sizeof(GraphicsBuffer.IndirectDrawIndexedArgs));
+            globalIndirectionBuffer.SetData(zeros, 0, 0, count * sizeof(uint));
+            zeros.Dispose();
         }
 
         internal void CleanupGraphicsBuffers()
@@ -128,7 +137,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         public bool IsInitialized() => globalIndirectBuffer != null && globalIndirectBuffer.IsValid();
 
-        public static class RegisterLocalVolumetricFogLateUpdate
+        public static class RegisterLocalVolumetricFogEarlyUpdate
         {
 #if UNITY_EDITOR
             [UnityEditor.InitializeOnLoadMethod]
@@ -138,8 +147,7 @@ namespace UnityEngine.Rendering.HighDefinition
             internal static void Init()
             {
                 var currentLoopSystem = LowLevel.PlayerLoop.GetCurrentPlayerLoop();
-
-                bool found = AppendToPlayerLoopList(typeof(RegisterLocalVolumetricFogLateUpdate), PrepareFogDrawCalls, ref currentLoopSystem, typeof(Update.ScriptRunBehaviourUpdate));
+                RegisterFogUpdateBeforeScriptUpdate(typeof(RegisterLocalVolumetricFogEarlyUpdate), PrepareFogDrawCalls, ref currentLoopSystem);
                 LowLevel.PlayerLoop.SetPlayerLoop(currentLoopSystem);
             }
 
@@ -153,31 +161,35 @@ namespace UnityEngine.Rendering.HighDefinition
                     volumes[i].PrepareDrawCall(i);
             }
 
-            internal static bool AppendToPlayerLoopList(Type updateType, PlayerLoopSystem.UpdateFunction updateFunction, ref PlayerLoopSystem playerLoop, Type playerLoopSystemType)
+            internal static bool RegisterFogUpdateBeforeScriptUpdate(Type updateType, PlayerLoopSystem.UpdateFunction updateFunction, ref PlayerLoopSystem playerLoop)
             {
-                if (updateType == null || updateFunction == null || playerLoopSystemType == null)
+                if (updateType == null || updateFunction == null)
                     return false;
-
-                if (playerLoop.type == playerLoopSystemType)
-                {
-                    var oldListLength = playerLoop.subSystemList != null ? playerLoop.subSystemList.Length : 0;
-                    var newSubsystemList = new PlayerLoopSystem[oldListLength + 1];
-                    for (var i = 0; i < oldListLength; ++i)
-                        newSubsystemList[i] = playerLoop.subSystemList[i];
-                    newSubsystemList[oldListLength] = new PlayerLoopSystem
-                    {
-                        type = updateType,
-                        updateDelegate = updateFunction
-                    };
-                    playerLoop.subSystemList = newSubsystemList;
-                    return true;
-                }
 
                 if (playerLoop.subSystemList != null)
                 {
                     for (var i = 0; i < playerLoop.subSystemList.Length; ++i)
                     {
-                        if (AppendToPlayerLoopList(updateType, updateFunction, ref playerLoop.subSystemList[i], playerLoopSystemType))
+                        var subLoop = playerLoop.subSystemList[i];
+
+                        if (subLoop.type == typeof(Update.ScriptRunBehaviourUpdate))
+                        {
+                            int currentSystemCount = playerLoop.subSystemList.Length;
+                            var newSystemList = new PlayerLoopSystem[currentSystemCount + 1];
+                            Array.Copy(playerLoop.subSystemList, 0, newSystemList, 0, i); // Copy first part of the system list
+                            // Inject system update just before the script behaviour update
+                            newSystemList[i] = new PlayerLoopSystem
+                            {
+                                type = updateType,
+                                updateDelegate = updateFunction
+                            };
+                            // Copy the rest of the system list after
+                            Array.Copy(playerLoop.subSystemList, i, newSystemList, i + 1, currentSystemCount - i); // Copy second part of the system list
+                            playerLoop.subSystemList = newSystemList;
+                            return true;
+                        }
+
+                        if (RegisterFogUpdateBeforeScriptUpdate(updateType, updateFunction, ref playerLoop.subSystemList[i]))
                             return true;
                     }
                 }

@@ -4,7 +4,8 @@ using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Arithmetic")]
+    [VFXHelpURL("Operator-InverseLerp")]
+    [VFXInfo(category = "Math/Arithmetic", synonyms = new []{ "linear", "interpolation" })]
     class InverseLerp : VFXOperatorNumericUnified, IVFXOperatorNumericUnifiedConstrained
     {
         public class InputProperties

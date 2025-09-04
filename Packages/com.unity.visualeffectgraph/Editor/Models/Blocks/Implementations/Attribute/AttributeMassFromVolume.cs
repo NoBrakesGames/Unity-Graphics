@@ -1,11 +1,10 @@
-using System;
-using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Attribute/Derived")]
+    [VFXHelpURL("Block-CalculateMassFromVolume")]
+    [VFXInfo(name = "Calculate Mass from Volume", category = "Attribute/Derived")]
     class AttributeMassFromVolume : VFXBlock
     {
         public override string name { get { return "Calculate Mass from Volume"; } }

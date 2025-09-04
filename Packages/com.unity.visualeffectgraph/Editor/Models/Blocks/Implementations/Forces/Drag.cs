@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Force")]
+    [VFXInfo(name = "Linear Drag", category = "Force")]
     class Drag : VFXBlock
     {
         [VFXSetting, Tooltip("When enabled, the particle size will affect the drag. Larger particles have a higher linear drag.")]
@@ -60,7 +60,7 @@ dragCoefficient *= side.x * side.y;
 ";
                 }
 
-                return source + "velocity *= max(0.0,(1.0 - (dragCoefficient * deltaTime) / mass));";
+                return source + "velocity *= exp(-(dragCoefficient * deltaTime) / mass);";
             }
         }
     }

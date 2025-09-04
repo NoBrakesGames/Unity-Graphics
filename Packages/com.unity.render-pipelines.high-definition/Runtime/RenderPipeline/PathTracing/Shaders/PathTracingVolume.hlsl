@@ -2,6 +2,7 @@
 #define UNITY_PATH_TRACING_VOLUME_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/PathTracing/Shaders/PathTracingLight.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
 
 float ComputeHeightFogMultiplier(float height)
 {
@@ -66,7 +67,6 @@ bool SampleVolumeScatteringPosition(uint2 pixelCoord, inout float inputSample, i
     {
         inputSample = RescaleSampleOver(inputSample, transmittanceThreshold);
         pdf *= 1.0 - transmittanceThreshold;
-
         return false;
     }
 
@@ -87,50 +87,58 @@ void ComputeVolumeScattering(inout PathPayload payload : SV_RayPayload, float3 i
     // Reset the payload color, which will store our final result
     payload.value = 0.0;
 
-    // Check if we want to compute direct and emissive lighting for current depth
-    bool computeDirect = payload.segmentID >= _RaytracingMinRecursion - 1;
+    SetPathTracingFlag(payload, PATHTRACING_FLAG_VOLUME_INTERACTION);
+
+    // Check if we want to compute direct lighting for current depth
+    bool minDepthAllowsDirect = payload.segmentID + 1 >= _RaytracingMinRecursion - 1;
+    // Check if we want to send more rays after this segment
+    bool haveReachedMaxDepth = payload.segmentID + 1 > _RaytracingMaxRecursion - 1;
 
     // Compute the scattering position
     float3 scatteringPosition = WorldRayOrigin() + payload.rayTHit * WorldRayDirection();
+    float3 incomingDirection = WorldRayDirection();
 
     // Create the list of active lights (a local light can be forced by providing its position)
     LightList lightList = CreateLightList(scatteringPosition, sampleLocalLights, lightPosition);
+    payload.lightListParams = float4(lightPosition, sampleLocalLights ? 1 : 0);
 
     float pdf, shadowOpacity;
     float3 value;
+    float3 sampleRayDirection;
+    float sampleRayDistance;
 
-    RayDesc ray;
-    ray.Origin = scatteringPosition;
-    ray.TMin = 0.0;
-
-    PathPayload shadowPayload;
-
-    // Light sampling
-    if (computeDirect)
+    if (minDepthAllowsDirect && !haveReachedMaxDepth)
     {
-        if (SampleLights(lightList, inputSample, scatteringPosition, 0.0, true, ray.Direction, value, pdf, ray.TMax, shadowOpacity))
+        float scatteringHeight = dot(scatteringPosition, _PlanetUp);
+
+        // Light sampling
+        if (SampleLights(lightList, inputSample, scatteringPosition, 0.0, true, sampleRayDirection, value, pdf, sampleRayDistance, shadowOpacity))
         {
             // Apply phase function and divide by PDF
-            value *= _HeightFogBaseScattering.xyz * ComputeHeightFogMultiplier(scatteringPosition.y) * INV_FOUR_PI / pdf;
+            float phasePdf = HenyeyGreensteinPhaseFunction(_GlobalFogAnisotropy,  dot(incomingDirection, sampleRayDirection));
+            value *= _HeightFogBaseScattering.xyz * ComputeHeightFogMultiplier(scatteringPosition.y) * phasePdf / pdf;
+
+            if (GetCurrentExposureMultiplier() * Luminance(value) > 0.0001)
+            {
+                PushLightSampleQuery(scatteringPosition, sampleRayDirection, sampleRayDistance - _RayTracingRayBias, PowerHeuristic(pdf, phasePdf) * value, shadowOpacity, payload);
+            }
+        }
+
+        // Phase function sampling
+        if (SampleHenyeyGreenstein(incomingDirection, _GlobalFogAnisotropy, inputSample, sampleRayDirection, pdf))
+        {
+            // Applying phase function and dividing by PDF cancels out
+            value = _HeightFogBaseScattering.xyz * ComputeHeightFogMultiplier(scatteringHeight);
 
             if (Luminance(value) > 0.001)
             {
-                // Shoot a transmission ray
-                shadowPayload.segmentID = SEGMENT_ID_TRANSMISSION;
-                shadowPayload.value = 1.0;
-                ray.TMax -= _RayTracingRayBias;
-
-                // FIXME: For the time being, there is no front/back face culling for shadows
-                TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-                         RAYTRACINGRENDERERFLAG_CAST_SHADOW, 0, 1, 1, ray, shadowPayload);
-
-                payload.value += value * GetLightTransmission(shadowPayload.value, shadowOpacity);
+                payload.throughput *= value;
+                payload.interactionThroughput *= value;
+                payload.materialSamplePdf = pdf;
+                PushMaterialSampleQuery(scatteringPosition, sampleRayDirection, payload);
             }
         }
     }
-
-    // Override AOV motion vector information
-    payload.aovMotionVector = 0.0;
 }
 
 #endif // UNITY_PATH_TRACING_VOLUME_INCLUDED

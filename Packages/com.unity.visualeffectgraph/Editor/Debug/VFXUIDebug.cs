@@ -613,7 +613,7 @@ namespace UnityEditor.VFX.UI
             var settingsBox = SetSettingsBox();
             var plotArea = SetPlotArea(m_DebugDrawingBox, Yaxis);
             var title = SetSystemInfosTitle();
-            m_SystemInfosContainer = SetSystemInfosContainer();
+            m_SystemInfosContainer = new VisualElement { name = "debug-system-stat-container" };
 
             m_DebugContainer.Add(settingsBox);
             m_DebugContainer.Add(plotArea);
@@ -636,7 +636,7 @@ namespace UnityEditor.VFX.UI
             var settingsBox = SetSettingsBox();
             var plotArea = SetPlotArea(m_DebugDrawingBox, Yaxis);
             var title = SetSystemInfosTitle();
-            m_SystemInfosContainer = SetSystemInfosContainer();
+            m_SystemInfosContainer = new VisualElement { name = "debug-system-stat-container" };
 
             m_DebugContainer.Add(settingsBox);
             m_DebugContainer.Add(plotArea);
@@ -745,13 +745,6 @@ namespace UnityEditor.VFX.UI
             return plotArea;
         }
 
-        VisualElement SetSystemInfosContainer()
-        {
-            var scrollerContainer = new ScrollView();
-            scrollerContainer.name = "debug-system-stat-container";
-            return scrollerContainer;
-        }
-
         VisualElement SetSystemInfosTitle()
         {
             var toggleAll = new Toggle();
@@ -776,9 +769,7 @@ namespace UnityEditor.VFX.UI
             SystemInfoEfficiency.name = "debug-system-stat-title";
             SystemInfoEfficiency.text = "Efficiency";
 
-            var titleContainer = new VisualElement();
-            titleContainer.name = "debug-system-stat-entry-container";
-
+            var titleContainer = new VisualElement { name = "debug-system-stat-entry-container" };
             titleContainer.Add(toggleAll);
             titleContainer.Add(SystemInfoName);
             titleContainer.Add(SystemInfoAlive);
@@ -790,8 +781,8 @@ namespace UnityEditor.VFX.UI
 
         void AddSystemInfoEntry(string systemName, int id, Color color)
         {
-            var statContainer = new VisualElement();
-            statContainer.name = "debug-system-stat-entry-container";
+            var statContainer = new VisualElement { name = "debug-system-stat-entry-container" };
+            statContainer.AddToClassList("row");
             m_SystemInfosContainer.Add(statContainer);
 
             var toggle = new Toggle();
@@ -813,8 +804,8 @@ namespace UnityEditor.VFX.UI
             VisualElement maxAlive;
             if (isSystemInSubgraph)
             {
-                var maxAliveButton = new Button();
-                maxAliveButton.name = "debug-system-stat-entry";
+                var maxAliveButton = new Button { name = "debug-system-stat-entry" };
+                maxAliveButton.tooltip = "Set system capacity";
                 maxAliveButton.text = "0";
                 maxAliveButton.SetEnabled(m_Graph.visualEffectResource != null && m_Graph.visualEffectResource.IsAssetEditable());
                 maxAliveButton.clickable.clickedWithEventInfo += setCapacity;
@@ -831,7 +822,6 @@ namespace UnityEditor.VFX.UI
             var efficiency = new TextElement();
             efficiency.name = "debug-system-stat-entry";
             efficiency.text = " - ";
-
             statContainer.Add(toggle);
             statContainer.Add(name);
             statContainer.Add(alive);
@@ -925,7 +915,7 @@ namespace UnityEditor.VFX.UI
         {
             var statUI = m_SystemInfos[systemId];// [0] is title bar
             if (statUI[3] is TextElement alive)
-                alive.text = stat.aliveCount.ToString();
+                alive.text = stat.sleeping ? "Sleeping" : stat.aliveCount.ToString();
             if (statUI[4] is TextElement maxAliveText)
             {
                 maxAliveText.SetEnabled(m_Graph.visualEffectResource != null && m_Graph.visualEffectResource.IsAssetEditable());
@@ -935,7 +925,7 @@ namespace UnityEditor.VFX.UI
             if (statUI[5] is TextElement efficiency)
             {
                 var eff = (int)((float)stat.aliveCount * 100.0f / (float)stat.capacity);
-                efficiency.text = string.Format("{0} %", eff);
+                efficiency.text = stat.sleeping ? "Sleeping" : string.Format("{0} %", eff);
                 if (eff < 51)
                     efficiency.style.color = Color.red.gamma;
                 else if (eff < 91)

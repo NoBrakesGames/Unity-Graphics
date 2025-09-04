@@ -4,7 +4,8 @@ using System.Linq;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Serialization;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -112,6 +113,24 @@ namespace UnityEngine.Rendering.HighDefinition
             set
             {
                 m_RendererLODCameraDistanceCurve = value;
+            }
+        }
+
+        [FormerlySerializedAs("m_RendererLODCameraCoverageCurve")] [SerializeField]
+        private AnimationCurve m_RendererLODScreenCoverageCurve = AnimationCurve.EaseInOut(0f, 0.01f, 1f, 1.0f);
+
+        /// <summary>
+        /// Sets the high quality line rendering level of detail curve for this mesh renderer.
+        /// </summary>
+        public AnimationCurve rendererLODScreenCoverageCurve
+        {
+            get
+            {
+                return m_RendererLODScreenCoverageCurve;
+            }
+            set
+            {
+                m_RendererLODScreenCoverageCurve = value;
             }
         }
 
@@ -234,6 +253,11 @@ namespace UnityEngine.Rendering.HighDefinition
 
         private void OnEnable()
         {
+        #if UNITY_EDITOR
+            // Need to do this here for similar reasons as we do in OnValidate.
+            s_FirstOnValidateCalled = false;
+        #endif
+
             RegisterCallbacks();
             TryGetDependentComponents();
 
@@ -338,8 +362,25 @@ namespace UnityEngine.Rendering.HighDefinition
                 }
                 if (!s_FirstOnValidateCalled)
                     s_FirstOnValidateCalled = true;
-#endif
+#else
+                if (!GraphicsSettings.TryGetRenderPipelineSettings<HDRenderPipelineRuntimeAssets>(out var assets))
+                {
+                    Debug.LogError("Failed to load runtime resources.");
+                    return;
+                }
 
+                if (!assets.computeMaterialLibrary)
+                {
+                    Debug.LogError("Failed to load compute material library.");
+                    return;
+                }
+
+                if (!assets.computeMaterialLibrary.Get(material.shader, out m_VertexSetupCompute))
+                {
+                    Debug.LogError("Failed to load compute material for the given shader.");
+                    return;
+                }
+#endif
                 m_OldMaterial = material;
             }
         }
@@ -484,10 +525,76 @@ namespace UnityEngine.Rendering.HighDefinition
             // Override
             var strandLOD = m_RendererLODFixed;
 
-            if (m_RendererLODMode == LineRendering.RendererLODMode.CameraDistance)
+            if (m_RendererLODMode == LineRendering.RendererLODMode.CameraDistance && m_RendererLODCameraDistanceCurve != null)
             {
-                var distanceToCamera = Vector3.Distance(camera.transform.position, transform.position);
+                var distanceToCamera = Vector3.Distance(camera.transform.position, m_MeshRenderer.bounds.center);
                 strandLOD = m_RendererLODCameraDistanceCurve.Evaluate(distanceToCamera);
+            }
+            else if (m_RendererLODMode == LineRendering.RendererLODMode.ScreenCoverage)
+            {
+                Vector3 min = m_MeshRenderer.bounds.min;
+                Vector3 max = m_MeshRenderer.bounds.max;
+
+                var boundsCorners = new Vector3[]
+                {
+                    new (min.x, min.y, min.z),
+                    new (max.x, min.y, min.z),
+                    new (min.x, max.y, min.z),
+                    new (max.x, max.y, min.z),
+                    new (min.x, min.y, max.z),
+                    new (max.x, min.y, max.z),
+                    new (min.x, max.y, max.z),
+                    new (max.x, max.y, max.z),
+                };
+
+                Vector2 ComputeScreenSpacePoint(Vector3 p)
+                {
+                    p = camera.WorldToScreenPoint(p);
+                    return new Vector2(p.x, p.y);
+                }
+
+                var minP = Vector2.positiveInfinity;
+                var maxP = Vector2.negativeInfinity;
+
+                foreach (var corner in boundsCorners)
+                {
+                    var p = ComputeScreenSpacePoint(corner);
+
+                    minP = Vector2.Min(p, minP);
+                    maxP = Vector2.Max(p, maxP);
+                }
+
+                // Determine the area of the bounds in screen space.
+                var length  = maxP.x - minP.x;
+                var width   = maxP.y - minP.y;
+                var area    = length * width;
+
+                // Screen coverage is the ratio between projected bounds and viewport size.
+                var screenCoverage = area / (Screen.width * Screen.height);
+
+                // Need to implement our own smoothstep since Mathf.SmoothStep is not the same
+                // behaviour as the HLSL intrinsic.
+                float Smoothstep(float edge0, float edge1, float x)
+                {
+                    // Scale, bias and saturate x to 0..1 range
+                    x = Mathf.Clamp01((x - edge0) / (edge1 - edge0));
+
+                    // Evaluate polynomial
+                    return x * x * (3 - 2 * x);
+                }
+
+                if (m_RendererLODScreenCoverageCurve != null)
+                {
+                    strandLOD = m_RendererLODScreenCoverageCurve.Evaluate(screenCoverage);
+                }
+                else
+                {
+                    // Remap the coverage s.t. we control when the min and max lod occur.
+                    screenCoverage = Smoothstep(0.01f, 0.1f, screenCoverage);
+                    // Minimum screen coverage LOD is 1% of strands.
+                    strandLOD = Mathf.Lerp(0.1f, 1.0f, screenCoverage);
+                }
+
             }
 
             return new LineRendering.RendererData
@@ -504,6 +611,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 renderingLayerMask   = m_MeshRenderer.renderingLayerMask,
                 indexBuffer          = renderGraph.ImportBuffer(m_IndexBuffer),
                 distanceToCamera     = Vector3.Distance(transform.position, camera.transform.position),
+                bounds               = m_MeshRenderer.bounds,
 
                 // LOD
                 segmentsPerLine = (int)m_SegmentsPerLine,

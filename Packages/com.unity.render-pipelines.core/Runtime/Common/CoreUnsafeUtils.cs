@@ -69,12 +69,18 @@ namespace UnityEngine.Rendering
             }
 
             /// <summary>
-            /// Pop an element of the queue.
+            /// Try to pop an element of the queue.
             /// </summary>
             /// <param name="v">Output result string.</param>
-            /// <returns>True if an element was succesfuly poped.</returns>
+            /// <returns>True if an element was successfully popped.</returns>
             public bool TryPop(out string v)
             {
+                if (m_ReadCursor + sizeof(int) >= m_BufferEnd)
+                {
+                    v = null;
+                    return false;
+                }
+
                 var size = *(int*)m_ReadCursor;
                 if (size != 0)
                 {
@@ -84,7 +90,7 @@ namespace UnityEngine.Rendering
                     return true;
                 }
 
-                v = default;
+                v = null;
                 return false;
             }
 
@@ -119,6 +125,8 @@ namespace UnityEngine.Rendering
         // Note: this is a workaround needed to circumvent some AOT issues when building for xbox
         internal struct UintKeyGetter : IKeyGetter<uint, uint>
         { public uint Get(ref uint v) { return v; } }
+        internal struct UlongKeyGetter : IKeyGetter<ulong, ulong>
+        { public ulong Get(ref ulong v) { return v; } }
 
 
         /// <summary>
@@ -153,8 +161,10 @@ namespace UnityEngine.Rendering
 
         private static void CalculateRadixParams(int radixBits, out int bitStates)
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             if (radixBits != 2 && radixBits != 4 && radixBits != 8)
                 throw new Exception("Radix bits must be 2, 4 or 8 for uint radix sort.");
+#endif
             bitStates = 1 << radixBits;
         }
 
@@ -389,6 +399,18 @@ namespace UnityEngine.Rendering
         }
 
         /// <summary>
+        /// Quick Sort
+        /// </summary>
+        /// <param name="arr">ulong array.</param>
+        /// <param name="left">Left boundary.</param>
+        /// <param name="right">Left boundary.</param>
+        public static unsafe void QuickSort(ulong[] arr, int left, int right)
+        {
+            fixed (ulong* ptr = arr)
+                CoreUnsafeUtils.QuickSort<ulong, ulong, UlongKeyGetter>(ptr, left, right);
+        }
+
+        /// <summary>
         /// Quick sort.
         /// </summary>
         /// <typeparam name="T">Type to compare.</typeparam>
@@ -481,7 +503,7 @@ namespace UnityEngine.Rendering
         /// <param name="removeIndices">Indices of element to remove in <paramref name="oldHashes"/> will be written here.</param>
         /// <param name="addCount">Number of elements to add will be written here.</param>
         /// <param name="remCount">Number of elements to remove will be written here.</param>
-        /// <returns>The number of operation to perform (<code><paramref name="addCount"/> + <paramref name="remCount"/></code>)</returns>
+        /// <returns>The number of operations to perform (<paramref name="addCount"/><c> + </c><paramref name="remCount"/>)</returns>
 
         public static int CompareHashes<TOldValue, TOldGetter, TNewValue, TNewGetter>(
             int oldHashCount, void* oldHashes,
@@ -594,7 +616,7 @@ namespace UnityEngine.Rendering
         /// <param name="removeIndices">Indices of element to remove in <paramref name="oldHashes"/> will be written here.</param>
         /// <param name="addCount">Number of elements to add will be written here.</param>
         /// <param name="remCount">Number of elements to remove will be written here.</param>
-        /// <returns>The number of operation to perform (<code><paramref name="addCount"/> + <paramref name="remCount"/></code>)</returns>
+        /// <returns>The number of operations to perform (<paramref name="addCount"/><c> + </c><paramref name="remCount"/>)</returns>
         public static int CompareHashes(
             int oldHashCount, Hash128* oldHashes,
             int newHashCount, Hash128* newHashes,

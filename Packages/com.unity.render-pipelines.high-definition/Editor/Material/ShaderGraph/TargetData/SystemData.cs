@@ -35,8 +35,8 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         }
 
         [SerializeField]
-        BlendMode m_BlendMode = BlendMode.Alpha;
-        public BlendMode blendMode
+        BlendingMode m_BlendMode = BlendingMode.Alpha;
+        public BlendingMode blendingMode
         {
             get => m_BlendMode;
             set => m_BlendMode = value;
@@ -88,6 +88,14 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         {
             get => m_AlphaTest;
             set => m_AlphaTest = value;
+        }
+
+        [SerializeField]
+        bool m_ExcludeFromTUAndAA = false;
+        public bool excludeFromTUAndAA
+        {
+            get => m_ExcludeFromTUAndAA;
+            set => m_ExcludeFromTUAndAA = value;
         }
 
         [SerializeField, Obsolete("Keep for migration")]

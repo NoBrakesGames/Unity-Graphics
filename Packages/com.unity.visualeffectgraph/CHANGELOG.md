@@ -1,23 +1,325 @@
 # Changelog
+
 All notable changes to this package will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-
-## [16.0.0] - 2023-01-18
-
-This version is compatible with Unity 2023.2.0a1.
+## [Unreleased]
 
 Version Updated
 The version number for this package has increased due to a version update of a related graphics package.
 
+## [17.0.3] - 2025-02-13
+
+This version is compatible with Unity 6000.0.39f1.
+
+### Changed
+- Added a missing button in the VFX template window to quickly install learning templates.
+
+### Fixed
+- Fixed HLSL blocks so that they accept parameters that don't have an `in` attribute.
+- Fixed incorrect error message on Custom HLSL.
+- Improved CustomHLSL to consider custom HLSL and includes workflow.
+- Added support for more HLSL function prototype declaration.
+- Resolved a corner case issue where the presence of multiple instances of the same buffer led to a compilation failure.
+- A compilation issue occured when declaring a gradient in ShaderGraph blackboard.
+- Fixed NullReferenceException when enabling Decal Layers in HDRP.
+- Fixed exposed properties reset when editing multiple VFX at the same time on inspector.
+- Fixed incorrect source spawnCount.
+- Fixed exception when a category color is reset in the node search.
+- Fixed a rare crash when destroying a VFX instance during rendering.
+- Updated the starter template Description and some default VFX resources.
+- Force culling when VFX rendering is disabled.
+- VFX Graph VFXOutputEventHandlers Sample now compatible with Cinemachine 3.x.
+- Disabled compile menu when authoring subgraphs.
+- Fixed the ability to add blocks to subgraph context.
+- Fixed some UI elements could overflow their reserved space.
+- Fixed "int" type could not be parsed when the access modifier is not specified.
+- Fixed unexpected CustomHLSL includes in neighbors contexts.
+- Fixed potential exception message in the console when opening any VFX Graph.
+- Fixed potential crash when using the Noise Module in a particle system.
+- Fixed output properties in subgraphs had misplaced wire connector.
+- Fixed a leak while spamming ReInit.
+- Fixed compilation error when using the Six-way Lit Output with Adaptive Probe Volumes.
+- Custom HLSL can be missing when connected to several contexts.
+- Improved how the sleep state is updated for particle systems receiving GPU events.
+- Wrong mesh rendered with instancing, when using multi mesh and exposed submesh mask.
+- Fixed potential crash and correctness when using a system with multiple Volumetric Fog Outputs.
+- Fixed SpawnIndex attribute when using instancing.
+- Fixed an exception when trying to create curl noise sub-variant nodes.
+- Fixed variadic attributes to not be allowed to be used in custom HLSL code.
+- Fixed random texture rendered with instancing when using exposed texture set to None.
+- Fixed a crash that occurred when visualizing a VFX preview with raytracing enabled.
+- Fixed a potential division by zero in RayBoxIntersection code.
+- Fixed an issue where copying or pasting in a different asset in a context with a block that used a custom attribute would lose the custom attribute type and fallback to float.
+
+
+- Fixed missing drag area to change a value for inline float, uint and int operators.
+- Fixed several UX issues in the VFX Graph blackboard.
+- Fixed copy/pasting a selection from a graph to another when the selection contains multiple times the same property node.
+- Fixed compatibility between Flipbook and Vector2 field types.
+- Added error feedback in case of incorrect setup of the Position Sequential Circle block.
+- Read unexposed shader global properties when using a Shader Graph output.
+- Fixed ParticleIndexInStrip, StripIndex, and ParticleCountinStrip attributes when used in quad or mesh outputs (previously all returning 0).
+- Fixed rendering unwanted particles when rendering particle strip systems as particles (previously rendering entire capacity).
+- Fixed strips with immortal particles disappearing with instancing on.
+- Fixed an issue where Convert Output to Output Particle ShaderGraph Octagon or Triangle generates an exception.
+- Fixed corrupted graph when a custom type was missing.
+- Fixed node search expand/collapse button, which could be blurry, depending on screen DPI setting.
+- Fixed sticky note resizing could be broken.
+- Fixed a crash that would uccur during the update of a Visual Effect when deleting a used Texture.
+- Fixed an issue where strip tangent was not computed correctly when using Shader Graph output.
+- Fixed two different HLSL parsing issues with VFX Graph custom HLSL.
+- Fixed an issue where Tooltips were not displaying. 
+- Fixed capacity field in the Particle System Info panel not being refreshed when modifying system capacity.
+- Fixed overdraw debug mode of unlit particles in URP.
+- Improved Water integration to prevent an unexpected error from dispatch.
+- Incorrect sanitization of SetCustomAttribute when Random was different than Random.Off.
+- Missing delayed field for Sample Water Surface Operator.
+- Unexpected log "Expression graph was marked as dirty after compiling context for UI" while using Custom HLSL based operators.
+- Particle outputs connected to particle strip systems don't render last particle.
+- Fixed an issue when using the same name as a built-in attribute in a custom HLSL function's parameter would lead to a compilation error.
+- Fixed an issue when creating a Custom HLSL operator with two outputs could prevent the generated shader from compiling.
+- Fixed an issue with VFX particles GBuffer pass with URP Render Graph.
+- Fixed an issue when importing old VFX asset in Unity6 using custom attribute with same name as built-in attribute.
+- Subgraph blocks now accept correct types of block based on their suitable context.
+- Fixed port's label was not be visible when node is collapsed.
+- Fixed an exception that could prevent opening a VFX in one specific case.
+- Fixed CustomRenderTexture could not be used in VFX Graph object fields.
+- Fixed reordering properties inside a category was not possible anymore.
+Also reordering a category could not work if there was properties at the root (with no category)
+- Fixed a small cursor offset when drawing a rectangle selection
+- This PR fix resolves minor issues related to VFX graph content sample package.
+- This PR fix resolves minor issues related to VFX graph content sample package.
+- This PR fix resolves minor issues related to VFX graph content sample package.
+- Fix emissive decal when using color attribute for emissive.
+- Fix NullReferenceExpection happening with disconnected output contexts.
+- Fix occasional crashes when modifying exposed properties when in paused play mode
+- Fixed VFX Graph template window was empty when the Terrain Tool package is installed
+
+## [17.0.2] - 2024-04-02
+
+This version is compatible with Unity 6000.0.0b15.
+
+### Changed
+- Improved compilation times with VFX Graph using Subgraphs.
+- Improved the performance of VFX.ProcessCommandList by skipping the use of a RenderingCommandBuffer.
+- Added selective VFX Graph buffers to lower the amount of buffer used in the shaders and increased platform reach.
+- The Construct Matrix can now select between row and column. Added the Split Matrix operator.
+
+### Fixed
+- Instancing when gradient selection was based on a branch was wrong.
+- Fixed very very long system name could lead to freeze the Editor.
+- Removed SetDirty calls that triggered assertions in debug mode.
+- Switch property binder from ExecuteInEditMode in ExecuteAlways.
+- Fixed a PCache exporter issue to insure color in linear space.
+- Fixed shadows being cast by Mesh Output when "cast shadows" was disabled (URP only).
+- Fixed an issue where multithreaded camera expression were not allowed.
+- Fixed a build failure on HDRP Linux using Sphere Output.
+- Fixed missing particles with strip systems using instancing.
+- Fixed some sanitation failures with new merged Position and Collision blocks.
+- Unexpected material listing in animation window.
+- Disable MeshToSDFBaker shaders on GLES3 to avoid warnings.
+- Fixed incompatibility issue with HLSL 2021.
+- Fixed an exception that could be raised when deleting all graph nodes in some specific cases.
+- Fixed normal handling of odd-negative scales.
+- Fixed an issue by cleaning data and upgraded VFX assets to prevent unwanted warnings in the console.
+- Fixed Screen Space Size block in Shader Graph outputs.
+- Fixed an editor crash when deleting objects (textures, meshes) that are used by active VFX graph.
+- Fixed an issue that reduced FloatField to a height of 1px.
+- Added tooltips to the VFX Control panel.
+- Fixed an issue where VFX graph rendered the wrong mesh when using different exposed meshes with instancing enabled.
+- When trying to connect incompatible types, the error popup was left over if the action was canceled with Escape key
+- Fixed an issue that caused missing recompilation triggers that occurred when changing some operator settings
+- Fixed an issue that caused an unexpected long enter in Play mode, and removed timeout exception.
+- Removed the eye dropper from Node Search details panel.
+- Fixed activation slot was hidden when a block was collapsed
+- Removed multiple unexpected constraints on CustomHLSL functions
+- Fix Construct Matrix operator serialization issue
+- Correctly handle includes in CustomHLSL operator
+- Initial Position Oriented Box with zero scale is restored.
+- Position On Signed Distance field was failing to compile without direction.
+
+## [17.0.1] - 2023-12-21
+
+This version is compatible with Unity 2023.3.0b2.
+
+### Changed
+
+- Improved and optimized both undo and redo.
+- Improved AddComponent performance for VFX by precaching script pointers in common case operation.
+- Improved the collision system so it is more stable, robust, and energy conservative.
+- Improved Position, Collision, and Kill blocks.
+- Improved error feedback and added more error feedback.
+
+### Fixed
+
+- The behavior of the VFX graph toolbar button to open the template window has slightly changed
+- Fixed unexpected inspector in case of Sprite Custom/Lit/Unlit.
+- Fixed decal normal map handling of non-uniform scale.
+- Fixed an issue where spawner callbacks were only working on the first instance of an instanced effect
+- Understeministic skin mesh sampling when previous and current were fetch within the same VFX
+- Updated of curve & gradient were missing when edited directly in VFX View Window.
+- Fixed undoing port value change that did not restore correct value.
+- Fixed undo/redo did not work anymore with selection.
+- Fixed property not visible in blackboard with creating using ALT+Drag shortcut.
+- Improved error feedback message when a shader graph is missing and no path is found.
+- Fixed an issue where the old style dropdown in Add, Divide (and many others) style had not been updated to new design.
+- Fixed custom attribute broke compilation if name was starting with a capital letter.
+- Fixed shader compilation error when using a Custom HLSL node.
+- Avoid names which doesn't fit in node search window.
+- Logical operators And (logical) and And (Bitwise) could be mixed up in the node search window when search for "and" (same for Or operator).
+- Blackboard menu entries are better human readable.
+- Fixed issue with null value in slots preventing it to be changed.
+- Fixed error feedback context menu could not be displayed anymore.
+- Fixed RenderTexture could not be used anymore in VFXGraph.
+- We could not change the selected gizmo for nodes with multiple gizmos (for instance: Set Position Sequential Line).
+- VFX Graph: Fixed gizmo overlay's drop down was cut at the bottom.
+- Unexpected JSON error while using ShaderGraph.
+- ShaderGraph keyword are now correctly supported in VFX Graph Output.
+- Fixed space conversion error when copy-pasting a system.
+- Trigger over distance now takes into account change in position (not just velocity).
+- Visual Effects back in Scene FX window.
+- Fixed strip output could not be created anymore.
+- Indeterminate state object fields were hidden instead of greyed out.
+- Fixed copy/paste a parameter node was also duplicating the parameter itself.
+- Fixed editor freeze when selecting all properties/custom attributes from the blackboard
+- Custom HLSL used in ShaderGraph Output
+- Sample of Camera Buffer isn't available in compute passes
+- Remove warning from VFX init for strips (GetParticleIndex)
+- Fixed unexpected warning message in the console
+- Fixed node search window could not be opened through the context menu
+
+## [17.0.0] - 2023-09-26
+
+This version is compatible with Unity 2023.3.0a8.
+
+### Fixed
+
+- Fixed an issue where the "materials" and "sharedMaterials" properties returned all materials instead of returning only the active materials.
+- Fixed an issue where an event at frame zero in Timeline were not handled correctly.
+- Fixed an issue with the wrong size used for updates in strips with immortal particles.
+- Fixed Six-way Shader Graph sub target when using more than one SRP in a project.
+- Unexpected generated shader with invalid ShaderGraph.
+- Keep the built-in templates category always visible when there's no user defined category.
+- Template items could have uneven width when the left panel is too small.
+- The template item hit box was slightly bigger than its visual representation, now it perfectly match.
+- The right panel (details panel) could be resize to as small as zero width, leading to messy layout. Now it has a minimum width of 200px (like the left panel).
+- Fixed a performance issue with parameters gizmos.
+- Fixed missing gizmo for Position exposed property
+- Fixed error log raised by VFX analytics while building a project.
+- Fixed unexpected behavior while switching to AfterPostProcess with ShaderGraph.
+- Fixed gizmo overlay's drop down was cut at the bottom
+
+## [16.0.3] - 2023-07-04
+
+This version is compatible with Unity 2023.3.0a1.
+
+### Fixed
+
+- Initialize VFX material indices to make all materials valid if used on Awake
+- Fix HDRP Decal Output when system is in world space
+- Fixed nested curly braces not supported in custom hlsl code
+- Fix VFX camera command culling failling when all effects are out of frustum
+
+## [16.0.2] - 2023-06-28
+
+This version is compatible with Unity 2023.2.0a22.
+
+### Fixed
+
+- Fixed a loss of Material Settings when switching between two SRP.
+- Fixed error when trying to open a VFX asset without using an SRP. Note that this does not make VFX Graph supported on BiRP.
+- Fixed a case where more than one **No Asset** window could be opened.
+- Fixed the unexpected listing of a Scene object in the object picker from VFX Graph.
+- Fixed immortal particles so they work properly when instancing is enabled.
+- Fixed an exception while removing a clip event in the Timeline Inspector window.
+- Fixed flickering and glitches when using Volumetric Fog Output on Metal devices.
+- Removed lock capabilities while editing material stored in VisualEffectAsset.
+- Fixes ray tracing shader passes when using Shader Graph and Ray Tracing
+- Fix crash when changing to custom batch capacity in computers with large GPU memory
+- Prevent unexpected border highlight after clicking on VFX toolbar button
+- Fixed several small issues related to the new VFX Template window
+- Crash when converting to subgraph block
+- Exception while convert to subgraph with Range of Parameter
+- Subgraph creation doesn't keep activation slots link
+- Crash while sampling combined or deleted mesh with SampleMesh
+
+## [16.0.1] - 2023-05-23
+
+This version is compatible with Unity 2023.2.0a17.
+
+### Changed
+
+- Optimized `VFX.Update` per component overhead.
+- Enabled VFX systems receiving GPU events to now enter sleep state.
+
+### Fixed
+
+- Fixed the broken documentation link for VFX Graph nodes (when documentation is available).
+- Fixed Motion Vector so it is now correct when transform isn't changed every frame.
+- Improved error feedback in case of missing reference in custom spawner.
+- Removed Loop And Delay block listing in favor of Spawn Context Settings (which can be accessed through the Inspector).
+- Fixed shader errors when building with sphere or cube outputs.
+- Fixed shader graph with VFX compatibility were not reimported if imported before VFX package is installed.
+- Fixed a crash when logging an error messages for unexpected buffers.
+- Fixed Opacity Channel "Metallic Map Blue" for VFX URP Decals.
+- Fixed an unexpected asset database error while importing VFX and ShaderGraph dependency.
+- Fixed the wrong evaluation of time in VFX Control Track while using Playables API.
+- Enabled the lighting debug to provide the ambient occlusion contribution on Unlit.
+- Enabled integrating the debug view for VertexDensity and QuadOverdraw.
+- Fixed data serialization that could lead to corrupted state.
+- Fixed a memory leak in the Unity Editor with VFX Graph objects.
+- Fix OutputUpdate warnings about spaces after end of line
+- Removed an error message when a point cache asset is missing, and replaced it with error feedback.
+- Fixed flickering with Volumetric Fog Output.
+- Fix strips tangents and buffer type with Shader Graph
+- Fix potential infinite loop when opening VFX Graph due to space issue
+
+## [16.0.0] - 2023-03-22
+
+This version is compatible with Unity 2023.2.0a9.
+
+### Changed
+
+- Reduced the import cost of VFX Graph objects, especially when importing many objects at once.
+
+### Fixed
+
+- Added extra memory to allow external threads to steal VFX update jobs.
+- Fixed the range not being applied in the UI when setting up a value out of the allowed range.
+- Fixed minor issues with Cube and Sphere particle outputs.
+- Fixed a crash when loading a subscene with VFX in DOTS.
+- Enabled correct generation of the interpolator modifiers for packed structure in HDRP Shader Graph.
+- Enabled minimizing the generated interpolator count with VFX Shader Graph to improve its performance and avoid reaching the limit.
+- Fixed mesh LOD flickering when using TAA.
+- Fixed mismatching LOD between eyes in multi-pass VR.
+- Restored missing tooltips.
+- Re-enabled Volumetric Test in XR.
+- Fixed the `Dispose()` method of `MeshToSDFBaker` leading to memory leaks
+- Fixed an unexpected motion vector when adding precompute velocity that was enabled in Shader Graph.
+- Fixed unexpected per frame garbage while using Timeline.
+- Fixed a crash when removing VFXRenderer from a disabled GameObject.
+- Enabled the exposure weight slider to be hidden when a shadergraph was assigned to an output context.
+- Fixed an error in the console when clicking on the [+] button in the blackboard in the "No Asset" window.
+- Fixed errors in the console when undoing changes from gizmo in some specific conditions.
+- Fixed panning and zooming a VFX Graph was synchronized between all opened tabs. Also when multiple VFX Graph tabs are opened they are now properly restored after Unity is restarted.
+- Enabled the option to filter out DXR and META passes from SG generated shaders.
+- Forced positive color values in the graph UI.
+- Fixed incorrect MotionVectors when using multiple camera or multi pass stereo.
+- Fixed incorrect MotionVectors in XR with Stereo Instancing.
+- Enabled taking user's preference for the Search Window mode into account for object fields in VFX Graph (classic / advanced).
+- Enabled hiding **Sorting mode** and **Revert sorting** when the blend mode is set to Opaque.
+- Enabled hiding the log message asking to check the asset for version control in an empty VFX window, when resetting Editor Layout.
+- Enabled keeping the bottom margin on blocks when collapsed.
 
 ## [15.0.3] - 2022-12-02
 
-This version is compatible with Unity 2023.1.0a23.
+This version is compatible with Unity 2023.2.0a1.
 
 ### Fixed
+
 - Fixed wrong particle count if read before first readback.
 - Fixed subgraph edition causing error **An infinite import loop has been detected.** while saving.
 - Enabled renamed blackboard categories that have been duplicated to stay on screen.
@@ -33,12 +335,14 @@ This version is compatible with Unity 2023.1.0a23.
 
 ## [15.0.2] - 2022-11-04
 
-This version is compatible with Unity 2023.1.0a19.
+This version is compatible with Unity 2023.1.0a23.
 
 ### Changed
+
 - Reduced the time taken by VFXGraph.CheckCompilationVersion that would previously potentially query all assets on every domain reload.
 
 ### Fixed
+
 - Fixed position where VFX are created when VFX asset is dragged to Scene View.
 - Fixed an issue where the output mesh with default shader was incorrectly sorted before the HDRP fog by Replacing default mesh output shader to be SRP compatible.
 - Fixed an unexpected compilation failure with URP Lit Output.
@@ -78,12 +382,14 @@ This version is compatible with Unity 2023.1.0a19.
 
 ## [15.0.1] - 2022-08-04
 
-This version is compatible with Unity 2023.1.0a6.
+This version is compatible with Unity 2023.1.0a19.
 
 ### Changed
+
 - Reduced time taken by code generation when a VFX asset is imported.
 
 ### Fixed
+
 - Fixed an issue when motion vector is applied on line using `targetOffset`, the VFXLoadParameter was missing.
 - Fixed NRE when the Vector2 is configured as a range, it was preventing Decal output context creation.
 - Fixed and unexpected lossy scale evaluation issue on GPU verses CPU where it's correct.
@@ -97,13 +403,15 @@ This version is compatible with Unity 2023.1.0a6.
 
 ## [15.0.0] - 2022-06-13
 
-This version is compatible with Unity 2023.1.0a1.
+This version is compatible with Unity 2023.1.0a6.
 
 ### Changed
+
 - Sticky notes are no longer lost when you convert to block subgraph.
 - Made the input property label colors consistent.
 
 ### Fixed
+
 - Fixed unexpected assert when capacity is really high.
 - Fixed delayed property changes so they apply when you save.
 - Fixed resetting of needsComputeBounds.
@@ -122,19 +430,20 @@ This version is compatible with Unity 2023.1.0a1.
 
 ## [14.0.3] - 2021-05-09
 
-This version is compatible with Unity 2022.2.0a14.
-
 ### Added
+
 - New Timeline Integration which supports scrubbing.
 - Samples project github link button in package manager.
 
 ### Changed
+
 - Fixed the OutputParticle context inspector content so it doesn't shift vertically when you resize the inspector panel.
 - Fixed so that the context name isn't lost when you convert to a different type.
 - Added a missing range slider for the blend property to the custom attribute blend block.
 - Fixed so the space property is carried over when copying/pasting a VFX property.
 
 ### Fixed
+
 - Fixed possible NaNs in Vortex Subgraph node.
 - Improved node position when you create a node by dragging an edge.
 - Fixed an exception when setting when changing the space of a shape to world.
@@ -155,14 +464,13 @@ This version is compatible with Unity 2022.2.0a14.
 
 ## [14.0.2] - 2021-02-04
 
-This version is compatible with Unity 2022.2.0a8.
-
 Version Updated
 The version number for this package has increased due to a version update of a related graphics package.
 
 ## [14.0.1] - 2021-12-07
 
 ### Fixed
+
 - Creating a new VFX of the same name as an already opened VFX will reuse the existing window [Case 1382841](https://issuetracker.unity3d.com/product/unity/issues/guid/1382841/)
 - Incorrect behavior of Tangent Space in ShaderGraph [Case 1363279](https://issuetracker.unity3d.com/product/unity/issues/guid/1363279/)
 - ShaderGraph made with new VFX SG integration where not listed when searching for a shader graph output [Case 1379523](https://issuetracker.unity3d.com/product/unity/issues/guid/1379523/)
@@ -187,6 +495,7 @@ The version number for this package has increased due to a version update of a r
 ## [14.0.0] - 2021-11-17
 
 ### Fixed
+
 - Gradient field doesn't support HDR values [Case 1381867](https://issuetracker.unity3d.com/product/unity/issues/guid/1381867/)
 - Allows for attribute-less systems. [Case 1341789](https://issuetracker.unity3d.com/product/unity/issues/guid/1341789/)
 - Editing the values in the graph did not impact the system in real-time after saving [Case 1371089](https://issuetracker.unity3d.com/product/unity/issues/guid/1371089/)
@@ -195,16 +504,21 @@ The version number for this package has increased due to a version update of a r
 ## [13.1.2] - 2021-11-05
 
 ### Fixed
+
 - Removed extra nodes in Ribbon template. [Case 1355602](https://issuetracker.unity3d.com/product/unity/issues/guid/1355602/)
 
 ## [13.1.1] - 2021-10-04
+
 ### Added
+
 - Multiple VFX graphs can be opened at the same time
 
 ### Changed
+
 - Search window now lists more nodes variants and they are organized by attribute first instead of operation
 
 ### Fixed
+
 - Compilation error while using not exposed texture in ShaderGraph [Case 1367167](https://issuetracker.unity3d.com/product/unity/issues/guid/1367167/)
 - Texture picker lists only textures with expected dimensions (2D, 3D, Cubemap)
 - Fix SDF Baker fail on PS4 & PS5 [Case 1351595](https://fogbugz.unity3d.com/f/cases/1351595/)
@@ -220,14 +534,17 @@ The version number for this package has increased due to a version update of a r
 ## [13.1.0] - 2021-09-24
 
 ### Fixed
+
 - Rename "Material Offset" to "Sorting Priority" in output render state settings [Case 1365257](https://issuetracker.unity3d.com/product/unity/issues/guid/1365257/)
 
 ## [13.0.0] - 2021-09-01
+
 ### Added
+
 - New options to select how to sort particles in the Output Context.
 
-
 ### Fixed
+
 - Prevent vector truncation error in HDRP Decal template
 - Fix potential infinite compilation when using subgraphs [Case 1346576](https://issuetracker.unity3d.com/product/unity/issues/guid/1346576/)
 - Prevent out of sync serialization of VFX assets that could cause the asset to be dirtied without reason
@@ -241,7 +558,9 @@ The version number for this package has increased due to a version update of a r
 - Automatically offset contexts when a new node is inserted to avoid overlapping
 
 ## [12.0.0] - 2021-01-11
+
 ### Added
+
 - Added support for Texture2D Arrays in Flipbooks
 - Added new setting in "Preferences -> Visual Effects" to control the fallback behavior of camera buffers from MainCamera node when the main camera is not rendered.
 - Sample vertices of a transformed skinned mesh with Position (Skinned Mesh) and Sample Skinned Mesh operator.
@@ -262,6 +581,7 @@ The version number for this package has increased due to a version update of a r
 - Improved toolbar design: added icons, removed labels and grouped commands into dropdown menus
 
 ### Changed
+
 - Allow remaking an existing link.
 - Sphere and Cube outputs are now experimental
 - Property Binder : Handle Remove Component removing linked hidden scriptable objectfields
@@ -269,6 +589,7 @@ The version number for this package has increased due to a version update of a r
 - Transform integrated to VFXTypes : Circle, ArcCircle, Sphere, ArcSphere, Torus, ArcTorus, Cone, ArcCone
 
 ### Fixed
+
 - VFXEventBinderBase throwing a null reference exception in runtime
 - Unexpected compilation warning in VFXMouseBinder [Case 1313003](https://issuetracker.unity3d.com/product/unity/issues/guid/1313003/)
 - Prevent creation of subgraph containing only partial systems [Case 1284053](https://issuetracker.unity3d.com/product/unity/issues/guid/1284053/)
@@ -337,14 +658,18 @@ The version number for this package has increased due to a version update of a r
 - Subgraph output properties tooltips were not easily editable when multiline
 
 ## [11.0.0] - 2020-10-21
+
 ### Added
+
 - Added new setting to output nodes to exclude from TAA
 - New Sample Point cache & Sample Attribute map operators
 
 ### Changed
+
 - Changed the "Edit" button so it becomes "New" when no asset is set on a Visual Effect component, in order to save a new visual effect graph asset.
 
 ### Fixed
+
 - Forbid incorrect link between incompatible context [Case 1269756](https://issuetracker.unity3d.com/product/unity/issues/guid/1269756/)
 - Serialization issue with VFXSpawnerCallbacks
 - Unexpected exception while trying to display capacity warning [Case 1294180](https://issuetracker.unity3d.com/product/unity/issues/guid/1294180/)
@@ -354,9 +679,10 @@ The version number for this package has increased due to a version update of a r
 - Fix [Case 1290493](https://fogbugz.unity3d.com/f/cases/1290493/#BugEvent.1072735759)
 - Incorrect path on Linux while targetting Android, IOS or WebGL [Case 1279750](https://issuetracker.unity3d.com/product/unity/issues/guid/1279750/)
 
-
 ## [10.2.0] - 2020-10-19
+
 ### Added
+
 - Warning using Depth Collision on unsupported scriptable render pipeline.
 - Warning in renderer inspector using Light Probe Proxy Volume when this feature isn't available.
 - New operator : Sample Signed distance field
@@ -368,6 +694,7 @@ The version number for this package has increased due to a version update of a r
 - Added Encompass (Point) subgraph utility operator in Additional Samples
 
 ### Fixed
+
 - "Create new VisualEffect Graph" creates a graph from the default template [Case 1279999](https://fogbugz.unity3d.com/f/cases/1279999/)
 - Fix [Case 1268977](https://issuetracker.unity3d.com/product/unity/issues/guid/1268977/)
 - Fix [Case 1114281](https://fogbugz.unity3d.com/f/cases/1114281/)
@@ -407,7 +734,9 @@ The version number for this package has increased due to a version update of a r
 - Disable implicit space transformations in sublock graphs as they led to unexpected behaviors
 
 ## [10.1.0] - 2020-10-12
+
 ### Added
+
 - Compare operator can take int and uint as inputs
 - New operator : Sample Signed distance field
 - New WorldToViewportPoint operator
@@ -418,6 +747,7 @@ The version number for this package has increased due to a version update of a r
 - Error display within the graph.
 
 ### Fixed
+
 - Mesh Sampling incorrect with some GPU (use ByteAddressBuffer instead of Buffer<float>)
 - Fix for node window staying when clicking elsewhere
 - Make VisualEffect created from the GameObject menu have unique names [Case 1262989](https://issuetracker.unity3d.com/product/unity/issues/guid/1262989/)
@@ -435,14 +765,16 @@ The version number for this package has increased due to a version update of a r
 - Random Per-Component on Set Attribute in Spawn Context [Case 1279294](https://issuetracker.unity3d.com/product/unity/issues/guid/1279294/)
 - Fix corrupted UI in nodes due to corrupted point cache files [Case 1232867](https://fogbugz.unity3d.com/f/cases/1232867/)
 - Fix InvalidCastException when using byte properties in point cache files [Case 1276623](https://fogbugz.unity3d.com/f/cases/1276623/)
-- Fix  https://issuetracker.unity3d.com/issues/ux-cant-drag-a-noodle-out-of-trigger-blocks
+- Fix https://issuetracker.unity3d.com/issues/ux-cant-drag-a-noodle-out-of-trigger-blocks
 - Fix [Case 1114281](https://issuetracker.unity3d.com/product/unity/issues/guid/1114281/)
 - Fix shadows not being rendered to some cascades with directional lights [Case 1229972](https://issuetracker.unity3d.com/issues/output-inconsistencies-with-vfx-shadow-casting-and-shadow-cascades)
 - Fix VFX Graph window invalidating existing Undo.undoRedoPerformed delegates.
 - Fix shadergraph changes not reflected in VisualEffectGraph [Case 1278469](https://fogbugz.unity3d.com/f/cases/resolve/1278469/)
 
 ## [10.0.0] - 2019-06-10
+
 ### Added
+
 - Tooltips for Attributes
 - Custom Inspector for Spawn context, delay settings are more user friendly.
 - Quick Expose Property : Holding Alt + Release Click in an Empty space while making property edges creates a new exposed property of corresponding type with current slot value.
@@ -478,6 +810,7 @@ The version number for this package has increased due to a version update of a r
 - Screen space per particle LOD on mesh and lit mesh outputs (Experimental)
 
 ### Fixed
+
 - Moved VFX Event Tester Window visibility to Component Play Controls SceneView Window
 - Universal Render Pipeline : Fog integration for Exponential mode [Case 1177594](https://issuetracker.unity3d.com/issues/urp-slash-fog-vfx-particles)
 - Correct VFXSettings display in Shader Graph compatible outputs
@@ -566,7 +899,9 @@ The version number for this package has increased due to a version update of a r
 - Handle correctly disabled alphaTreshold material slot in shaderGraph.
 
 ## [7.1.1] - 2019-09-05
+
 ### Added
+
 - Moved High Definition templates and includes to com.unity.render-pipelines.high-definition package
 - Navigation commands for subgraph.
 - Allow choosing the place to save vfx subgraph.
@@ -574,6 +909,7 @@ The version number for this package has increased due to a version update of a r
 - Shadergraph integration into vfx. (Experimental)
 
 ### Fixed
+
 - Using struct as subgraph parameters.
 - Objectproperty not consuming delete key.
 - Converting a subgraph operator inside a subgraph operator with outputs.
@@ -591,20 +927,25 @@ The version number for this package has increased due to a version update of a r
 - Unlit outputs are no longer pre-exposed by default in HDRP
 - Augmented generated HLSL floatN precision [Case 1177730] (https://issuetracker.unity3d.com/issues/vfx-graph-7x7-flipbook-particles-flash-and-dont-animate-correctly-in-play-mode-or-in-edit-mode-with-vfx-graph-closed)
 - Spherical coordinates to Rectangular (Cartesians) coordinates node input: angles are now expressed in radians
-- Turbulence noise updated: noise type and frequency can be specified [Case  1141282] (https://issuetracker.unity3d.com/issues/vfx-particles-flicker-when-blend-mode-is-set-to-alpha-turbulence-block-is-enabled-and-there-is-more-than-50000-particles)
+- Turbulence noise updated: noise type and frequency can be specified [Case 1141282] (https://issuetracker.unity3d.com/issues/vfx-particles-flicker-when-blend-mode-is-set-to-alpha-turbulence-block-is-enabled-and-there-is-more-than-50000-particles)
 - Color and Depth camera buffer access in HDRP now use Texture2DArray instead of Texture2D
 - Output Mesh with shader graph now works as expected
 
 ## [7.0.1] - 2019-07-25
+
 ### Added
+
 - Add Position depth operator along with TransformVector4 and LoadTexture2D expressions.
 
 ### Fixed
+
 - Inherit attribute block appears three times [Case 1166905](https://issuetracker.unity3d.com/issues/attributes-each-inherit-attribute-block-appears-3-times-in-the-search-and-some-have-a-seed-attribute)
 - Unexpected exception : `Trying to modify space on a not spaceable slot` error when adding collision or conform blocks [Case 1163442](https://issuetracker.unity3d.com/issues/block-trying-to-modify-space-on-a-not-spaceable-slot-error-when-adding-collision-or-conform-blocks)
 
 ## [7.0.0] - 2019-07-17
+
 ### Added
+
 - Make multiselection work in a way that do not assume that the same parameter will have the same index in the property sheet.
 - auto recompile when changing shaderpath
 - auto recompile new vfx
@@ -622,6 +963,7 @@ The version number for this package has increased due to a version update of a r
 - Motion Vector support for PlanarPrimitive & Mesh outputs
 
 ### Fixed
+
 - Handle a possible exception (ReflectionTypeLoadException) while using VFXParameterBinderEditor
 - Renamed Parameter Binders to Property Binders. (This will cause breaking serialization for these PropertyBinders : VFXAudioSpectrumBinder, VFXInputMouseBinder, VFXInputMouseBinder, VFXInputTouchBinder, VFXInputTouchBinder, VFXRaycastBinder, VFXTerrainBinder, VFXUIDropdownBinder, VFXUISliderBinder, VFXUIToggleBinder)
 - Renamed Namespace `UnityEngine.Experimental.VFX.Utility` to `UnityEngine.VFX.Utility`
@@ -629,7 +971,9 @@ The version number for this package has increased due to a version update of a r
 - Automatic template path detection based on SRP in now working correctly
 
 ## [6.7.0-preview] - 2019-05-16
+
 ### Added
+
 - Distortion Outputs (Quad / Mesh)
 - Color mapping mode for unlit outputs (Textured/Gradient Mapped)
 - Add Triangle and Octagon primitives for particle outputs
@@ -637,6 +981,7 @@ The version number for this package has increased due to a version update of a r
 - Trigger : GPUEvent Rate (Over time or Distance)
 
 ### Fixed
+
 - Fix shader compilation error with debug views
 - Improve AA line rendering
 - Fix screen space size block
@@ -649,7 +994,9 @@ The version number for this package has increased due to a version update of a r
 - Add Exposure Weight for emissive in lit outputs
 
 ## [6.6.0-preview] - 2019-04-01
+
 ### Added
+
 - Addressing mode for Sequential blocks
 - Invert transform available on GPU
 - Add automatic depth buffer reference for main camera (for position and collision blocks)
@@ -661,6 +1008,7 @@ The version number for this package has increased due to a version update of a r
 - Add Other Parameter Binders : Previous Position, Hierarchy Attribute Map, Multi-Position, Enabled
 
 ### Fixed
+
 - Undo Redo while changing space
 - Type declaration was unmodifiable due to exception during space intialization
 - Fix unexpected issue when plugging per particle data into hash of per component fixed random
@@ -681,10 +1029,13 @@ The version number for this package has increased due to a version update of a r
 ## [6.3.0-preview] - 2019-02-18
 
 ## [6.2.0-preview] - 2019-02-15
+
 ### Changed
+
 - Code refactor: all macros with ARGS have been swapped with macros with PARAM. This is because the ARGS macros were incorrectly named
 
 ### Fixed
+
 - Better Handling of Null or Missing Parameter Binders (Editor + Runtime)
 - Fixes in VFX Raycast Binder
 - Fixes in VFX Parameter Binder Editor
@@ -692,7 +1043,9 @@ The version number for this package has increased due to a version update of a r
 ## [6.1.0-preview] - 2019-02-13
 
 ## [6.0.0-preview] - 2019-02-23
+
 ### Added
+
 - Add spawnTime & spawnCount operator
 - Add seed slot to constant random mode of Attribute from curve and map
 - Add customizable function in VariantProvider to replace the default cartesian product
@@ -700,6 +1053,7 @@ The version number for this package has increased due to a version update of a r
 - Expose light probes parameters in VisualEffect inspector
 
 ### Fixed
+
 - Some fixes in noise library
 - Some fixes in the Visual Effect inspector
 - Visual Effects menu is now in the right place
@@ -716,13 +1070,17 @@ The version number for this package has increased due to a version update of a r
 - Shader compilation with SimpleLit and debug display
 
 ## [5.2.0-preview] - 2018-11-27
+
 ### Added
+
 - Prewarm mechanism
 
 ### Fixed
+
 - Handle data loss of overriden parameters better
 
 ### Optimized
+
 - Improved iteration times by not compiling initial shader variant
 
 ## [4.3.0-preview] - 2018-11-23

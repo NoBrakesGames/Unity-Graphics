@@ -97,7 +97,7 @@ namespace UnityEngine.Rendering.HighDefinition
         // All Validate functions must be static. It allows to automatically update the shaders with a script if code changes
         internal static void ValidateMaterial(Material material)
         {
-            MaterialId materialId = material.GetMaterialId();
+            MaterialId materialId = material.GetMaterialType();
             if (material.HasProperty(kMaterialID))
             {
                 if (materialId != MaterialId.LitStandard && materialId != MaterialId.LitSSS && materialId != MaterialId.LitTranslucent)
@@ -112,7 +112,9 @@ namespace UnityEngine.Rendering.HighDefinition
             SetupLayersMappingKeywords(material);
             bool receiveSSR = material.GetSurfaceType() == SurfaceType.Opaque ? (material.HasProperty(kReceivesSSR) ? material.GetInt(kReceivesSSR) != 0 : false)
                 : (material.HasProperty(kReceivesSSRTransparent) ? material.GetInt(kReceivesSSRTransparent) != 0 : false);
-            BaseLitAPI.SetupStencil(material, receivesLighting: true, receiveSSR, materialId == MaterialId.LitSSS);
+
+            bool excludeFromTUAndAA = BaseLitAPI.CompatibleWithExcludeFromTUAndAA(material) && material.GetInt(kExcludeFromTUAndAA) != 0;
+            BaseLitAPI.SetupStencil(material, receivesLighting: true, receiveSSR, materialId == MaterialId.LitSSS, excludeFromTUAndAA: excludeFromTUAndAA);
 
             for (int i = 0; i < kMaxLayerCount; ++i)
             {

@@ -1,29 +1,27 @@
 default:
-  area: RP Foundation
+  area: SRP Foundation
 
-rpw:
+Workflow:
   when:
     path:
       - ^.*CameraCaptureBridge?.*$
+      - ^.*CoreRenderPipelinePreferences?.*$
       - ^.*CoreUtils?.*$
       - ^.*DelegateUtility?.*$
       - ^.*MeshGizmo?.*$
       - ^.*ResourceReloader?.*$
       - ^.*SceneRenderPipeline?.*$
       - ^.*TextureCurve?.*$ 
-  area: RP Workflows
+  area: SRP Settings
 
 xr:
   when:
     path:
       - ^.*XRUtils?.*$
-  area: XR SRP
+  area: SRP XR
 
-hdrp:
+workflow:
   when:
     path:
-      - ^.*FSRUtils?.*$
-      - ^.*HableCurve?.*$
-      - ^.*HaltonSequence?.*$
-      - ^.*MaterialQuality?.*$
-  area: HD RP
+      - ^.*TextureCurve?.*$
+  area: SRP Settings

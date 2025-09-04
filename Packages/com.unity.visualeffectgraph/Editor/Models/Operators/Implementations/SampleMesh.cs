@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.VFX;
@@ -10,22 +9,30 @@ namespace UnityEditor.VFX.Operator
 {
     class SampleMeshProvider : VariantProvider
     {
-        protected override sealed Dictionary<string, object[]> variants
+        protected virtual string nameTemplate { get; } = "Sample {0}";
+        protected virtual Type operatorType { get; } = typeof(SampleMesh);
+
+        public override IEnumerable<Variant> GetVariants()
         {
-            get
-            {
-                return new Dictionary<string, object[]>
-                {
-                    { "source", Enum.GetValues(typeof(SampleMesh.SourceType)).Cast<object>().ToArray() },
-                };
-            }
+            yield return new Variant(
+                string.Format(nameTemplate, "Mesh"),
+                "Sampling",
+                operatorType,
+                new[] { new KeyValuePair<string, object>("source", SampleMesh.SourceType.Mesh) });
+
+            yield return new Variant(
+                string.Format(nameTemplate, "Skinned Mesh"),
+                "Sampling",
+                operatorType,
+                new[] { new KeyValuePair<string, object>("source", SampleMesh.SourceType.SkinnedMeshRenderer) });
         }
     }
 
-    [VFXInfo(category = "Sampling", variantProvider = typeof(SampleMeshProvider))]
+    [VFXHelpURL("Operator-SampleMesh")]
+    [VFXInfo(variantProvider = typeof(SampleMeshProvider))]
     class SampleMesh : VFXOperator
     {
-        override public string name
+        public override string name
         {
             get
             {
@@ -191,14 +198,14 @@ namespace UnityEditor.VFX.Operator
         public static readonly string kMixingSMRWorldAndLocalPostTransformMsg = @"Mixing World Root Bone transform with an input transform in Local space can yield unexpected results.
 To avoid this, change the input Transform space from Local to World or None.";
 
-        internal override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal override void GenerateErrors(VFXErrorReporter report)
         {
-            base.GenerateErrors(manager);
+            base.GenerateErrors(report);
 
             var transformSlot = inputSlots.Last();
             if (actualSkinnedTransform == SkinnedRootTransform.ApplyWorldRootTransform && transformSlot.space == VFXSpace.Local)
             {
-                manager.RegisterError("MixingSMRWorldAndLocalPostTransformOperator", VFXErrorType.Warning, kMixingSMRWorldAndLocalPostTransformMsg);
+                report.RegisterError("MixingSMRWorldAndLocalPostTransformOperator", VFXErrorType.Warning, kMixingSMRWorldAndLocalPostTransformMsg, this);
             }
 
             var previousFlag = VertexAttributeFlag.PreviousNormal
@@ -210,7 +217,7 @@ To avoid this, change the input Transform space from Local to World or None.";
 
             if (source == SourceType.Mesh && (output & previousFlag) != 0)
             {
-                manager.RegisterError("PreviousOutputUsageOnMesh", VFXErrorType.Warning, "Sampling previous data is only available with SkinnedMeshRenderer sources.\nWhen using a Mesh source, previous outputs return the same values as current ones.");
+                report.RegisterError("PreviousOutputUsageOnMesh", VFXErrorType.Warning, "Sampling previous data is only available with SkinnedMeshRenderer sources.\nWhen using a Mesh source, previous outputs return the same values as current ones.", this);
             }
         }
 
@@ -579,7 +586,7 @@ To avoid this, change the input Transform space from Local to World or None.";
 
                 //insure tangent orthonormal with normal (cross of normalized input, not need to renormalize)
                 tangent = VFXOperatorUtility.Cross(bitangent, normal);
-                sampled = new VFXExpressionVector3sToMatrix(bitangent, normal, tangent, position);
+                sampled = new VFXExpressionAxisToMatrix(bitangent, normal, tangent, position);
             }
             else if (currentAttribute == VertexAttributeFlag.Velocity)
             {

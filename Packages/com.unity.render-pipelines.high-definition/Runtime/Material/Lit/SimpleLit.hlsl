@@ -207,15 +207,8 @@ PreLightData GetPreLightData(float3 V, PositionInputs posInput, inout BSDFData b
     preLightData.iblR = reflect(-V, N);
 
     // Area light
-    // We use V = sqrt( 1 - cos(theta) ) for parametrization which is kind of linear and only requires a single sqrt() instead of an expensive acos()
-    float cosThetaParam = sqrt(1 - clampedNdotV); // For Area light - UVs for sampling the LUTs
-    float2 uv = LTC_LUT_OFFSET + LTC_LUT_SCALE * float2(bsdfData.perceptualRoughness, cosThetaParam);
-
-    preLightData.ltcTransformDiffuse = k_identity3x3;
-
-    preLightData.ltcTransformSpecular      = 0.0;
-    preLightData.ltcTransformSpecular._m22 = 1.0;
-    preLightData.ltcTransformSpecular._m00_m02_m11_m20 = SAMPLE_TEXTURE2D_ARRAY_LOD(_LtcData, s_linear_clamp_sampler, uv, LTCLIGHTINGMODEL_GGX, 0);
+    preLightData.ltcTransformDiffuse  = k_identity3x3;
+    preLightData.ltcTransformSpecular = SampleLtcMatrix(bsdfData.perceptualRoughness, clampedNdotV, LTCLIGHTINGMODEL_GGX);
 
     // Construct a right-handed view-dependent orthogonal basis around the normal
     preLightData.orthoBasisViewNormal = GetOrthoBasisViewNormal(V, N, preLightData.NdotV);
@@ -352,7 +345,7 @@ float EvaluateLight_EnvIntersection(float3 positionWS, float3 normalWS, EnvLight
 #endif
 #define LIGHT_EVALUATION_NO_CONTACT_SHADOWS
 // TODO: validate that the condition will work!
-#if !HDRP_ENABLE_SHADOWS
+#if defined(_RECEIVE_SHADOWS_OFF)
 #define LIGHT_EVALUATION_NO_SHADOWS
 #endif
 #define LIGHT_EVALUATION_NO_CLOUDS_SHADOWS

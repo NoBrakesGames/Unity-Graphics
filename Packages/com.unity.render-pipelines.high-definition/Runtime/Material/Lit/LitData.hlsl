@@ -3,6 +3,7 @@
 //-------------------------------------------------------------------------------------
 
 // Use surface gradient normal mapping as it handle correctly triplanar normal mapping and multiple UVSet
+// Not used in rtx as it requires derivatives
 #ifndef SHADER_STAGE_RAY_TRACING
 #define SURFACE_GRADIENT
 #endif
@@ -12,9 +13,12 @@
 //-------------------------------------------------------------------------------------
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/SampleUVMapping.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/MaterialUtilities.hlsl"
-#ifndef SHADER_STAGE_RAY_TRACING
+#if !defined(SHADER_STAGE_RAY_TRACING) || defined (PATH_TRACING_CLUSTERED_DECALS)
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Decal/DecalUtilities.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitDecalData.hlsl"
+#endif
+#ifndef SURFACE_GRADIENT
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/NormalSurfaceGradient.hlsl"
 #endif
 
 //#define PROJECTED_SPACE_NDF_FILTERING
@@ -254,23 +258,30 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     surfaceData.geomNormalWS = input.tangentToWorld[2];
     surfaceData.specularOcclusion = 1.0;
 
-#if HAVE_DECALS && (defined(DECAL_SURFACE_GRADIENT) && defined(SURFACE_GRADIENT))
+#ifdef DECAL_NORMAL_BLENDING
     if (_EnableDecals)
     {
+        #ifndef SURFACE_GRADIENT
+        normalTS = SurfaceGradientFromTangentSpaceNormalAndFromTBN(normalTS,
+                input.tangentToWorld[0], input.tangentToWorld[1]);
+        #endif
+
         DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
         ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData, normalTS);
     }
-#endif
 
+    GetNormalWS_SG(input, normalTS, surfaceData.normalWS, doubleSidedConstants);
+#else
     GetNormalWS(input, normalTS, surfaceData.normalWS, doubleSidedConstants);
 
-#if HAVE_DECALS && (!defined(DECAL_SURFACE_GRADIENT) || !defined(SURFACE_GRADIENT))
+    #if HAVE_DECALS
     if (_EnableDecals)
     {
         // Both uses and modifies 'surfaceData.normalWS'.
         DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
         ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData);
     }
+    #endif
 #endif
 
     // Use bent normal to sample GI if available
@@ -280,14 +291,17 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     bentNormalWS = surfaceData.normalWS;
 #endif
 
-#if defined(DEBUG_DISPLAY)  && !defined(SHADER_STAGE_RAY_TRACING)
+#if defined(DEBUG_DISPLAY)
+#if !defined(SHADER_STAGE_RAY_TRACING)
+    // Mipmap mode debugging isn't supported with ray tracing as it relies on derivatives
     if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
     {
-        surfaceData.baseColor = GetTextureDataDebug(_DebugMipMapMode, layerTexCoord.base.uv, _BaseColorMap, _BaseColorMap_TexelSize, _BaseColorMap_MipInfo, surfaceData.baseColor);
+        surfaceData.baseColor = GET_TEXTURE_STREAMING_DEBUG(posInput.positionSS, input.texCoord0);
         surfaceData.metallic = 0;
     }
+#endif
 
-    // We need to call ApplyDebugToSurfaceData after filling the surfarcedata and before filling builtinData
+    // We need to call ApplyDebugToSurfaceData after filling the surfaceData and before filling builtinData
     // as it can modify attribute use for static lighting
     ApplyDebugToSurfaceData(input.tangentToWorld, surfaceData);
 #endif

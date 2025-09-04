@@ -13,8 +13,8 @@ ${VFXGlobalDeclaration}
 #pragma multi_compile _ UNITY_SINGLE_PASS_STEREO STEREO_INSTANCING_ON STEREO_MULTIVIEW_ON
 #endif
 
-#if HAS_STRIPS
-RWStructuredBuffer<uint> stripDataBuffer;
+#if HAS_STRIPS_DATA
+StructuredBuffer<uint> stripDataBuffer;
 #endif
 
 ${VFXInclude("Shaders/VFXParticleCommon.template")}
@@ -87,11 +87,9 @@ void CSMain(uint3 groupId		: SV_GroupID,
 {
 	uint id = GetThreadId(groupId, groupThreadId, dispatchWidth);
 
-	uint index = GetThreadId(groupId, 0, dispatchWidth);
-	${VFXInitInstancing}
-	index += groupThreadId.x;
+    ${VFXInitInstancingCompute}
 
-    ContextData contextData = instancingContextData[instanceActiveIndex];
+    ${VFXLoadContextData}
     uint systemSeed = contextData.systemSeed;
     uint nbMax = contextData.maxParticleCount;
 
@@ -113,23 +111,39 @@ void CSMain(uint3 groupId		: SV_GroupID,
 		VFXAttributes attributes = (VFXAttributes)0;
 		VFXSourceAttributes sourceAttributes = (VFXSourceAttributes)0;
 		${VFXLoadAttributes:{alive}}
+#if HAS_STRIPS
+        // For strips, we need to render the entire strip, even if some particles are dead.
+        const StripData stripData = GetStripDataFromParticleIndex(index, instanceIndex);
+        InitStripAttributes(index, attributes, stripData);
+        uint relativeIndexInStrip = GetRelativeIndex(index, stripData);
+		if (relativeIndexInStrip < stripData.nextIndex)
+#else
 		if (attributes.alive)
+#endif
 		{
 			${VFXLoadAttributes:{(?!(alive))(\b\w)}}
-#if HAS_STRIPS
-            const StripData stripData = GetStripDataFromParticleIndex(index, instanceIndex);
-            InitStripAttributes(index, attributes, stripData);
-            uint relativeIndexInStrip = GetRelativeIndex(index, stripData);
-#endif
 			${VFXProcessBlocks}
 
+#if !HAS_STRIPS
             // Recheck alive as blocks can set it to false for manual culling.
             // Test will be stripped if it's not the case anyway.
             if (attributes.alive)
+#endif
             {
                 ${VFXLoadSize}
+                float3 center = attributes.position;
 #if HAS_STRIPS
-                size3 += size3 < 0.0f ? -VFX_EPSILON : VFX_EPSILON; // Add an epsilon so that size is never 0 for strips
+                // Add an epsilon so that size is never 0 for strips
+                size3.x += size3.x < 0.0f ? -VFX_EPSILON : VFX_EPSILON;
+                size3.y += size3.y < 0.0f ? -VFX_EPSILON : VFX_EPSILON;
+                size3.z += size3.z < 0.0f ? -VFX_EPSILON : VFX_EPSILON;
+
+                if (relativeIndexInStrip < stripData.nextIndex - 1)
+                {
+                    uint nextIndex = GetParticleIndex(relativeIndexInStrip + 1,stripData);
+                    center = (center + GetParticlePosition(nextIndex, instanceIndex)) * 0.5f;
+                    size3 += abs(center - attributes.position) * sign(size3);
+                }
 #endif
                 float4x4 elementToVFX = GetElementToVFXMatrix(
                     attributes.axisX,
@@ -138,7 +152,7 @@ void CSMain(uint3 groupId		: SV_GroupID,
                     float3(attributes.angleX,attributes.angleY,attributes.angleZ),
                     float3(attributes.pivotX,attributes.pivotY,attributes.pivotZ),
                     size3,
-                    attributes.position);
+                    center);
 
 #if VFX_FEATURE_FRUSTUM_CULL || VFX_FEATURE_LOD
 #if VFX_WORLD_SPACE

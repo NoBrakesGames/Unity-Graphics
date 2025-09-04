@@ -1,1 +1,26 @@
-area: Universal RP
+old:
+  area: SRP Foundation
+
+Workflow:
+  when:
+    path:
+      - ^.*Volume?.*$
+      - ^.*GlobalSettings?.*$
+      - ^.*AdditionalLight?.*$
+      - ^.*Camera?.*$
+      - ^.*ContextualMenuDispatcher?.*$
+  area: SRP Settings
+  
+Tools:
+  when:
+    path:
+      - ^.*Analytic?.*$
+      - ^.*LightExplorer?.*$
+      - ^.*MaterialUpgrader?.*$
+  area: Graphics Tools
+
+post-processing-and-compositing:
+  when:
+    path:
+      - ^.*PostProcessPass?.*$
+  area: Post-processing and Compositing

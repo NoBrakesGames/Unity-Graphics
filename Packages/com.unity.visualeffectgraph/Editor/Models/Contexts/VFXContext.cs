@@ -24,11 +24,14 @@ namespace UnityEditor.VFX
         SpawnerGPU = 1 << 6,
         Subgraph = 1 << 7,
         Filter = 1 << 8,
+        BlockSubgraph = 1 << 9,
 
         InitAndUpdate = Init | Update,
         InitAndUpdateAndOutput = Init | Update | Output,
         UpdateAndOutput = Update | Output,
         All = Init | Update | Output | Spawner | Subgraph,
+
+        CanHaveBlocks = ~(OutputEvent | Event | SpawnerGPU | Subgraph),
     };
 
     [Flags]
@@ -72,11 +75,11 @@ namespace UnityEditor.VFX
             get { return m_Label; }
             set
             {
-                var invalidationCause = InvalidationCause.kUIChanged;
-                if (contextType == VFXContextType.Spawner && m_Label != value)
-                    invalidationCause = InvalidationCause.kSettingChanged;
-                m_Label = value;
-                Invalidate(invalidationCause);
+                if (m_Label != value)
+                {
+                    m_Label = value;
+                    Invalidate(InvalidationCause.kSettingChanged);
+                }
             }
         }
 
@@ -126,11 +129,13 @@ namespace UnityEditor.VFX
             base.OnEnable();
         }
 
-        public bool doesGenerateShader { get { return codeGeneratorTemplate != null; } }
+        public virtual bool doesGenerateShader { get { return codeGeneratorTemplate != null; } }
         public virtual string codeGeneratorTemplate { get { return null; } }
         public virtual bool codeGeneratorCompute { get { return true; } }
         public virtual bool doesIncludeCommonCompute { get { return codeGeneratorCompute; } }
         public virtual VFXContextType contextType { get { return m_ContextType; } }
+
+        public virtual VFXContextType compatibleContextType { get { return contextType; } } 
         public virtual VFXDataType inputType { get { return m_InputType; } }
         public virtual VFXDataType outputType { get { return m_OutputType; } }
         public virtual VFXDataType ownedType { get { return contextType == VFXContextType.Output ? inputType : outputType; } }
@@ -141,7 +146,7 @@ namespace UnityEditor.VFX
         public virtual IEnumerable<string> additionalDefines { get { return Enumerable.Empty<string>(); } }
         public virtual IEnumerable<KeyValuePair<string, VFXShaderWriter>> additionalReplacements { get { return Enumerable.Empty<KeyValuePair<string, VFXShaderWriter>>(); } }
         public virtual IEnumerable<string> fragmentParameters { get { return Enumerable.Empty<string>(); } }
-        public virtual IEnumerable<string> vertexParameters { get { return Enumerable.Empty<string>(); } }
+        public virtual bool usesMaterialVariantInEditMode { get { return false; } }
 
         public virtual VFXContextCompiledData PrepareCompiledData()
         {
@@ -151,6 +156,7 @@ namespace UnityEditor.VFX
                 {
                     new VFXTask
                     {
+                        doesGenerateShader = doesGenerateShader,
                         templatePath = codeGeneratorTemplate,
                         type = taskType,
                         shaderType = codeGeneratorCompute ? VFXTaskShaderType.ComputeShader : VFXTaskShaderType.Shader,
@@ -265,10 +271,12 @@ namespace UnityEditor.VFX
             return Accept(block, index);
         }
 
-        public virtual bool Accept(VFXBlock block, int index = -1)
+        public bool Accept(VFXBlock block, int index = -1) => Accept(block.compatibleContexts, block.compatibleData);
+        public bool Accept(VFXContextType blockContexts, VFXDataType blockData) => (blockContexts & compatibleContextType) == compatibleContextType && (blockData & ownedType) != 0;
+
+        public bool CanHaveBlocks()
         {
-            var testedType = contextType == VFXContextType.Output ? inputType : outputType;
-            return ((block.compatibleContexts & contextType) != 0) && ((block.compatibleData & testedType) != 0);
+            return (contextType & VFXContextType.CanHaveBlocks) != 0;
         }
 
         protected override void OnAdded()
@@ -480,7 +488,7 @@ namespace UnityEditor.VFX
 
         public void SetDefaultData(bool notify)
         {
-            InnerSetData(VFXData.CreateDataType(GetGraph(), ownedType), notify);
+            InnerSetData(VFXData.CreateDataType(ownedType), notify);
         }
 
         public virtual void OnDataChanges(VFXData oldData, VFXData newData)
@@ -494,8 +502,6 @@ namespace UnityEditor.VFX
                 if (m_Data != null)
                 {
                     m_Data.OnContextRemoved(this);
-                    if (m_Data.owners.Count() == 0)
-                        m_Data.Detach(notify);
                 }
                 OnDataChanges(m_Data, data);
                 m_Data = data;
@@ -507,9 +513,10 @@ namespace UnityEditor.VFX
                     Invalidate(InvalidationCause.kStructureChanged);
 
                 // Propagate data downwards
-                foreach (var output in m_OutputFlowSlot.SelectMany(o => o.link.Select(l => l.context)))
-                    if (output.ownedType == ownedType)
-                        output.InnerSetData(data, notify);
+                if (ownedType.HasFlag(VFXDataType.Particle)) // Only propagate for particle type atm
+                    foreach (var output in m_OutputFlowSlot.SelectMany(o => o.link.Select(l => l.context)))
+                        if (output.ownedType == ownedType)
+                            output.InnerSetData(data, notify);
             }
         }
 
@@ -714,5 +721,26 @@ namespace UnityEditor.VFX
                 attributesInfos = attributesInfos.Concat(block.attributes);
             return attributesInfos;
         }
+
+        public List<VFXData.TaskProfilingData> GetContextTaskIndices()
+        {
+            return GetData().GetContextTaskIndices(this);
+        }
+
+        public List<uint> CreateInstancingSplitValues(VFXExpressionGraph expressionGraph)
+        {
+            List<uint> instancingSplitValues = new List<uint>();
+            foreach (var exp in instancingSplitCPUExpressions)
+            {
+                int index = expressionGraph.GetFlattenedIndex(exp);
+                if (index >= 0)
+                {
+                    instancingSplitValues.Add((uint)index);
+                }
+            }
+            return instancingSplitValues;
+        }
+
+        public virtual IEnumerable<VFXExpression> instancingSplitCPUExpressions { get { return Enumerable.Empty<VFXExpression>(); } }
     }
 }

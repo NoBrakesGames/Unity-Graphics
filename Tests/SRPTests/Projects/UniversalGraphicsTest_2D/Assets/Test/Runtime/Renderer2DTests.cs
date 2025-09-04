@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.Rendering.Universal;
 
 [TestFixture]
@@ -23,6 +24,7 @@ class Renderer2DTests
         m_BaseCameraData.SetRenderer(2);    // 2D Renderer. See the list of Renderers in CommonAssets/UniversalRPAsset.
         m_BaseCameraData.renderType = CameraRenderType.Base;
         m_BaseCameraData.renderPostProcessing = false;
+        m_BaseCamera.targetTexture = new RenderTexture(m_BaseCamera.pixelWidth, m_BaseCamera.pixelHeight, 24);
 
         m_OverlayObj = new GameObject();
         m_OverlayCamera = m_OverlayObj.AddComponent<Camera>();
@@ -72,6 +74,7 @@ class Renderer2DTests
     }
 
     [Test]
+    [UnityPlatform(exclude = new RuntimePlatform[] { RuntimePlatform.WindowsPlayer })] // Unstable: https://jira.unity3d.com/browse/UUM-112466
     public void BaseRendererUsesSeparateDepthAttachmentFromColorTextureIfNoDepthStencilRequested()
     {
         m_BaseCameraData.renderPostProcessing = true;   // This will make the renderer create color texture.
@@ -100,6 +103,7 @@ class Renderer2DTests
     }
 
     [Test]
+    [UnityPlatform(exclude = new RuntimePlatform[] { RuntimePlatform.WindowsPlayer })] // Unstable: https://jira.unity3d.com/browse/UUM-112466
     public void OverlayRendererSetsTheCreateTextureFlags()
     {
         m_BaseCameraData.cameraStack.Add(m_OverlayCamera);
@@ -111,4 +115,55 @@ class Renderer2DTests
         Assert.IsTrue(overlayRenderer.createColorTexture);
         Assert.IsTrue(overlayRenderer.createDepthTexture);
     }
+
+    [Test]
+    public void PixelPerfectCameraZeroScale()
+    {
+        m_BaseObj.AddComponent<PixelPerfectCamera>();
+
+        // Check for errors if scale is set to zero
+        m_BaseCamera.transform.localScale = Vector3.zero;
+
+        m_BaseCamera.Render();
+
+        bool valid = m_BaseCamera.worldToCameraMatrix.ValidTRS();
+
+        Assert.IsTrue(valid);
+    }
+
+    [Test]
+    [UnityPlatform(exclude = new RuntimePlatform[] { RuntimePlatform.WindowsPlayer })] // Unstable on StandaloneWindows64: https://jira.unity3d.com/browse/UUM-112466
+    public void PostProcessingEnabled_OverlayCamera()
+    {
+        m_BaseCameraData.cameraStack.Add(m_OverlayCamera);
+
+        m_OverlayCameraData.renderPostProcessing = true;
+
+        m_BaseCamera.Render();
+    }
+
+
+    [Test]
+    [UnityPlatform(exclude = new RuntimePlatform[] { RuntimePlatform.WindowsPlayer })] // Unstable on StandaloneWindows64: https://jira.unity3d.com/browse/UUM-112466
+    public void PostProcessingEnabled_BaseCamera()
+    {
+        m_BaseCameraData.cameraStack.Add(m_OverlayCamera);
+
+        m_BaseCameraData.renderPostProcessing = true;
+
+        m_BaseCamera.Render();
+    }
+
+    [Test]
+    [UnityPlatform(exclude = new RuntimePlatform[] { RuntimePlatform.WindowsPlayer })] // Unstable on StandaloneWindows64: https://jira.unity3d.com/browse/UUM-112466
+    public void PostProcessingEnabled_BaseAndOverlayCamera()
+    {
+        m_BaseCameraData.cameraStack.Add(m_OverlayCamera);
+
+        m_BaseCameraData.renderPostProcessing = true;
+        m_OverlayCameraData.renderPostProcessing = true;
+
+        m_BaseCamera.Render();
+    }
+
 }

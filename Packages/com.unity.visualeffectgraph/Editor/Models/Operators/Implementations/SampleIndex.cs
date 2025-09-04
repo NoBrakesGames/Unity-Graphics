@@ -6,7 +6,14 @@ using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Sampling", variantProvider = typeof(SampleMeshProvider))]
+    class SampleMeshIndexProvider : SampleMeshProvider
+    {
+        protected override string nameTemplate { get; } = "Sample {0} Index";
+        protected override Type operatorType { get; } = typeof(SampleIndex);
+    }
+
+    [VFXHelpURL("Operator-SampleMeshIndex")]
+    [VFXInfo(variantProvider = typeof(SampleMeshIndexProvider))]
     class SampleIndex : VFXOperator
     {
         override public string name

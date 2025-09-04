@@ -39,7 +39,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Sorting flags of the objects to render.
         /// </summary>
-        public SortingCriteria sortingCriteria = SortingCriteria.CommonOpaque;
+        public SortingCriteria sortingCriteria = HDUtils.k_OpaqueSortingCriteria;
 
         /// <summary>
         /// Select which type of override to apply on the DrawRenderers pass.
@@ -231,7 +231,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 stencilReference = overrideStencil ? stencilReferenceValue : 0,
             };
 
-            PerObjectData renderConfig = ctx.hdCamera.frameSettings.IsEnabled(FrameSettingsField.Shadowmask) ? HDUtils.GetBakedLightingWithShadowMaskRenderConfig() : HDUtils.GetBakedLightingRenderConfig();
+            PerObjectData renderConfig = HDUtils.GetRendererConfiguration(ctx.hdCamera.frameSettings.IsEnabled(FrameSettingsField.AdaptiveProbeVolume), ctx.hdCamera.frameSettings.IsEnabled(FrameSettingsField.Shadowmask));
             var overrideShaderMaterial = (overrideShader != null) ? new Material(overrideShader) : null;
 
             var result = new RendererUtils.RendererListDesc(shaderPasses, ctx.cullingResults, ctx.hdCamera.camera)

@@ -1,20 +1,17 @@
 using System;
 using System.Linq;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.Overlays;
 using UnityEditor.Experimental;
-using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.VFX;
 using UnityEditor.VFX;
 using UnityEditor.VFX.UI;
-
 using UnityObject = UnityEngine.Object;
-using UnityEditorInternal;
 using System.Reflection;
+using UnityEngine.Profiling;
+using UnityEngine.Rendering;
 
 [CustomEditor(typeof(VFXModel), true)]
 [CanEditMultipleObjects]
@@ -53,12 +50,13 @@ class VFXSlotContainerEditor : Editor
         foreach (var prop in settingFields.Select(t => new KeyValuePair<VFXSetting, SerializedProperty>(t, FindProperty(t))).Where(t => t.Value != null))
         {
             var fieldInfo = prop.Key.field;
+            var disabledScope = new EditorGUI.DisabledScope(prop.Key.visibility.HasFlag(VFXSettingAttribute.VisibleFlags.ReadOnly));
             EditorGUI.BeginChangeCheck();
-            var stringAttribute = fieldInfo.GetCustomAttributes<StringProviderAttribute>(true);
+            var stringAttribute = fieldInfo.GetCustomAttributes<StringProviderAttribute>(true).ToArray();
             var rangeAttribute = fieldInfo.GetCustomAttributes<RangeAttribute>(false).FirstOrDefault();
-            if (stringAttribute.Any())
+            if (stringAttribute.Length > 0)
             {
-                var strings = StringPropertyRM.FindStringProvider(stringAttribute.ToArray())();
+                var strings = StringPropertyRM.FindStringProvider(slotContainer, stringAttribute)();
 
                 int selected = prop.Value.hasMultipleDifferentValues ? -1 : System.Array.IndexOf(strings, prop.Value.stringValue);
                 int result = EditorGUILayout.Popup(ObjectNames.NicifyVariableName(prop.Value.name), selected, strings);
@@ -71,14 +69,12 @@ class VFXSlotContainerEditor : Editor
             {
                 GUIContent[] enumNames = null;
                 int[] enumValues = null;
-
                 Array enums = Enum.GetValues(fieldInfo.FieldType);
                 List<int> values = new List<int>(enums.Length);
                 for (int i = 0; i < enums.Length; ++i)
                 {
                     values.Add((int)enums.GetValue(i));
                 }
-
                 foreach (var target in targets)
                 {
                     VFXModel targetIte = target as VFXModel;
@@ -98,18 +94,20 @@ class VFXSlotContainerEditor : Editor
 
                 EditorGUILayout.IntPopup(prop.Value, enumNames, enumValues);
             }
+            else if (fieldInfo.FieldType == typeof(uint) && fieldInfo.Name == "decalLayer")
+            {
+                if (!GraphicsSettings.isScriptableRenderPipelineEnabled || target == null)
+                    continue;
+
+                var guiContent = CreateGUIContentWithTooltip(fieldInfo, prop);
+                prop.Value.uintValue = EditorGUILayout.RenderingLayerMaskField(guiContent, prop.Value.uintValue);
+            }
             else if (fieldInfo.FieldType == typeof(int)
                         && rangeAttribute != null
                         && fieldInfo.GetCustomAttributes<DelayedAttribute>().Any())
             {
                 //Workaround: Range & Delayed attribute are incompatible, avoid the slider usage to keep the delayed behavior
-                var tooltipAttribute = fieldInfo.GetCustomAttributes<TooltipAttribute>().FirstOrDefault();
-                GUIContent guiContent;
-                if (tooltipAttribute != null)
-                    guiContent = new GUIContent(ObjectNames.NicifyVariableName(prop.Value.name),
-                        tooltipAttribute.tooltip);
-                else
-                    guiContent = new GUIContent(ObjectNames.NicifyVariableName(prop.Value.name));
+                var guiContent = CreateGUIContentWithTooltip(fieldInfo, prop);
 
                 var newValue = EditorGUILayout.DelayedIntField(guiContent, prop.Value.intValue);
                 if (EditorGUI.EndChangeCheck())
@@ -136,9 +134,22 @@ class VFXSlotContainerEditor : Editor
             {
                 modifiedSetting = prop.Value;
             }
+            disabledScope.Dispose();
         }
 
         return modifiedSetting;
+    }
+
+    private static GUIContent CreateGUIContentWithTooltip(FieldInfo fieldInfo, KeyValuePair<VFXSetting, SerializedProperty> prop)
+    {
+        var tooltipAttribute = fieldInfo.GetCustomAttributes<TooltipAttribute>().FirstOrDefault();
+        GUIContent guiContent;
+        if (tooltipAttribute != null)
+            guiContent = new GUIContent(ObjectNames.NicifyVariableName(prop.Value.name),
+                tooltipAttribute.tooltip);
+        else
+            guiContent = new GUIContent(ObjectNames.NicifyVariableName(prop.Value.name));
+        return guiContent;
     }
 
     IGizmoController m_CurrentController;
@@ -148,80 +159,147 @@ class VFXSlotContainerEditor : Editor
     [Overlay(typeof(SceneView), k_OverlayId, k_DisplayName)]
     internal class SceneViewVFXSlotContainerOverlay : IMGUIOverlay, ITransientOverlay
     {
+        private struct GizmoInfo : IComparable<GizmoInfo>
+        {
+            public GizmoInfo(VFXView view, IGizmoController controller, IGizmoable gizmo)
+            {
+                this.view = view;
+                this.controller = controller;
+                this.gizmo = gizmo;
+            }
+
+            public VFXView view { get; }
+            public IGizmoController controller { get; }
+            public IGizmoable gizmo { get; }
+            public int CompareTo(GizmoInfo other)
+            {
+                if (view.attachedComponent == null)
+                    return int.MinValue;
+                return string.Compare(view.attachedComponent.name, other.view.attachedComponent.name, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
         const string k_OverlayId = "Scene View/Visual Effect Model";
         const string k_DisplayName = "Visual Effect Model";
 
-        static readonly Dictionary<IGizmoController, VFXView> s_ControllersMap = new();
+        static readonly List<GizmoInfo> s_AllGizmosInfo = new();
+        static string[] s_Entries;
         static bool s_HasGizmos;
+        static int currentIndex;
 
-        private IGizmoController selectedController;
-
-        public static void UpdateFromVFXView(VFXView vfxView, IEnumerable<IGizmoController> controllers)
+        public static void UpdateFromVFXView(VFXView vfxView, List<IGizmoController> controllers)
         {
-            var viewControllers = s_ControllersMap
-                .Where(x => x.Value == vfxView)
-                .Select(x => x.Key)
-                .ToArray();
+            Profiler.BeginSample("SceneViewVFXSlotContainerOverlay.UpdateFromVFXView");
+            try
+            {
+                for (int i = s_AllGizmosInfo.Count - 1; i >= 0; i--)
+                {
+                    var gizmo = s_AllGizmosInfo[i];
+                    if (gizmo.view == vfxView && (controllers == null || controllers.All(x => x != gizmo.controller)))
+                    {
+                        s_AllGizmosInfo.RemoveAt(i);
+                    }
+                }
 
-            viewControllers.Except(controllers).ToList().ForEach(x => s_ControllersMap.Remove(x));
-            controllers.Except(viewControllers).ToList().ForEach(x => s_ControllersMap[x] = vfxView);
+                if (controllers != null)
+                {
+                    var index = s_AllGizmosInfo.TakeWhile(x => x.view != vfxView).Count();
+                    foreach (var controller in controllers)
+                    {
+                        controller.CollectGizmos();
+                        if (s_AllGizmosInfo.All(x => x.view != vfxView || x.controller != controller))
+                        {
+                            s_AllGizmosInfo.AddRange(controller.gizmoables.Select(x => new GizmoInfo(vfxView, controller, x)));
+                        }
 
-            s_HasGizmos = s_ControllersMap.Any(x => x.Key.gizmoables.Any());
+                        var currentGizmo = controller.gizmoables.ElementAtOrDefault(currentIndex - index);
+                        if (currentGizmo != null)
+                        {
+                            controller.DrawGizmos(vfxView.attachedComponent);
+                        }
+                        index += controller.gizmoables.Count;
+                    }
+                }
+
+                s_HasGizmos = s_AllGizmosInfo.Count > 0;
+            }
+            finally
+            {
+                Profiler.EndSample();
+            }
         }
 
         public bool visible => s_HasGizmos;
 
         public override void OnGUI()
         {
-            if (s_ControllersMap.Any())
+            Profiler.BeginSample("SceneViewVFXSlotContainerOverlay.OnGUI");
+            try
             {
-                GUILayout.BeginHorizontal();
-                try
+                if (s_AllGizmosInfo.Count > 0)
                 {
-                    var gizmosData = s_ControllersMap
-                        .SelectMany(x => x.Key.gizmoables.Select(y => new { View = x.Value, Controller = x.Key, Gizmo = y }))
-                        .ToArray();
-
-                    if (gizmosData.Length == 0)
+                    s_AllGizmosInfo.Sort();
+                    GUILayout.BeginHorizontal();
+                    try
                     {
-                        return;
-                    }
-
-                    var entries = gizmosData
-                        .Select(x => $"{x.View.controller.name}, {(string.IsNullOrEmpty(x.Gizmo.name) ? ((VFXController<VFXModel>)x.Controller).name : x.Gizmo.name)}")
-                        .ToArray();
-
-                    var currentIndex = selectedController != null && s_ControllersMap.Keys.Contains(selectedController) ? gizmosData.TakeWhile(x => x.Gizmo != selectedController.currentGizmoable).Count() : 0;
-
-                    GUI.enabled = true;
-                    var index = EditorGUILayout.Popup(currentIndex, entries);
-                    var selection = gizmosData[index];
-                    selectedController = selection.Controller;
-                    selectedController.currentGizmoable = selection.Gizmo;
-                    var vfxView = selection.View;
-
-                    var component = vfxView.attachedComponent;
-                    var gizmoError = selectedController.GetGizmoError(component);
-                    if (gizmoError != GizmoError.None)
-                    {
-                        var content = Contents.GetGizmoErrorContent(gizmoError);
-                        GUILayout.Label(content, Styles.warningStyle, GUILayout.Width(19), GUILayout.Height(18));
-                    }
-                    else
-                    {
-                        if (GUILayout.Button(Contents.gizmoFrame, Styles.frameButtonStyle, GUILayout.Width(16), GUILayout.Height(16)))
+                        // Cleanup closed views
+                        for (int i = s_AllGizmosInfo.Count - 1; i >= 0; i--)
                         {
-                            Bounds b = selectedController.GetGizmoBounds(vfxView.attachedComponent);
-                            var sceneView = SceneView.lastActiveSceneView;
-                            if (b.size.sqrMagnitude > Mathf.Epsilon && sceneView)
-                                sceneView.Frame(b, false);
+                            var gizmo = s_AllGizmosInfo[i];
+                            if (gizmo.view == null)
+                            {
+                                s_AllGizmosInfo.RemoveAt(i);
+                            }
+                        }
+
+                        if (s_AllGizmosInfo.Count == 0)
+                        {
+                            return;
+                        }
+
+                        if (s_Entries?.Length != s_AllGizmosInfo.Count)
+                        {
+                            s_Entries = new string[s_AllGizmosInfo.Count];
+                        }
+                        for (var i = 0; i < s_AllGizmosInfo.Count; i++)
+                        {
+                            var entry = s_AllGizmosInfo[i];
+                            s_Entries[i] = $"{entry.view.controller.name}, {(string.IsNullOrEmpty(entry.gizmo.name) ? ((VFXController<VFXModel>)entry.controller).name : entry.gizmo.name)}";
+                        }
+
+                        currentIndex = Math.Clamp(currentIndex, 0, s_Entries.Length - 1);
+
+                        GUI.enabled = true;
+                        currentIndex = EditorGUILayout.Popup(currentIndex, s_Entries, GUILayout.Height(20));
+                        var currentGizmo = s_AllGizmosInfo[currentIndex];
+                        currentGizmo.controller.currentGizmoable = currentGizmo.gizmo;
+                        var component = currentGizmo.view.attachedComponent;
+                        var gizmoError = currentGizmo.controller.GetGizmoError(component);
+                        if (gizmoError != GizmoError.None)
+                        {
+                            var content = Contents.GetGizmoErrorContent(gizmoError);
+                            GUILayout.Label(content, Styles.warningStyle, GUILayout.Width(19), GUILayout.Height(18));
+                        }
+                        else
+                        {
+                            if (GUILayout.Button(Contents.gizmoFrame, Styles.frameButtonStyle, GUILayout.Width(16), GUILayout.Height(16)))
+                            {
+                                var b = currentGizmo.controller.GetGizmoBounds(component);
+                                var sceneView = SceneView.lastActiveSceneView;
+                                if (b.size.sqrMagnitude > Mathf.Epsilon && sceneView)
+                                    sceneView.Frame(b, false);
+                            }
                         }
                     }
+                    finally
+                    {
+                        GUILayout.EndHorizontal();
+                    }
                 }
-                finally
-                {
-                    GUILayout.EndHorizontal();
-                }
+            }
+            finally
+            {
+                Profiler.EndSample();
             }
         }
     }
@@ -364,6 +442,7 @@ class VFXSlotContainerEditor : Editor
             { VFXValueType.Int32, new Color32(125, 110, 191, 255) },
             { VFXValueType.Matrix4x4, new Color32(118, 118, 118, 255) },
             { VFXValueType.Mesh, new Color32(130, 223, 226, 255) },
+            { VFXValueType.SkinnedMeshRenderer, new Color32(130, 223, 226, 255) },
             { VFXValueType.None, new Color32(118, 118, 118, 255) },
             { VFXValueType.Spline, new Color32(130, 223, 226, 255) },
             { VFXValueType.Texture2D, new Color32(250, 137, 137, 255) },
@@ -372,6 +451,7 @@ class VFXSlotContainerEditor : Editor
             { VFXValueType.TextureCube, new Color32(250, 137, 137, 255) },
             { VFXValueType.TextureCubeArray, new Color32(250, 137, 137, 255) },
             { VFXValueType.CameraBuffer, new Color32(250, 137, 137, 255) },
+            { VFXValueType.Buffer, new Color32(250, 137, 137, 255) },
             { VFXValueType.Uint32, new Color32(125, 110, 191, 255) },
         };
 

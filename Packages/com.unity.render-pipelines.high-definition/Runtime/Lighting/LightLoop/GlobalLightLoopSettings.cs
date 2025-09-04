@@ -14,6 +14,8 @@ namespace UnityEngine.Rendering.HighDefinition
     [Serializable]
     public enum CubeReflectionResolution
     {
+        /// <summary>Turns off Probes if selected</summary>
+        CubeReflectionResolution0 = 0,
         /// <summary>Size 128</summary>
         CubeReflectionResolution128 = 128,
         /// <summary>Size 256</summary>
@@ -76,6 +78,8 @@ namespace UnityEngine.Rendering.HighDefinition
     [Serializable]
     public enum PlanarReflectionAtlasResolution
     {
+        /// <summary>Turns off Probes if selected</summary>
+        Resolution0 = 0,
         /// <summary>Size 64</summary>
         Resolution64 = 64,
         /// <summary>Size 128</summary>
@@ -197,7 +201,7 @@ namespace UnityEngine.Rendering.HighDefinition
             maxDirectionalLightsOnScreen = 16,
             maxPunctualLightsOnScreen = 512,
             maxAreaLightsOnScreen = 64,
-            maxCubeReflectionOnScreen = HDRenderPipeline.k_MaxCubeReflectionsOnScreen / 2,
+            maxCubeReflectionOnScreen = HDRenderPipeline.k_MaxCubeReflectionsOnScreen / 4,
             maxPlanarReflectionOnScreen = HDRenderPipeline.k_MaxPlanarReflectionsOnScreen / 2,
             maxDecalsOnScreen = 512,
             maxLightsPerClusterCell = 8,

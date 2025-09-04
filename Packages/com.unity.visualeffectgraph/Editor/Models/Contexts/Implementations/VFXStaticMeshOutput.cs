@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEditor.VFX;
+
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Serialization;
@@ -9,7 +9,7 @@ using UnityEngine.VFX;
 
 namespace UnityEditor.VFX
 {
-    [VFXInfo]
+    [VFXInfo(name = "Output Single Mesh", category = "#5Output Debug", synonyms = new []{ "static" })]
     class VFXStaticMeshOutput : VFXContext, IVFXSubRenderer
     {
         [VFXSetting, Tooltip("Specifies the shader with which the mesh output is rendered.")]
@@ -49,9 +49,7 @@ namespace UnityEditor.VFX
 
         public virtual void SetupMaterial(Material material)
         {
-            VFXLibrary.currentSRPBinder.SetupMaterial(material);
-
-            // TODO Deactivate mv and shadow passes if needed
+            VFXLibrary.currentSRPBinder.SetupMaterial(material, false, hasShadowCasting);
         }
 
         protected VFXStaticMeshOutput() : base(VFXContextType.Output, VFXDataType.Mesh, VFXDataType.None) { }
@@ -275,14 +273,14 @@ namespace UnityEditor.VFX
             Invalidate(InvalidationCause.kUIChangedTransient);
         }
 
-        internal override void GenerateErrors(VFXInvalidateErrorReporter manager)
+        internal override void GenerateErrors(VFXErrorReporter report)
         {
-            base.GenerateErrors(manager);
+            base.GenerateErrors(report);
 
             GetOrRefreshShaderGraphObject(false);
             if (m_IsShaderGraphMissing)
             {
-                manager.RegisterError("ErrorMissingShaderGraph", VFXErrorType.Error, "The VFX Graph cannot be compiled because the Shader Graph asset is missing.");
+                report.RegisterError("ErrorMissingShaderGraph", VFXErrorType.Error, "The VFX Graph cannot be compiled because the Shader Graph asset is missing.", this);
             }
         }
     }

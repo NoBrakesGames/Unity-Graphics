@@ -45,6 +45,9 @@ EditorBuildSettings:
     path: Assets/Scenes/003_PixelPerfect_Cinemachine.unity
     guid: 548efbe8196c7bb41a94d25d70cf82e6
   - enabled: 1
+    path: Assets/Scenes/003_PixelPerfect_PostProcessing.unity
+    guid: 9f750aafa54d07a43b7601615bb2c7ea
+  - enabled: 1
     path: Assets/Scenes/003_PixelPerfect_StretchFill_RetroAA.unity
     guid: 7dae1015b491af64bb5866e0b3c43aa2
   - enabled: 1
@@ -69,35 +72,11 @@ EditorBuildSettings:
     path: Assets/Scenes/004_Shadows_Caster_Ortho_011_Casts_Self.unity
     guid: 2ebe6f9707194264dbb7c5ea1a554a63
   - enabled: 1
-    path: Assets/Scenes/004_Shadows_Caster_Ortho_101_Silhoutte_Self.unity
-    guid: d8fca6ddf5f036e4c9f78ca6a73c9c7e
-  - enabled: 1
-    path: Assets/Scenes/004_Shadows_Caster_Ortho_110_Silhoutte_Casts.unity
-    guid: 2dda30162850d854a82c0aefd796ac47
-  - enabled: 1
-    path: Assets/Scenes/004_Shadows_Caster_Ortho_111_Silhoutte_Casts_Self.unity
-    guid: 6c6efdca0c680b644afe1e5633c16f1e
-  - enabled: 1
     path: Assets/Scenes/004_Shadows_Caster_Perspective_010_Casts.unity
     guid: 131bd0d5f9d17c2428d5c3d1ec81c404
   - enabled: 1
     path: Assets/Scenes/004_Shadows_Caster_Perspective_011_Casts_Self.unity
     guid: 628b5808162e78e44873c13d02ee6004
-  - enabled: 1
-    path: Assets/Scenes/004_Shadows_Caster_Perspective_110_Silhoutte_Casts.unity
-    guid: 4c07daa3552b3394089af62683209c84
-  - enabled: 1
-    path: Assets/Scenes/004_Shadows_Caster_Perspective_111_Silhoutte_Casts_Self.unity
-    guid: 2a18f99570705fd449f8655170150241
-  - enabled: 1
-    path: Assets/Scenes/004_Shadows_Caster_Ortho_Volumetric_111_Silhoutte_Casts_Self.unity
-    guid: 7162c533026f1df40acb93885a833d3d
-  - enabled: 1
-    path: Assets/Scenes/004_Shadows_Caster_Ortho_Volumetric_110_Silhoutte_Casts.unity
-    guid: 352218ce3212d9e4fbe0a167d6081bb2
-  - enabled: 1
-    path: Assets/Scenes/004_Shadows_Caster_Ortho_Volumetric_101_Silhoutte_Self.unity
-    guid: 09188a0a64a3a8148af5f186fe5575f9
   - enabled: 1
     path: Assets/Scenes/004_Shadows_Caster_Ortho_Volumetric_011_Casts_Self.unity
     guid: 45ef0f49a3464054399f4da9d4e9ff0d
@@ -114,23 +93,11 @@ EditorBuildSettings:
     path: Assets/Scenes/005_Shadows_Composite_Ortho_011_Casts_Self.unity
     guid: f7952349d3e7dc948939e2cb20e23cd7
   - enabled: 1
-    path: Assets/Scenes/005_Shadows_Composite_Ortho_110_Silhoutte_Casts.unity
-    guid: 69114a96062831843a5fbd2dc88d4bbc
-  - enabled: 1
-    path: Assets/Scenes/005_Shadows_Composite_Ortho_111_Silhoutte_Casts_Self.unity
-    guid: 0c92f1bbe0928b542a0eabd9058802a0
-  - enabled: 1
     path: Assets/Scenes/005_Shadows_Composite_Perspective_010_Casts.unity
     guid: b5cae22917767144b9ca74c726ad2397
   - enabled: 1
     path: Assets/Scenes/005_Shadows_Composite_Perspective_011_Casts_Self.unity
     guid: da610f9f6388f6643982010dab851e81
-  - enabled: 1
-    path: Assets/Scenes/005_Shadows_Composite_Perspective_110_Silhoutte_Casts.unity
-    guid: 6911d731a08c29a42a27064fa52ba1ed
-  - enabled: 1
-    path: Assets/Scenes/005_Shadows_Composite_Perspective_111_Silhoutte_Casts_Self.unity
-    guid: 1e524f710a15aab43acaa97cb477ddab
   - enabled: 1
     path: Assets/Scenes/006_Shadows_Multi_Light_Ortho.unity
     guid: 117f831afebc64849a3778657be72e4b
@@ -161,6 +128,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/010_2D_Sprite_Mask_Normals.unity
     guid: ed89280810f9d034f93a6efc7ca1816e
+  - enabled: 1
+    path: Assets/Scenes/010_2D_Sprite_Mask_Normals_SortingLayer.unity
+    guid: 493769f3645d4d344854ee5895828b4a
   - enabled: 1
     path: Assets/Scenes/011_UnlitSprites.unity
     guid: c1aed1727cd63dd42882f4c9ebb99cf4
@@ -195,6 +165,12 @@ EditorBuildSettings:
     path: Assets/Scenes/014_Layer_Batching_GlobalLightWithShadows.unity
     guid: 428ccbee9b0fb7c4ca5f4dd5579b62d3
   - enabled: 1
+    path: Assets/Scenes/015_Shadergraph_VFX.unity
+    guid: 320bc6f8378f61647959c52de7e45603
+  - enabled: 1
+    path: Assets/Scenes/016_Shadergraph_Colors.unity
+    guid: e41db3beb44cb774db3b1b67d7ccc323
+  - enabled: 1
     path: Assets/Scenes/020_ShadowInterOp_Sprite_DrawMode_NoFlip.unity
     guid: a133f2a1dea07a742a524313aff76538
   - enabled: 1
@@ -219,22 +195,105 @@ EditorBuildSettings:
     path: Assets/Scenes/021_Shadow_Batching_03.unity
     guid: c5d8258f10589fa4c986556b16becf52
   - enabled: 1
-    path: Assets/Scenes/072_Shadow_Prerendering.unity
-    guid: 5c51bb3f8f127fd4cbfa0fbdb9221b0e
-  - enabled: 1
-    path: Assets/Scenes/070_2D_Forward_Shader_Compatibility_2D.unity
-    guid: c8f0da7688959b142bebd1f707d6f935
-  - enabled: 1
-    path: Assets/Scenes/069_2D_Forward_Shader_Compatibility_Forward.unity
-    guid: 4387c323b80b3f8479359d07b90f0031
-  - enabled: 1
-    path: Assets/Scenes/060_2D_Renderer_Feature.unity
-    guid: 685e926d45059124dbe53d3d229ea876
+    path: Assets/Scenes/022_Normals_FlipXY.unity
+    guid: 0fd9ba64f5114634b81f084fb92123e1
   - enabled: 1
     path: Assets/Scenes/056_2D_Lights-Shadows.unity
     guid: 4f7a50da47cfeca46b45fe14be17081d
   - enabled: 1
     path: Assets/Scenes/056_2D_Lights.unity
     guid: c0c276a91b93d254b957277941d2329b
-  m_configObjects: {}
+  - enabled: 1
+    path: Assets/Scenes/056_2D_Lights_Shader_Graph.unity
+    guid: 381306730e4f1b141bf8e0e1c35f16e9
+  - enabled: 1
+    path: Assets/Scenes/057_2D_Lights_Blending.unity
+    guid: f6eb3eed1eb0a004797f00a2a4435f32
+  - enabled: 1
+    path: Assets/Scenes/058_2D_Lights_Shadow_Blending.unity
+    guid: 52bd9e05675efbe468bd5d25ac5b1402
+  - enabled: 1
+    path: Assets/Scenes/059_2D_Volumetric_Shadergraph.unity
+    guid: 9451115b4ef9efa459de7112b5ac7d9e
+  - enabled: 1
+    path: Assets/Scenes/060_2D_Renderer_Feature.unity
+    guid: 685e926d45059124dbe53d3d229ea876
+  - enabled: 1
+    path: Assets/Scenes/061_PostProcessing_DepthOfField.unity
+    guid: f3e627e1bc0f5194e89de91fc1c69243
+  - enabled: 1
+    path: Assets/Scenes/061_PostProcessing_DepthOfField_Shadergraph.unity
+    guid: db099ca108d9963499e679d61fcfcf22
+  - enabled: 1
+    path: Assets/Scenes/062_MSAA.unity
+    guid: 2927736f597c14a478595009f36fcb00
+  - enabled: 1
+    path: Assets/Scenes/063_LayerMask.unity
+    guid: 589fffe344f1a3847910fd1b61c8404c
+  - enabled: 1
+    path: Assets/Scenes/064_FullScreenRendererFeature.unity
+    guid: f47933cb58d03af41a718fdea55dea08
+  - enabled: 1
+    path: Assets/Scenes/069_2D_Forward_Shader_Compatibility_Forward.unity
+    guid: 4387c323b80b3f8479359d07b90f0031
+  - enabled: 1
+    path: Assets/Scenes/070_2D_Forward_Shader_Compatibility_2D.unity
+    guid: c8f0da7688959b142bebd1f707d6f935
+  - enabled: 1
+    path: Assets/Scenes/071_2D_Sort_Mode.unity
+    guid: a6712b8c147c74a17947b986e8fe9ebf
+  - enabled: 1
+    path: Assets/Scenes/072_Shadow_Prerendering.unity
+    guid: 5c51bb3f8f127fd4cbfa0fbdb9221b0e
+  - enabled: 1
+    path: Assets/Scenes/074_Screen_Space_UI_Overlay.unity
+    guid: 40e6c1647ae044647ad33454538fa98a
+  - enabled: 1
+    path: Assets/Scenes/075_TilemapRenderer_SpriteAtlas_MixedSecondaryTextures.unity
+    guid: 606833216bc06f442aeede4ae93a98be
+  - enabled: 1
+    path: Assets/Scenes/076_TilemapRenderer_DefaultSecondaryTextures.unity
+    guid: df19e9e1912830644b606bb88acf7b86
+  - enabled: 1
+    path: Assets/Scenes/077_SpriteMask_Tilemap_SpriteShape_Renderer.unity
+    guid: e689d77e7920d8c4dbfba50074e7bc24
+  - enabled: 1
+    path: Assets/Scenes/078_TilemapRenderer_ShaderGraph_LightMapTexture.unity
+    guid: 0fa034d17c4f8814398528f265d2c60f
+  - enabled: 1
+    path: Assets/Scenes/079_SpriteRenderer_MaterialPropertyBlock.unity
+    guid: fffc724089bd24f5d84c962cb11aeb4d
+  - enabled: 1
+    path: Assets/Scenes/080_TilemapRenderer_GPUSkinning.unity
+    guid: f2882940e2db8f344878e353fac92b48
+  - enabled: 1
+    path: Assets/Scenes/081_TilemapRenderer_SRPBatch_Color.unity
+    guid: cc7b6c00f76631b43b37c30813e45fd7
+  - enabled: 1
+    path: Assets/Scenes/083_GPU_Instancing.unity
+    guid: 67d46509b9dfceb43bf64d2d1ae052f5
+  - enabled: 1
+    path: Assets/Scenes/084_SpriteShape_Batching.unity
+    guid: 04c5421de28253e4698974917df2d68b
+  - enabled: 1
+    path: Assets/Scenes/085_SpriteShape_Batching_Multi_Material.unity
+    guid: 75bc3d3d22879cf4ea62792c1a8158d8
+  - enabled: 1
+    path: Assets/Scenes/086_SpriteAtlas.unity
+    guid: 5f981f02c2fc4ef4f9ff3fda036a736f
+  - enabled: 1
+    path: Assets/Scenes/087_SpriteAtlas_Dilate.unity
+    guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 1
+    path: Assets/Scenes/088_TilemapRenderer_MaskInteraction.unity
+    guid: f5c31dad7aab75241a867c300ce2bc5e
+  - enabled: 1
+    path: Assets/Scenes/089_Sprite_MBP_Animation.unity
+    guid: 6b171e9d6c5830346986426b97513fce
+  - enabled: 1
+    path: Assets/Scenes/091_SpriteMask_SupportedRenderers.unity
+    guid: b3db030be38d9441eba28d8038467ba7
+  m_configObjects:
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 20e925b8abdd424429b17f709e9d00f8,
+      type: 2}
   m_UseUCBPForAssetBundles: 0

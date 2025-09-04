@@ -44,7 +44,7 @@ RenderSettings:
 LightmapSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 12
-  m_GIWorkflowMode: 0
+  m_GIWorkflowMode: 1
   m_GISettings:
     serializedVersion: 2
     m_BounceScale: 1
@@ -216,6 +216,7 @@ MonoBehaviour:
     ActivePixelTests: -1
   WaitFrames: 10
   XRCompatible: 0
+  gpuDrivenCompatible: 0
   CheckMemoryAllocation: 1
 --- !u!81 &971756571
 AudioListener:
@@ -316,7 +317,7 @@ MonoBehaviour:
   m_RequiresOpaqueTextureOption: 2
   m_CameraType: 0
   m_Cameras: []
-  m_RendererIndex: -1
+  m_RendererIndex: 38
   m_VolumeLayerMask:
     serializedVersion: 2
     m_Bits: 1

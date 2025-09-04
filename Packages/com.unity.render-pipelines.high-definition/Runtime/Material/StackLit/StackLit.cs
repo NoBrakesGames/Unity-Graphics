@@ -173,7 +173,7 @@ namespace UnityEngine.Rendering.HighDefinition
             [SurfaceDataAttributes("Subsurface Mask")]
             public float subsurfaceMask;
             [SurfaceDataAttributes("Transmission Mask")]
-            public float transmissionMask;
+            public Vector3 transmissionMask;
 
             // Transmission
             // + Diffusion Profile
@@ -283,7 +283,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         public StackLit() { }
 
-        public override void Build(HDRenderPipelineAsset hdAsset, HDRenderPipelineRuntimeResources defaultResources)
+        public override void Build(HDRenderPipeline _)
         {
             PreIntegratedFGD.instance.Build(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
             LTCAreaLight.instance.Build();

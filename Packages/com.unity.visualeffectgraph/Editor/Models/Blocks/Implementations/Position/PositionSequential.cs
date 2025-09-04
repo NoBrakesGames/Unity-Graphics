@@ -2,25 +2,28 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Block
 {
     class PositionSequentialVariantProvider : VariantProvider
     {
-        public override IEnumerable<Variant> ComputeVariants()
+        public override IEnumerable<Variant> GetVariants()
         {
             return new[] { PositionSequential.SequentialShape.Circle, PositionSequential.SequentialShape.Line, PositionSequential.SequentialShape.ThreeDimensional }
                 .Select(x => new Variant(
+                    "Set".Label(false).AppendLiteral("Position Sequential", false).AppendLabel(x.ToString()),
+                    "Position Shape/Sequential",
+                    typeof(PositionSequential),
                     new[]
                     {
                         new KeyValuePair<string, object>("compositionPosition", AttributeCompositionMode.Overwrite),
                         new KeyValuePair<string, object>("shape", x)
-                    }, new[] { "position", VFXBlockUtility.GetNameString(AttributeCompositionMode.Overwrite) }));
+                    }));
         }
     }
 
-    [VFXInfo(category = "Attribute/{0}/Composition/{1}", variantProvider = typeof(PositionSequentialVariantProvider))]
+    [VFXHelpURL("Block-SetPosition(Sequential)")]
+    [VFXInfo(variantProvider = typeof(PositionSequentialVariantProvider))]
     class PositionSequential : VFXBlock
     {
         public enum SequentialShape
@@ -65,7 +68,7 @@ namespace UnityEditor.VFX.Block
         [Tooltip("Specifies how the sequence should behave at the end. It can either wrap back to the beginning, clamp, or continue in a mirrored direction.")]
         private VFXOperatorUtility.SequentialAddressingMode mode = VFXOperatorUtility.SequentialAddressingMode.Clamp;
 
-        public override string name { get { return string.Format("{0} Position (Sequential: {1})", VFXBlockUtility.GetNameString(compositionPosition), shape); } }
+        public override string name => VFXBlockUtility.GetNameString(compositionPosition).Label(false).AppendLiteral("Position Sequential", false).AppendLabel(shape.ToString());
         public override VFXContextType compatibleContexts { get { return VFXContextType.InitAndUpdateAndOutput; } }
         public override VFXDataType compatibleData { get { return VFXDataType.Particle; } }
 
@@ -313,6 +316,62 @@ namespace UnityEditor.VFX.Block
                     source += VFXBlockUtility.GetComposeString(compositionTargetPosition, "targetPosition", s_computedTargetPosition, "blendTargetPosition");
                 }
                 return source;
+            }
+        }
+
+        public static void GenerateSequentialCircleErrors(IVFXErrorReporter report, string countName, string normalName, string upName, VFXModel model)
+        {
+            var slotContainer = model as IVFXSlotContainer;
+            if (slotContainer == null)
+                return;
+
+            var context = new VFXExpression.Context(VFXExpressionContextOption.CPUEvaluation | VFXExpressionContextOption.ConstantFolding);
+            var countExpression = slotContainer.inputSlots.Single(x => x.name == countName).GetExpression();
+            var normalExpression = slotContainer.inputSlots.Single(x => x.name == normalName).GetExpression();
+            var upExpression = slotContainer.inputSlots.Single(x => x.name == upName).GetExpression();
+            context.RegisterExpression(countExpression);
+            context.RegisterExpression(normalExpression);
+            context.RegisterExpression(upExpression);
+            context.Compile();
+
+            if (context.GetReduced(countExpression) is var countExpressionReduced &&
+                countExpressionReduced.Is(VFXExpression.Flags.Constant) &&
+                countExpressionReduced.Get<uint>() == 0)
+            {
+                report.RegisterError("CircleCountIsZero", VFXErrorType.Warning, "A circle with Count = 0 is not valid", model);
+            }
+
+            if (context.GetReduced(normalExpression) is var normalExpressionReduced &&
+                context.GetReduced(upExpression) is var upExpressionReduced &&
+                normalExpressionReduced.Is(VFXExpression.Flags.Constant) &&
+                upExpressionReduced.Is(VFXExpression.Flags.Constant))
+            {
+
+                var normal = normalExpressionReduced.Get<Vector3>();
+                var up = upExpressionReduced.Get<Vector3>();
+
+                if (float.IsNaN(normal.x) || float.IsNaN(normal.y) || float.IsNaN(normal.z))
+                {
+                    report.RegisterError("CircleNormalIsInvalid", VFXErrorType.Warning, "Normal vector is invalid.", model);
+                }
+
+                if (float.IsNaN(up.x) || float.IsNaN(up.y) || float.IsNaN(up.z))
+                {
+                    report.RegisterError("CircleUpIsInvalid", VFXErrorType.Warning, "Up vector is invalid.", model);
+                }
+
+                if (Math.Abs(Vector3.Cross(normal, up).sqrMagnitude) < 10e-5f)
+                {
+                    report.RegisterError("CircleNormalAndUpArCollinear", VFXErrorType.Warning, "Normal and Up vectors are collinear, circle orientation cannot be computed.", model);
+                }
+            }
+        }
+
+        internal sealed override void GenerateErrors(VFXErrorReporter report)
+        {
+            if (shape == SequentialShape.Circle)
+            {
+                GenerateSequentialCircleErrors(report, nameof(InputPropertiesCircle.Count), nameof(InputPropertiesCircle.Normal), nameof(InputPropertiesCircle.Up), this);
             }
         }
     }

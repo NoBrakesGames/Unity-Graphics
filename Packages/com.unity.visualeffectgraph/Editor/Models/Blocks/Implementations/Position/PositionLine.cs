@@ -1,14 +1,11 @@
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
+using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Block
 {
-    [VFXInfo(category = "Attribute/position/Composition/{0}", variantProvider = typeof(PositionBaseProvider))]
-    class PositionLine : PositionBase
+    sealed class PositionLine : PositionShapeBase
     {
-        public override string name { get { return string.Format(base.name, "Line"); } }
-
         public class InputProperties
         {
             [Tooltip("Sets the line used for positioning the particles.")]
@@ -21,49 +18,73 @@ namespace UnityEditor.VFX.Block
             public float LineSequencer = 0.0f;
         }
 
-        protected override IEnumerable<string> filteredOutSettings
-        {
-            get
-            {
-                yield return "positionMode";
-            }
-        }
+        public override bool supportVolume => false;
 
-        public override IEnumerable<VFXNamedExpression> parameters
+        public override IEnumerable<VFXNamedExpression> GetParameters(PositionShape positionBase, List<VFXNamedExpression> allSlots)
         {
-            get
+            VFXExpression line_start = null;
+            VFXExpression line_end = null;
+            foreach (var param in allSlots)
             {
-                VFXExpression line_start = null;
-                VFXExpression line_end = null;
-                foreach (var param in base.parameters)
-                {
-                    if (param.name == "line_start")
-                        line_start = param.exp;
-                    if (param.name == "line_end")
-                        line_end = param.exp;
-
+                if (param.name.StartsWith("line")
+                    || param.name == nameof(CustomProperties.LineSequencer))
                     yield return param;
-                }
-                var line_direction = VFXOperatorUtility.SafeNormalize(line_end - line_start);
+
+                if (param.name == "line_start")
+                    line_start = param.exp;
+                if (param.name == "line_end")
+                    line_end = param.exp;
+            }
+
+            var preferredUp = VFXValue.Constant(Vector3.up);
+            var fallbackUp = VFXValue.Constant(Vector3.right);
+
+            var line_direction = VFXOperatorUtility.SafeNormalize(line_end - line_start);
+
+            var line_tangent = VFXOperatorUtility.Cross(preferredUp, line_direction);
+            var line_tangent_srq_length = VFXOperatorUtility.Dot(line_tangent, line_tangent);
+            var line_tangent_srq_length_close_to_zero = new VFXExpressionCondition(VFXValueType.Float, VFXCondition.Less, line_tangent_srq_length, VFXOperatorUtility.EpsilonSqrExpression[VFXValueType.Float]);
+            line_tangent = new VFXExpressionBranch(line_tangent_srq_length_close_to_zero, VFXOperatorUtility.Cross(fallbackUp, line_direction), line_tangent);
+            line_tangent = VFXOperatorUtility.Normalize(line_tangent);
+            var line_up = VFXOperatorUtility.Cross(line_tangent, line_direction);
+
+            if (positionBase.applyOrientation.HasFlag(PositionBase.Orientation.Direction))
+            {
                 yield return new VFXNamedExpression(line_direction, "line_direction");
             }
+
+            if (positionBase.applyOrientation.HasFlag(PositionBase.Orientation.Axes))
+            {
+                yield return new VFXNamedExpression(line_tangent, "line_tangent");
+                if (!positionBase.applyOrientation.HasFlag(PositionBase.Orientation.Direction))
+                    yield return new VFXNamedExpression(line_direction, "line_direction");
+                yield return new VFXNamedExpression(line_up, "line_up");
+            }
+
         }
 
-        protected override bool needDirectionWrite => true;
-
-        public override string source
+        public override string GetSource(PositionShape positionBase)
         {
-            get
+            string outSource;
+            if (positionBase.spawnMode == PositionShape.SpawnMode.Custom)
+                outSource = string.Format(positionBase.composePositionFormatString, "lerp(line_start, line_end, LineSequencer)");
+            else
+                outSource = string.Format(positionBase.composePositionFormatString, "lerp(line_start, line_end, RAND)");
+
+            if (positionBase.applyOrientation.HasFlag(PositionBase.Orientation.Direction))
             {
-                string outSource;
-                if (spawnMode == SpawnMode.Custom)
-                    outSource = string.Format(composePositionFormatString, "lerp(line_start, line_end, LineSequencer)");
-                else
-                    outSource = string.Format(composePositionFormatString, "lerp(line_start, line_end, RAND)");
                 outSource += "\n";
-                outSource += string.Format(composeDirectionFormatString, "line_direction");
-                return outSource;
+                outSource += string.Format(positionBase.composeDirectionFormatString, "line_direction");
             }
+
+            if (positionBase.applyOrientation.HasFlag(PositionBase.Orientation.Axes))
+            {
+                outSource += VFXBlockUtility.GetComposeString(positionBase.compositionAxes, "axisX", "line_tangent", "blendAxes") + "\n";
+                outSource += VFXBlockUtility.GetComposeString(positionBase.compositionAxes, "axisY", "line_direction", "blendAxes") + "\n";
+                outSource += VFXBlockUtility.GetComposeString(positionBase.compositionAxes, "axisZ", "line_up", "blendAxes") + "\n";
+            }
+
+            return outSource;
         }
     }
 }

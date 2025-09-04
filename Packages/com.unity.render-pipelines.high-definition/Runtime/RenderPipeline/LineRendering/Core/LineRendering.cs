@@ -5,8 +5,9 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEditor;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Profiling;
+using UnityEngine.Rendering.HighDefinition;
 
 namespace UnityEngine.Rendering
 {
@@ -21,11 +22,13 @@ namespace UnityEngine.Rendering
         public enum CompositionMode
         {
             /// <summary>Composition will occur before the color pyramid is generated.</summary>
-            BeforeColorPyramid,
+            BeforeColorPyramid = 0,
+            /// <summary>Composition will occur before the color pyramid is generated but after clouds are composited.</summary>
+            BeforeColorPyramidAfterClouds = 3,
             /// <summary>Composition will occur after temporal anti-aliasing.</summary>
-            AfterTemporalAntialiasing,
+            AfterTemporalAntialiasing = 1,
             /// <summary>Composition will occur after depth of field.</summary>
-            AfterDepthOfField
+            AfterDepthOfField = 2
         }
 
         /// <summary>
@@ -54,11 +57,18 @@ namespace UnityEngine.Rendering
         }
 
         private bool m_IsInitialized = false;
+        private List<RendererData> m_VisibleDatas = new List<RendererData>();
 
         // Compute resources and utility container.
         private SystemResources m_SystemResources;
 
-        static readonly ProfilingSampler k_LineRenderingSampler = new ProfilingSampler("LineRendering");
+        static readonly ProfilingSampler k_LineRenderingGeometrySampler      = new ProfilingSampler("LineRenderingGeometry");
+        static readonly ProfilingSampler k_LineRenderingRasterizationSampler = new ProfilingSampler("LineRenderingRasterization");
+
+        private ConstantBuffer<ShaderVariables> m_ShaderVariablesBuffer;
+
+        // System keywords
+        private LocalKeyword[] m_SegmentIndicesKeywords;
 
         internal void Initialize(SystemResources parameters)
         {
@@ -69,6 +79,14 @@ namespace UnityEngine.Rendering
             }
 
             m_SystemResources = parameters;
+
+            m_SegmentIndicesKeywords = new LocalKeyword[]
+            {
+                new(m_SystemResources.stageSetupSegmentCS, "INDEX_FORMAT_UINT_16"),
+                new(m_SystemResources.stageSetupSegmentCS, "INDEX_FORMAT_UINT_32")
+            };
+
+            m_ShaderVariablesBuffer = new ConstantBuffer<ShaderVariables>();
 
             m_IsInitialized = true;
         }
@@ -83,6 +101,9 @@ namespace UnityEngine.Rendering
 
             CleanupShadingAtlas();
 
+            m_ShaderVariablesBuffer?.Release();
+            m_ShaderVariablesBuffer = null;
+
             m_IsInitialized = false;
         }
 
@@ -96,7 +117,8 @@ namespace UnityEngine.Rendering
                 _SizeScreen           = new Vector4(args.viewport.x, args.viewport.y, 1 + (1f / args.viewport.x), 1 + (1f / args.viewport.y)),
                 _SizeBin              = new Vector4(Budgets.TileSizeBin, 2f * Budgets.TileSizeBin / args.viewport.x, 2f * Budgets.TileSizeBin / args.viewport.y, 0),
                 _ClusterDepth         = args.settings.clusterCount,
-                _TileOpacityThreshold = args.settings.tileOpacityThreshold
+                _TileOpacityThreshold = args.settings.tileOpacityThreshold,
+                _ViewIndex            = args.viewIndex
             };
 
             // Set up the various bin and clustering counts.
@@ -132,22 +154,26 @@ namespace UnityEngine.Rendering
 
 #if UNITY_EDITOR
             var shadersStillCompiling = renderDatas.Any(o => !ShaderUtil.IsPassCompiled(o.material, o.offscreenShadingPass));
+
+            // Disable the compiling indication if we are in XR.
+            shadersStillCompiling &= args.viewCount <= 1;
 #endif
 
             // Utility for binding the common buffers between passes one and two.
             void UseSharedBuffers(RenderGraphBuilder builder, SharedPassData.Buffers buff)
             {
-                builder.WriteBuffer(buff.constantBuffer);
                 builder.WriteBuffer(buff.counterBuffer);
                 builder.WriteBuffer(buff.vertexStream0);
                 builder.WriteBuffer(buff.vertexStream1);
+                builder.WriteBuffer(buff.vertexStream2);
+                builder.WriteBuffer(buff.vertexStream3);
                 builder.WriteBuffer(buff.recordBufferSegment);
                 builder.WriteBuffer(buff.viewSpaceDepthRange);
                 builder.ReadWriteTexture(buff.groupShadingSampleAtlas);
             }
 
             // Pass 1: Geometry Processing and Shading
-            using (var builder = args.renderGraph.AddRenderPass<GeometryPassData>("Geometry Processing", out var passData, k_LineRenderingSampler))
+            using (var builder = args.renderGraph.AddRenderPass<GeometryPassData>("Geometry Processing", out var passData, k_LineRenderingGeometrySampler))
             {
                 // TODO: Get rid of this...
                 // Unfortunately we currently need this utility to "reimport" some buffers.
@@ -165,51 +191,56 @@ namespace UnityEngine.Rendering
                 }
 
                 // Set up other various dependent data.
-                passData.depthRT          = builder.ReadTexture(args.depthTexture);
+                passData.shaderVariables       = shaderVariables;
+                passData.shaderVariablesBuffer = m_ShaderVariablesBuffer;
+
                 passData.systemResources  = m_SystemResources;
                 passData.rendererData     = ImportRenderDatas();
                 passData.offsetsVertex    = PrefixSum(renderDatas.Select(o => o.mesh.vertexCount).ToArray());
                 passData.offsetsSegment   = PrefixSum(renderDatas.Select(o => (int)o.mesh.GetIndexCount(0) / 2).ToArray());
                 passData.matrixIVP        = args.matrixIVP;
                 passData.shadingAtlas     = args.shadingAtlas;
-                passData.shaderVariables  = shaderVariables;
 
                 // Set up the shared resources.
                 passData.sharedBuffers = sharedBuffers;
+                passData.depthRT       = builder.ReadTexture(args.depthTexture);
                 UseSharedBuffers(builder, sharedBuffers);
 
                 // Then set up the resources specific to this pass.
                 passData.transientBuffers = GeometryPassData.Buffers.Allocate(args.renderGraph, builder, new GeometryPassData.Buffers.AllocationParameters
                 {
-                    countVertex  = passData.shaderVariables._VertexCount,
+                    countVertex  = shaderVariables._VertexCount,
                     countVertexMaxPerRenderer = renderDatas.Max(o => o.mesh.vertexCount),
                 });
 
                 builder.SetRenderFunc((GeometryPassData data, RenderGraphContext context) =>
                 {
-                    // Upload the constant buffer before the geometry pass.
-                    var constantBufferData = new NativeArray<ShaderVariables>(1, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
-                    {
-                        constantBufferData[0] = shaderVariables;
-                        context.cmd.SetBufferData(data.sharedBuffers.constantBuffer, constantBufferData);
-                        constantBufferData.Dispose();
-                    }
+                    // Upload the constants to device.
+                    data.shaderVariablesBuffer.UpdateData(context.cmd, data.shaderVariables);
+
+                    // Render-graph provides a scratch MPB for our needs.
+                    data.materialPropertyBlock = context.renderGraphPool.GetTempMaterialPropertyBlock();
 
                     ExecuteGeometryPass(context.cmd, data);
                 });
             }
 
             // Pass 2: Rasterization
-            using (var builder = args.renderGraph.AddRenderPass<RasterizationPassData>("Rasterization", out var passData, k_LineRenderingSampler))
+            using (var builder = args.renderGraph.AddRenderPass<RasterizationPassData>("Rasterization", out var passData, k_LineRenderingRasterizationSampler))
             {
                 // Optionally schedule this pass in async. (This is actually the whole reason we split this process into two passes).
                 builder.EnableAsyncCompute(args.settings.executeAsync);
 
                 // Set up other various dependent data.
+                passData.shaderVariables       = shaderVariables;
+                passData.shaderVariablesBuffer = m_ShaderVariablesBuffer;
+
+                passData.binCount         = shaderVariables._BinCount;
+                passData.clusterCount     = shaderVariables._ClusterCount;
+                passData.clusterDepth     = shaderVariables._ClusterDepth;
                 passData.systemResources  = m_SystemResources;
                 passData.debugModeIndex   = (int)args.settings.debugMode;
                 passData.qualityModeIndex = (int)args.settings.sortingQuality;
-                passData.shaderVariables  = shaderVariables;
 #if UNITY_EDITOR
                 passData.renderDataStillHasShadersCompiling = shadersStillCompiling;
 #endif
@@ -223,14 +254,15 @@ namespace UnityEngine.Rendering
 
                 // Set up the shared resources.
                 passData.sharedBuffers = sharedBuffers;
+                passData.depthRT       = builder.ReadTexture(args.depthTexture);
                 UseSharedBuffers(builder, sharedBuffers);
 
                 // Then set up the resources specific to this pass.
                 passData.transientBuffers = RasterizationPassData.Buffers.Allocate(args.renderGraph, builder, new RasterizationPassData.Buffers.AllocationParameters
                 {
-                    countBin     = passData.shaderVariables._BinCount,
-                    countCluster = passData.shaderVariables._ClusterCount,
-                    depthCluster = passData.shaderVariables._ClusterDepth,
+                    countBin     = shaderVariables._BinCount,
+                    countCluster = shaderVariables._ClusterCount,
+                    depthCluster = shaderVariables._ClusterDepth,
 
                     countBinRecords = ComputeBinningRecordCapacity(args.settings.memoryBudget),
                     countWorkQUeue  = ComputeWorkQueueCapacity(args.settings.memoryBudget)
@@ -253,9 +285,48 @@ namespace UnityEngine.Rendering
             if (renderDatas.Length == 0)
                 return;
 
+            // Cull the render datas to lighten the CPU and GPU load further down the line
+            Vector3 cameraOffset = Vector3.zero;
+            if (ShaderConfig.s_CameraRelativeRendering != 0) // TODO: ShaderConfig is HDRP-specific, we should not use it here.
+                cameraOffset = args.cameraPosition;
+
+            m_VisibleDatas.Clear();
+            foreach (var renderData in renderDatas)
+            {
+                // We're using the OrientedBBox although it is in world space and really a AABB
+                OrientedBBox obb;
+                Bounds worldBounds = renderData.bounds;
+
+                obb.center = worldBounds.center;
+                obb.center -= cameraOffset;
+
+                obb.right = Vector3.right;
+                obb.up = Vector3.up;
+
+                obb.extentX = worldBounds.extents.x;
+                obb.extentY = worldBounds.extents.y;
+                obb.extentZ = worldBounds.extents.z;
+
+                if (GeometryUtils.Overlap(obb, args.cameraFrustum, 6, 8))
+                {
+                    m_VisibleDatas.Add(renderData);
+                }
+            }
+
+            if (m_VisibleDatas.Count == 0)
+                return;
+
             foreach (var renderData in SortRenderDatasByCameraDistance(renderDatas, args.camera))
             {
-                DrawInternal(renderData, ref args);
+                // [NOTE-HQ-LINES-SINGLE-PASS-STEREO]
+                // The software rasterizer doesn't support instancing and is thus incompatible with
+                // single-pass mode for XR stereo rendering. This is a problem since that is what HDRP
+                // use by default, so we have to manually support it with a multi-pass approach.
+                for (int viewIndex = 0; viewIndex < args.viewCount; ++viewIndex)
+                {
+                    args.viewIndex = viewIndex;
+                    DrawInternal(renderData, ref args);
+                }
             }
         }
     }

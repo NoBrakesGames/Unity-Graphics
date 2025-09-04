@@ -30,7 +30,7 @@ namespace UnityEditor.ShaderGraph.Internal
     {
         private class ShaderGraphVfxAssetData : JsonObject
         {
-            public List<JsonData<AbstractShaderProperty>> m_Properties = new List<JsonData<AbstractShaderProperty>>();
+            public List<JsonData<ShaderInput>> m_Properties = new();
         }
 
         public const int BaseColorSlotId = 1;
@@ -74,6 +74,7 @@ namespace UnityEditor.ShaderGraph.Internal
 
         ShaderGraphVfxAssetData m_Data = new ShaderGraphVfxAssetData();
 
+        [HideInInspector]
         [SerializeField]
         private SerializationHelper.JSONSerializedElement m_SerializedVfxAssetData;
 
@@ -132,7 +133,12 @@ namespace UnityEditor.ShaderGraph.Internal
             internal set { m_OutputStructName = value; }
         }
 
-        public List<AbstractShaderProperty> properties
+        internal void SetGUID(string guid)
+        {
+            m_Data.OverrideObjectId(guid, "SerializedVfxAssetData");
+        }
+
+        public List<ShaderInput> properties
         {
             get
             {
@@ -150,8 +156,9 @@ namespace UnityEditor.ShaderGraph.Internal
                 var fragProperties = new List<AbstractShaderProperty>();
                 for (var i = 0; i < allProperties.Count(); i++)
                 {
-                    if ((m_PropertiesStages[i] & ShaderStageCapability.Fragment) != 0)
-                        fragProperties.Add(allProperties[i]);
+                    if (allProperties[i] is AbstractShaderProperty property
+                        && (m_PropertiesStages[i] & ShaderStageCapability.Fragment) != 0)
+                        fragProperties.Add(property);
                 }
                 return fragProperties;
             }
@@ -166,14 +173,15 @@ namespace UnityEditor.ShaderGraph.Internal
                 var vertexProperties = new List<AbstractShaderProperty>();
                 for (var i = 0; i < allProperties.Count(); i++)
                 {
-                    if ((m_PropertiesStages[i] & ShaderStageCapability.Vertex) != 0)
-                        vertexProperties.Add(allProperties[i]);
+                    if (allProperties[i] is AbstractShaderProperty property
+                        && (m_PropertiesStages[i] & ShaderStageCapability.Vertex) != 0)
+                        vertexProperties.Add(property);
                 }
                 return vertexProperties;
             }
         }
 
-        internal void SetProperties(List<AbstractShaderProperty> propertiesList)
+        internal void SetProperties(List<ShaderInput> propertiesList)
         {
             m_Data.m_Properties.Clear();
             foreach (var property in propertiesList)
@@ -196,7 +204,8 @@ namespace UnityEditor.ShaderGraph.Internal
 
             foreach (var property in m_Data.m_Properties.SelectValue())
             {
-                property.SetupConcretePrecision(m_ConcretePrecision);
+                if (property is AbstractShaderProperty shaderProperty)
+                    shaderProperty.SetupConcretePrecision(m_ConcretePrecision);
             }
         }
 
@@ -236,7 +245,7 @@ namespace UnityEditor.ShaderGraph.Internal
             }
             var propertyIndices = propertyIndexSet.ToArray();
             Array.Sort(propertyIndices);
-            var filteredProperties = propertyIndices.Select(i => properties[i]).ToArray();
+            var filteredProperties = propertyIndices.Select(i => properties[i]).OfType<AbstractShaderProperty>().ToArray();
             graphCode.properties = filteredProperties;
 
             return graphCode;

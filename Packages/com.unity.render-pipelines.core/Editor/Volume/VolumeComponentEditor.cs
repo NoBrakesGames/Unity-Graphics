@@ -17,7 +17,7 @@ namespace UnityEditor.Rendering
     /// component this drawer is for.
     /// </summary>
     /// <example>
-    /// Below is an example of a custom <see cref="VolumeComponent"/>:
+    /// <para>Below is an example of a custom <see cref="VolumeComponent"/>:</para>
     /// <code>
     /// using UnityEngine.Rendering;
     ///
@@ -27,7 +27,7 @@ namespace UnityEditor.Rendering
     ///     public ClampedFloatParameter intensity = new ClampedFloatParameter(0f, 0f, 1f);
     /// }
     /// </code>
-    /// And its associated editor:
+    /// <para>And its associated editor:</para>
     /// <code>
     /// using UnityEditor.Rendering;
     ///
@@ -56,6 +56,8 @@ namespace UnityEditor.Rendering
         const string k_KeyPrefix = "CoreRP:VolumeComponent:UI_State:";
 
         EditorPrefBool m_EditorPrefBool;
+
+        internal string categoryTitle { get; set; }
 
         /// <summary>
         /// If the editor for this <see cref="VolumeComponent"/> is expanded or not in the inspector
@@ -115,31 +117,20 @@ namespace UnityEditor.Rendering
 
         #region Additional Properties
 
-        AnimFloat m_AdditionalPropertiesAnimation;
-        EditorPrefBool m_ShowAdditionalProperties;
         List<VolumeParameter> m_VolumeNotAdditionalParameters = new List<VolumeParameter>();
 
         /// <summary>
         /// Override this property if your editor makes use of the "Additional Properties" feature.
         /// </summary>
-        public virtual bool hasAdditionalProperties => volumeComponent.parameters.Count != m_VolumeNotAdditionalParameters.Count;
+        public virtual bool hasAdditionalProperties => volumeComponent.parameterList.Count != m_VolumeNotAdditionalParameters.Count;
 
         /// <summary>
         /// Set to true to show additional properties.
         /// </summary>
         public bool showAdditionalProperties
         {
-            get => m_ShowAdditionalProperties.value;
-            set
-            {
-                if (value && !m_ShowAdditionalProperties.value)
-                {
-                    m_AdditionalPropertiesAnimation.value = 1.0f;
-                    m_AdditionalPropertiesAnimation.target = 0.0f;
-                }
-
-                SetAdditionalPropertiesPreference(value);
-            }
+            get => AdvancedProperties.enabled;
+            set => AdvancedProperties.enabled = value;
         }
 
         /// <summary>
@@ -149,15 +140,11 @@ namespace UnityEditor.Rendering
         /// <returns>True if the additional content should be drawn.</returns>
         protected bool BeginAdditionalPropertiesScope()
         {
-            if (hasAdditionalProperties && showAdditionalProperties)
-            {
-                CoreEditorUtils.BeginAdditionalPropertiesHighlight(m_AdditionalPropertiesAnimation);
-                return true;
-            }
-            else
-            {
+            if (!showAdditionalProperties || !hasAdditionalProperties)
                 return false;
-            }
+
+            AdvancedProperties.BeginGroup();
+            return true;
         }
 
         /// <summary>
@@ -166,9 +153,7 @@ namespace UnityEditor.Rendering
         protected void EndAdditionalPropertiesScope()
         {
             if (hasAdditionalProperties && showAdditionalProperties)
-            {
-                CoreEditorUtils.EndAdditionalPropertiesHighlight();
-            }
+                AdvancedProperties.EndGroup();
         }
 
         #endregion
@@ -187,10 +172,25 @@ namespace UnityEditor.Rendering
             set => m_Inspector = value;
         }
 
+        internal void SetVolume(Volume v)
+        {
+            volume = v;
+        }
+
         /// <summary>
-        /// Obtains the <see cref="Volume"/> that is being edited from this volume component
+        /// Obtains the <see cref="Volume"/> that is being edited if editing a scene volume, otherwise null.
         /// </summary>
-        protected Volume volume => inspector?.target as Volume;
+        protected Volume volume { get; private set; }
+
+        internal void SetVolumeProfile(VolumeProfile p)
+        {
+            volumeProfile = p;
+        }
+
+        /// <summary>
+        /// Obtains the <see cref="VolumeProfile"/> that is being edited.
+        /// </summary>
+        VolumeProfile volumeProfile { get; set; }
 
         List<(GUIContent displayName, int displayOrder, SerializedDataParameter param)> m_Parameters;
 
@@ -214,16 +214,19 @@ namespace UnityEditor.Rendering
         {
             s_ParameterDrawers.Clear();
 
-            // Look for all the valid parameter drawers
-            var types = CoreUtils.GetAllTypesDerivedFrom<VolumeParameterDrawer>()
-                .Where(t => t.IsDefined(typeof(VolumeParameterDrawerAttribute), false) && !t.IsAbstract);
-
-            // Store them
-            foreach (var type in types)
+            foreach (var type in TypeCache.GetTypesDerivedFrom<VolumeParameterDrawer>())
             {
-                var attr = (VolumeParameterDrawerAttribute)type.GetCustomAttributes(typeof(VolumeParameterDrawerAttribute), false)[0];
-                var decorator = (VolumeParameterDrawer)Activator.CreateInstance(type);
-                s_ParameterDrawers.Add(attr.parameterType, decorator);
+                if (type.IsAbstract)
+                    continue;
+
+                var attr = type.GetCustomAttribute<VolumeParameterDrawerAttribute>(false);
+                if (attr == null)
+                {
+                    Debug.LogWarning($"{type} is missing the attribute {nameof(VolumeParameterDrawerAttribute)}");
+                    continue;
+                }
+
+                s_ParameterDrawers.Add(attr.parameterType, Activator.CreateInstance(type) as VolumeParameterDrawer);
             }
         }
 
@@ -232,9 +235,7 @@ namespace UnityEditor.Rendering
         /// </summary>
         public new void Repaint()
         {
-            inspector?.Repaint();
-
-            // Volume Component Editors can be shown in the ProjectSettings window (default volume profile)
+            // Volume Component Editors can be shown in the Graphics Settings window (default volume profile)
             // This will force a repaint of the whole window, otherwise, additional properties highlight animation does not work properly.
             SettingsService.RepaintAllSettingsWindow();
 
@@ -249,27 +250,24 @@ namespace UnityEditor.Rendering
         internal void InitAdditionalPropertiesPreference()
         {
             string key = GetAdditionalPropertiesPreferenceKey(GetType());
-            m_ShowAdditionalProperties = new EditorPrefBool(key);
-        }
-
-        internal void SetAdditionalPropertiesPreference(bool value)
-        {
-            m_ShowAdditionalProperties.value = value;
+            AdvancedProperties.UpdateShowAdvancedProperties(key, EditorPrefs.HasKey(key) && EditorPrefs.GetBool(key));
         }
 
         internal void Init()
         {
             activeProperty = serializedObject.FindProperty("active");
 
-            var inspectorKey = inspector != null ? inspector.GetType().Name : string.Empty;
-            m_EditorPrefBool = new EditorPrefBool(k_KeyPrefix + inspectorKey + volumeComponent.GetType().Name, true);
+            string inspectorKey = string.Empty;
+            bool expandedByDefault = true;
+            if (!enableOverrides)
+            {
+                inspectorKey += "default"; // Ensures the default VolumeProfile editor doesn't share expander state with other editors
+                expandedByDefault = false;
+            }
+
+            m_EditorPrefBool = new EditorPrefBool(k_KeyPrefix + inspectorKey + volumeComponent.GetType().Name, expandedByDefault);
 
             InitAdditionalPropertiesPreference();
-
-            m_AdditionalPropertiesAnimation = new AnimFloat(0, Repaint)
-            {
-                speed = CoreEditorConstants.additionalPropertiesHightLightSpeed
-            };
 
             InitParameters();
             OnEnable();
@@ -365,7 +363,6 @@ namespace UnityEditor.Rendering
                 })
                 .OrderBy(t => t.order)
                 .ToList();
-
         }
 
         /// <summary>
@@ -375,17 +372,52 @@ namespace UnityEditor.Rendering
         {
         }
 
-        internal void OnInternalInspectorGUI()
+        internal void AddDefaultProfileContextMenuEntries(
+            GenericMenu menu,
+            VolumeProfile defaultProfile,
+            GenericMenu.MenuFunction copyAction)
         {
+            // Host can be either VolumeProfileEditor or VolumeEditor
+            var profile = volume
+                ? volume.HasInstantiatedProfile() ? volume.profile : volume.sharedProfile
+                : volumeProfile;
+
+            if (defaultProfile != null &&
+                profile != null &&
+                defaultProfile != profile)
+            {
+                menu.AddSeparator(string.Empty);
+                menu.AddItem(EditorGUIUtility.TrTextContent($"Show Default Volume Profile"), false,
+                    () => Selection.activeObject = defaultProfile);
+                menu.AddItem(EditorGUIUtility.TrTextContent($"Apply Values to Default Volume Profile"), false, copyAction);
+            }
+        }
+
+        /// <summary>
+        /// Unity calls this method after drawing the header for each VolumeComponentEditor
+        /// </summary>
+        protected virtual void OnBeforeInspectorGUI()
+        {
+        }
+
+        internal bool OnInternalInspectorGUI()
+        {
+            if (serializedObject == null || serializedObject.targetObject == null)
+                return false;
+
             serializedObject.Update();
             using (new EditorGUILayout.VerticalScope())
             {
-                TopRowFields();
+                OnBeforeInspectorGUI();
+                if (enableOverrides)
+                    TopRowFields();
+                else
+                    GUILayout.Space(4);
                 OnInspectorGUI();
                 EditorGUILayout.Space();
             }
 
-            serializedObject.ApplyModifiedProperties();
+            return serializedObject.ApplyModifiedProperties();
         }
 
         /// <summary>
@@ -415,19 +447,8 @@ namespace UnityEditor.Rendering
         /// <returns>A label to display in the component header.</returns>
         public virtual GUIContent GetDisplayTitle()
         {
-            var targetType = target.GetType();
             var title = string.IsNullOrEmpty(volumeComponent.displayName) ? ObjectNames.NicifyVariableName(volumeComponent.GetType().Name) : volumeComponent.displayName;
-            var supportedOn = targetType.GetCustomAttribute<SupportedOnRenderPipelineAttribute>(false);
-            if(supportedOn !=null)
-                return EditorGUIUtility.TrTextContent(title, string.Join(", ", supportedOn.renderPipelineTypes.Select(t => ObjectNames.NicifyVariableName(t.Name))));
-
-#pragma warning disable CS0618
-            var volumeComponentMenuForRenderPipelineAttribute = targetType.GetCustomAttribute<VolumeComponentMenuForRenderPipeline>(false);
-            if (volumeComponentMenuForRenderPipelineAttribute != null)
-                return EditorGUIUtility.TrTextContent(title, string.Join(", ", volumeComponentMenuForRenderPipelineAttribute.pipelineTypes.Select(t => ObjectNames.NicifyVariableName(t.Name))));
-#pragma warning restore CS0618
-
-            return EditorGUIUtility.TrTextContent(title,  string.Empty);
+            return EditorGUIUtility.TrTextContent(title, string.Empty);
         }
 
         void AddToggleState(GUIContent content, bool state)
@@ -482,9 +503,9 @@ namespace UnityEditor.Rendering
 
         internal bool AreAllOverridesTo(bool state)
         {
-            for (int i = 0; i < volumeComponent.parameters.Count; ++i)
+            for (int i = 0; i < volumeComponent.parameterList.Count; ++i)
             {
-                if (volumeComponent.parameters[i].overrideState != state)
+                if (volumeComponent.parameterList[i].overrideState != state)
                     return false;
             }
 
@@ -504,7 +525,7 @@ namespace UnityEditor.Rendering
         /// </summary>
         /// <param name="property">A serialized property holding a <see cref="VolumeParameter{T}"/>
         /// </param>
-        /// <returns></returns>
+        /// <returns>A <see cref="SerializedDataParameter"/> that encapsulates the provided serialized property.</returns>
         protected SerializedDataParameter Unpack(SerializedProperty property)
         {
             Assert.IsNotNull(property);
@@ -537,8 +558,9 @@ namespace UnityEditor.Rendering
                 s_HeadersGuiContents.Add(header, content);
             }
 
-            var rect = EditorGUI.IndentedRect(EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight));
-            EditorGUI.LabelField(rect, content, EditorStyles.miniLabel);
+            EditorGUILayout.Space(4);
+            var rect = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight);
+            EditorGUI.LabelField(rect, content, EditorStyles.boldLabel);
         }
 
         /// <summary>
@@ -546,7 +568,7 @@ namespace UnityEditor.Rendering
         /// </summary>
         /// <param name="property">The property to obtain the attributes and handle the decorators</param>
         /// <param name="title">A custom label and/or tooltip that might be updated by <see cref="TooltipAttribute"/> and/or by <see cref="InspectorNameAttribute"/></param>
-        void HandleDecorators(SerializedDataParameter property, GUIContent title)
+        internal void HandleDecorators(SerializedDataParameter property, GUIContent title)
         {
             foreach (var attr in property.attributes)
             {
@@ -678,6 +700,27 @@ namespace UnityEditor.Rendering
         }
 
         /// <summary>
+        /// Draw a Color Field but convert the color to gamma space before displaying it in the shader.
+        /// Using SetColor on a material does the conversion, but setting the color as vector3 in a constant buffer doesn't
+        /// So we have to do it manually, doing it in the UI avoids having to do a migration step for existing fields
+        /// </summary>
+        /// <param name="property">The color property</param>
+        protected void ColorFieldLinear(SerializedDataParameter property)
+        {
+            var title = EditorGUIUtility.TrTextContent(property.displayName,
+                property.GetAttribute<TooltipAttribute>()?.tooltip);
+
+            using (var scope = new OverridablePropertyScope(property, title, this))
+            {
+                if (!scope.displayed)
+                    return;
+
+                // Standard Unity drawer
+                CoreEditorUtils.ColorFieldLinear(property.value, title);
+            }
+        }
+
+        /// <summary>
         /// Draws the override checkbox used by a property in the editor.
         /// </summary>
         /// <param name="property">The property to draw the override checkbox for</param>
@@ -783,13 +826,19 @@ namespace UnityEditor.Rendering
                     editor.HandleDecorators(property, label);
 
                     int relativeIndentation = editor.HandleRelativeIndentation(property);
-                    if (relativeIndentation != 0)
-                        indentScope = new IndentLevelScope(relativeIndentation * 15);
+
+                    int indent = relativeIndentation * 15;
+                    if (haveCustomOverrideCheckbox)
+                        indent += 15;
+
+                    if (indent != 0)
+                        indentScope = new IndentLevelScope(indent);
 
                     if (!haveCustomOverrideCheckbox)
                     {
                         EditorGUILayout.BeginHorizontal();
-                        editor.DrawOverrideCheckbox(property);
+                        if (editor.enableOverrides)
+                            editor.DrawOverrideCheckbox(property);
 
                         disabledScope = new EditorGUI.DisabledScope(!property.overrideState.boolValue);
                     }
@@ -848,5 +897,10 @@ namespace UnityEditor.Rendering
                 GUILayout.EndHorizontal();
             }
         }
+
+        /// <summary>
+        /// Whether to draw the UI elements related to overrides.
+        /// </summary>
+        public bool enableOverrides { get; set; } = true;
     }
 }

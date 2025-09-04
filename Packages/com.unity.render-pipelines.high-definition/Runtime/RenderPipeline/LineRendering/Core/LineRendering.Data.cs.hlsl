@@ -15,24 +15,7 @@
 // UnityEngine.Rendering.LineRendering+ShaderVariables:  static fields
 //
 #define NUM_LANE_SEGMENT_SETUP (1024)
-#define NUM_LANE_RASTER_BIN (1024)
-
-// Generated from UnityEngine.Rendering.LineRendering+ShaderVariables
-// PackingRules = Exact
-CBUFFER_START(ShaderVariables)
-    float2 _DimBin;
-    int _SegmentCount;
-    int _BinCount;
-    float4 _SizeScreen;
-    float4 _SizeBin;
-    int _VertexCount;
-    int _VertexStride;
-    int _ActiveBinCount;
-    int _ClusterDepth;
-    int2 _ShadingAtlasDimensions;
-    int _ClusterCount;
-    float _TileOpacityThreshold;
-CBUFFER_END
+#define NUM_LANE_RASTER_BIN (512)
 
 // Generated from UnityEngine.Rendering.LineRendering+ClusterRecord
 // PackingRules = Exact
@@ -55,6 +38,17 @@ struct SegmentRecord
     uint vertexIndex1;
 };
 
+// Generated from UnityEngine.Rendering.LineRendering+ShaderVariables
+// PackingRules = Exact
+CBUFFER_START(ShaderVariables)
+    float4 _Params0;
+    float4 _Params1;
+    float4 _Params2;
+    float4 _Params3;
+    float4 _Params4;
+    float4 _Params5;
+CBUFFER_END
+
 // Generated from UnityEngine.Rendering.LineRendering+VertexRecord
 // PackingRules = Exact
 struct VertexRecord
@@ -64,8 +58,8 @@ struct VertexRecord
     float3 positionRWS;
     float3 tangentWS;
     float3 normalWS;
-    float texCoord0;
-    float texCoord1;
+    uint texCoord0;
+    uint texCoord1;
 };
 
 

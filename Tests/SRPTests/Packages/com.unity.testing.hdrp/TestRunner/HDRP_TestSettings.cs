@@ -32,6 +32,9 @@ public class HDRP_TestSettings : GraphicsTestSettings
     [Tooltip("When enabled, the tests handles XR compatibility.")]
     public bool xrCompatible = true;
 
+    [Tooltip("When enabled, the tests handles GPU Driven compatibility.")]
+    public bool gpuDrivenCompatible = true;
+
     [UnityEngine.Range(1.0f, 10.0f)]
     [Tooltip("Set the multiplier to increase the tolerance in AverageCorrectnessThreshold and PerPixelCorrectnessThreshold to account for slight changes due to float precision.")]
     public float xrThresholdMultiplier = 1.0f;
@@ -56,13 +59,13 @@ public class HDRP_TestSettings : GraphicsTestSettings
             return;
         }
 
-        var currentRP = GraphicsSettings.renderPipelineAsset;
+        var currentRP = GraphicsSettings.defaultRenderPipeline;
 
         if (currentRP != renderPipelineAsset)
         {
             quitDebug.AppendLine($"{SceneManager.GetActiveScene().name} RP asset change: {((currentRP == null) ? "null" : currentRP.name)} => {renderPipelineAsset.name}");
 
-            GraphicsSettings.renderPipelineAsset = renderPipelineAsset;
+            GraphicsSettings.defaultRenderPipeline = renderPipelineAsset;
 
             // Render pipeline is only reconstructed when a frame is renderer
             // If scene requires lightmap baking, we have to force it

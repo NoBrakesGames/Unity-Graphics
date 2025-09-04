@@ -1,10 +1,9 @@
-using System;
-using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-Area(Circle)")]
+    [VFXInfo(name = "Area (Circle)", category = "Math/Geometry")]
     class CircleArea : VFXOperator
     {
         public class InputProperties

@@ -1,10 +1,9 @@
-using System;
-using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-Volume(Cone)")]
+    [VFXInfo(name = "Volume (Cone)", category = "Math/Geometry")]
     class ConeVolume : VFXOperator
     {
         public class InputProperties

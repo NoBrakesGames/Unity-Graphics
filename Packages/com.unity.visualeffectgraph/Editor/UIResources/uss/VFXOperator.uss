@@ -6,42 +6,42 @@ VFXOperatorUI.node #middle
 
 VFXOperatorUI #title #edit
 {
-   width: 28px;
-   flex-direction:column;
-   justify-content:center;
-}
-
-VFXOperatorUI #title #edit #icon
-{
-    background-image: url("project:///Packages/com.unity.visualeffectgraph/Editor/UIResources/VFX/EditStolen.png");
-    width: 15px;
-    height: 14px;
+    opacity: 0.6;
+    width: 24px;
+    height: 24px;
     align-self: center;
+    border-width: 0;
+    background-color: rgba(0, 0, 0, 0);
+    background-size: 16px 16px;
+    background-image: resource("d_SettingsIcon@2x.png");
 }
 
-OperandInfo *
+VFXOperatorUI #title #edit:hover {
+    opacity: 1;
+    background-color: #2B2B2B;
+}
+
+VFXOperatorUI > #node-border #contents > #top > #output {
+    flex: 1 1 auto;
+}
+
+VFXOperatorUI.node #node-border > #title > Label.first {
+    margin-left: 16px;
+}
+
+VFXOperatorUI.node.superCollapsed #node-border > #title > Label.last {
+    margin-right: 24px;
+}
+
+OperandInfo PopupField
 {
     height: 16px;
 }
-OperandInfo .unity-text-field
-{
-    flex:1 0 auto;
-}
 
-OperandInfo .PopupButton
+OperandInfo .unity-text-element, OperandInfo .unity-text-field
 {
-    flex:0 0 auto;
-    width: 64px;
-}
-
-VFXUnifiedOperatorEdit OperandInfo .unity-label
-{
-    flex:1 0 auto;
-}
-
-VFXUnifiedOperatorEdit OperandInfo .PopupButton
-{
-    width: 80px;
+    margin-left: 4px;
+    flex: 1 1 auto;
 }
 
 #edit-container
@@ -100,8 +100,16 @@ VFXOperatorUI.superCollapsed.VFXNodeUI.node #settings-divider, VFXOperatorUI.sup
     background-color: rgba(0,0,0,0);
 }
 
+.VFXNodeUI.node.superCollapsed #node-border
+{
+    flex-grow: 1;
+    overflow: hidden;
+}
+
 .VFXNodeUI.node.superCollapsed #node-border > #title
 {
+    border-radius: 6px;
+    flex-grow: 1;
     position:Relative;
     left:0;
     right:0;
@@ -109,8 +117,7 @@ VFXOperatorUI.superCollapsed.VFXNodeUI.node #settings-divider, VFXOperatorUI.sup
     bottom:0;
     height: auto;
     margin-bottom:0;
-    border-bottom-left-radius: 2px;
-    border-bottom-right-radius: 2px;
+    border-bottom-width: 0;
 }
 
 .VFXNodeUI.node.superCollapsed #node-border > #title > .unity-label#title-label {
@@ -171,12 +178,6 @@ VFXOperatorUI.superCollapsed.VFXNodeUI.node #settings-divider, VFXOperatorUI.sup
     display:none;
 }
 
-.VFXNodeUI.superCollapsed > #node-border > #title > #edit,.VFXNodeUI.superCollapsed > #node-border > #title > #collapse-button
-{
-    width:0;
-    padding-left:0;
-}
-
 .VFXNodeUI.superCollapsed #icon
 {
     max-width:0;
@@ -197,11 +198,12 @@ VFXOperatorUI.superCollapsed.VFXNodeUI.node #settings-divider, VFXOperatorUI.sup
 .VFXNodeUI.superCollapsed.node .VFXDataAnchor
 {
     position: Absolute;
-    left: 0px;
+    left: 0;
+    right: 4px;
     width: 16px;
     top: 11px;
-    height: 0px;
-    min-height: 0px;
+    height: 0;
+    min-height: 0;
     overflow: hidden;
 }
 
@@ -214,14 +216,15 @@ VFXOperatorUI.superCollapsed.VFXNodeUI.node #settings-divider, VFXOperatorUI.sup
 {
     top: auto;
     height: auto;
-    bottom: 0px;
+    bottom: 0;
     min-height: 20px;
 }
 
 
 .VFXNodeUI.superCollapsed.node .VFXDataAnchor.first #connector
 {
-    margin-top: 0px;
+    margin-top: 0;
+    margin-right: 0;
 }
 
 .VFXNodeUI.superCollapsed.node VFXOutputDataAnchor.VFXDataAnchor

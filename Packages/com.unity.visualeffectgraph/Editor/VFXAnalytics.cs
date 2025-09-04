@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 
 using UnityEditor.Build;
@@ -15,26 +14,39 @@ using UnityEngine.VFX;
 
 namespace UnityEditor.VFX
 {
-    internal interface IEditorAnalytics
+    interface IEditorAnalytics
     {
         bool enabled { get; }
         bool CanBeSent(VFXAnalytics.UsageEventData data);
-        AnalyticsResult RegisterEventWithLimit(string eventName, int maxEventPerHour, int maxItems, string vendorKey, int ver);
-        AnalyticsResult SendEventWithLimit(string eventName, object parameters, int ver);
+        AnalyticsResult SendAnalytic(IAnalytic analytic);
+    }
+
+    interface IBuildReport
+    {
+        IEnumerable<string> packedAssetsInfoPath { get; }
+        BuildSummary summary { get; }
+    }
+
+    class BuildReportWrapper : IBuildReport
+    {
+        private readonly BuildReport m_BuildReport;
+
+        public BuildReportWrapper(BuildReport buildReport)
+        {
+            m_BuildReport = buildReport;
+        }
+
+        public IEnumerable<string> packedAssetsInfoPath => m_BuildReport.packedAssets.SelectMany(x => x.contents).Select(x => x.sourceAssetPath);
+        public BuildSummary summary => m_BuildReport.summary;
     }
 
     class EditorAnalyticsWrapper : IEditorAnalytics
     {
         public bool enabled => EditorAnalytics.enabled;
 
-        public AnalyticsResult RegisterEventWithLimit(string eventName, int maxEventPerHour, int maxItems, string vendorKey, int ver)
+        public AnalyticsResult SendAnalytic(IAnalytic analytic)
         {
-            return EditorAnalytics.RegisterEventWithLimit(eventName, maxEventPerHour, maxItems, vendorKey, ver);
-        }
-
-        public AnalyticsResult SendEventWithLimit(string eventName, object parameters, int ver)
-        {
-            return EditorAnalytics.SendEventWithLimit(eventName, parameters, ver);
+            return EditorAnalytics.SendAnalytic(analytic);
         }
 
         public bool CanBeSent(VFXAnalytics.UsageEventData data) => data.nb_vfx_assets > 0 || data.nb_vfx_opened > 0;
@@ -170,15 +182,8 @@ namespace UnityEditor.VFX
             }
         }
 
-        const string k_PackageName = "com.unity.visualeffectgraph";
         const string k_AdditionalSamples = "VisualEffectGraph Additions";
         const string k_AdditionalHelpers = "OutputEvent Helpers";
-
-        const int k_MaxEventsPerHour = 10;
-        const int k_MaxNumberOfElements = 1000;
-        const string k_VendorKey = "unity.vfxgraph";
-        const string k_UsageEventName = "uVFXGraphUsage";
-        const int k_UsageCurrentVersion = 4;
 
         static VFXAnalytics s_Instance;
 
@@ -201,7 +206,8 @@ namespace UnityEditor.VFX
             Quit,
         }
 
-        internal struct UsageEventData
+        [Serializable]
+        internal struct UsageEventData : IAnalytic.IData
         {
             public string event_kind;
             public string build_target;
@@ -220,6 +226,20 @@ namespace UnityEditor.VFX
             public int has_samples_installed;
             public int has_helpers_installed;
             public List<string> system_template_used;
+        }
+
+        [AnalyticInfo(eventName: "uVFXGraphUsage", vendorKey: "unity.vfxgraph", maxEventsPerHour: 10, maxNumberOfElements: 1000, version: 4)]
+        internal class Analytic : IAnalytic
+        {
+            public Analytic(UsageEventData data) { m_Data = data; }
+            public bool TryGatherData(out IAnalytic.IData data, out Exception error)
+            {
+                data = m_Data;
+                error = null;
+                return true;
+            }
+
+            public UsageEventData m_Data;
         }
 
         protected internal VFXAnalytics(IEditorAnalytics editorAnalytics)
@@ -308,22 +328,29 @@ namespace UnityEditor.VFX
 
         public void OnPostprocessBuild(BuildReport report)
         {
+            OnPostprocessBuildInternal(new BuildReportWrapper(report));
+        }
+
+        private void OnPostprocessBuildInternal(IBuildReport report)
+        {
             try
             {
                 if (m_EditorAnalytics.enabled)
                 {
-                    var assets = report.packedAssets
-                        .SelectMany(x => x.contents)
-                        .Select(x => x.sourceAssetPath)
-                        .Where(x => string.Compare(Path.GetExtension(x), ".vfx", StringComparison.OrdinalIgnoreCase) == 0)
-                        .Distinct()
-                        .ToArray();
+                    var assetsCount = 0;
+                    foreach (var sourceAssetPath in report.packedAssetsInfoPath.Distinct())
+                    {
+                        if (sourceAssetPath.EndsWith(".vfx", StringComparison.OrdinalIgnoreCase))
+                        {
+                            assetsCount++;
+                        }
+                    }
 
                     var data = new UsageEventData
                     {
                         event_kind = EventKind.ProjectBuild.ToString(),
                         build_target = report.summary.platform.ToString(),
-                        nb_vfx_assets = assets.Length,
+                        nb_vfx_assets = assetsCount,
                         nb_vfx_opened = 0,
                     };
 
@@ -336,6 +363,7 @@ namespace UnityEditor.VFX
                 Debug.LogError($"Analytics could not log project build event\n{e.Message}");
             }
         }
+
 
         // Uncomment for testing purpose
         /*
@@ -403,19 +431,14 @@ namespace UnityEditor.VFX
         {
             if (m_EditorAnalytics.CanBeSent(data))
             {
-                if (!m_IsDataRegistered)
-                    m_IsDataRegistered = m_EditorAnalytics.RegisterEventWithLimit(k_UsageEventName, k_MaxEventsPerHour, k_MaxNumberOfElements, k_VendorKey, k_UsageCurrentVersion) == AnalyticsResult.Ok;
-
-                if (m_IsDataRegistered)
-                {
-                    m_EditorAnalytics.SendEventWithLimit(k_UsageEventName, data, k_UsageCurrentVersion);
-                }
+                Analytic analytic = new Analytic(data);
+                m_EditorAnalytics.SendAnalytic(analytic);
             }
         }
 
         private bool HasPackage(string sampleName)
         {
-            var sample = Sample.FindByPackage(k_PackageName, null).SingleOrDefault(x => x.displayName == sampleName);
+            var sample = Sample.FindByPackage(VisualEffectGraphPackageInfo.name, null).SingleOrDefault(x => x.displayName == sampleName);
             return sample.isImported;
         }
 

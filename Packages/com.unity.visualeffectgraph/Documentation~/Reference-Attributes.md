@@ -23,7 +23,7 @@ Some attributes are a bit more advanced and will be used by default in most simu
 
 | Name       | Type    | Description                                                  | Default Value                                     |
 | ---------- | ------- | ------------------------------------------------------------ | ---------- |
-| `mass` | float | The mass of a particle in Kg/dm^3 | 1.0 (defaults to 1kg per liter of water) |
+| `mass` | float | The mass of a particle in kilograms | 1.0 |
 | `direction` | Vector | You can use this attribute in the following ways:<br/>&#8226;As a storage helper to store arbitrary direction.<br/>&#8226;Use any block that sets a shape position to write to the direction attribute. For example, Set Position (Shape : Circle). | (0.0, 0.0, 1.0) |
 | `angle` | Vector3 | **Variadic:** Euler rotation of a simulated element, expressed as a Vector of Degrees Values. | (0,0,0) |
 | `angularVelocity` | Vector3 | **Variadic:** Euler rotation speed of a simulated element, expressed as a Vector of Degrees per second values. | (0,0,0) |
@@ -52,11 +52,23 @@ System Attributes provide information about system values. These attributes are 
 
 | Name       | Type    | Description                                                  | Default Value                                     |
 | ---------- | ------- | ------------------------------------------------------------ | ---------- |
-| `particleID` | uint | A unique ID that refers to 1 particle | 0 |
+| `particleId` | uint | A unique ID that refers to 1 particle | 0 |
 | `seed` | uint | A unique seed used for random number computations. | 0 |
-| `spawnCount` | uint | A SpawnEvent attribute available as Source Attribute in Spawn Contexts, that describes how many particles were spawned this frame. | (0,0,0) |
-| `spawnTime` | float | A SpawnEvent attribute available as Source Attribute in Spawn Contexts, that contains a Spawn Context internal time (when exported using a **Set Spawn Time** Spawn Block) | 0.0 |
+| `spawnCount` | float | A `SpawnEvent` attribute that describes how many particles were spawned this frame.  You can use `spawnCount` as a [Source Attribute](Attributes.md) in a Spawn context. `spawnCount` is a floating point number so that Unity can accumulate a relative `spawnCount` at the spawn context stage in the [Constant Rate](Block-ConstantRate.md) block.| 0.0 |
+| `spawnTime` | float | A SpawnEvent attribute available as Source Attribute in Spawn Contexts, that contains a Spawn Context internal time (when exported using a [Set Spawn Time](Block-SetSpawnTime.md) Spawn Block) | 0.0 |
 | `particleIndexInStrip` | uint | The index in the Particle Strip Ring Buffer where is located this element. | 0 |
+
+### Collision Attributes
+
+Collision Attributes provide information about collisions between the outer shape of a particle and a surface. These attributes are available as **Read Only**, which means you can only read them using the `Get <Attribute>` Operator.
+
+| Name                     | Type    | Description                                                                                                                                                                                                                                                                                                                                                                                 |
+|--------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `collisionEventCount`    | uint    | Outputs the number of times a particle has hit a surface since it was spawned.                                                                                                                                                                                                                                                                                                              |
+| `collisionEventNormal`   | Vector3 | Outputs the surface normal at the point of impact at this frame. Outputs (0,0,0) if no collision occurs.<br/><br/>To generate random normal values to simulate collision with a [rough surface](Block-CollisionShape.md), enable **Rough Normal** in the Collision Shape block and **Write Rough Normal** in the Collision Shape block's Inspector window, outputs the unrandomized normal. |
+| `collisionEventPosition` | Vector3 | Outputs the coordinates of the point where the particle hits the surface at this frame. Outputs (0,0,0) if no collision occurs.                                                                                                                                                                                                                                                             |
+| `hasCollisionEvent`      | bool    | Outputs `true` when the particle hits a surface. Only available in the [Update](Context-Update.md) context.                                                                                                                                                                                                                                                                                 |
+
 ## Attribute Usage and Implicit Behavior
 
 Some attributes combinations are used in various implicit cases during simulation and rendering. Here is a list of the usages and an explanation of their relationships.

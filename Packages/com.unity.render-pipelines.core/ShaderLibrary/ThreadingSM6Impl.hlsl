@@ -1,12 +1,6 @@
 #ifndef THREADING_SM6_IMPL
 #define THREADING_SM6_IMPL
 
-// If a special definition for WaveReadLaneShuffle is not provided, we assume that the WaveReadLaneAt function is capable
-// of handling a lane index value that varies per lane.
-#if !defined(WaveReadLaneShuffle)
-    #define WaveReadLaneShuffle WaveReadLaneAt
-#endif
-
 namespace Threading
 {
     // Currently we only cover scalar types as at the time of writing this utility library we only needed emulation for those.
@@ -34,7 +28,6 @@ namespace Threading
         TYPE Wave::PrefixProduct(TYPE v)            { return WavePrefixProduct(v);      } \
         TYPE Wave::ReadLaneAt(TYPE v, uint i)       { return WaveReadLaneAt(v, i);      } \
         TYPE Wave::ReadLaneFirst(TYPE v)            { return WaveReadLaneFirst(v);      } \
-        TYPE Wave::ReadLaneShuffle(TYPE v, uint i)  { return WaveReadLaneShuffle(v, i); } \
 
     // Currently just support scalars.
     DEFINE_API_FOR_TYPE(uint)
@@ -55,6 +48,7 @@ namespace Threading
     uint  Wave::Xor(uint v)             { return WaveActiveBitXor(v);    }
 
 #define EMULATED_GROUP_REDUCE(TYPE, OP) \
+    GroupMemoryBarrierWithGroupSync(); \
     g_Scratch[groupIndex] = asuint(v); \
     GroupMemoryBarrierWithGroupSync(); \
     [unroll] \
@@ -67,6 +61,7 @@ namespace Threading
     return as##TYPE(g_Scratch[0]); \
 
 #define EMULATED_GROUP_REDUCE_CMP(TYPE, OP) \
+    GroupMemoryBarrierWithGroupSync(); \
     g_Scratch[groupIndex] = asuint(v); \
     GroupMemoryBarrierWithGroupSync(); \
     [unroll] \
@@ -79,6 +74,7 @@ namespace Threading
     return as##TYPE(g_Scratch[0]); \
 
 #define EMULATED_GROUP_PREFIX(TYPE, OP, FILL_VALUE) \
+    GroupMemoryBarrierWithGroupSync(); \
     g_Scratch[groupIndex] = asuint(v); \
     GroupMemoryBarrierWithGroupSync(); \
     [unroll] \
@@ -104,19 +100,19 @@ namespace Threading
         return THREADING_BLOCK_SIZE / WaveGetLaneCount();
     }
 
-    #define DEFINE_API_FOR_TYPE_GROUP(TYPE)                                                                                                                     \
-        bool Group::AllEqual(TYPE v)                  { bool isEqual = (ReadThreadFirst(v) == v); GroupMemoryBarrierWithGroupSync(); return AllTrue(isEqual); } \
-        TYPE Group::Product(TYPE v)                   { EMULATED_GROUP_REDUCE(TYPE, *)                                                                        } \
-        TYPE Group::Sum(TYPE v)                       { EMULATED_GROUP_REDUCE(TYPE, +)                                                                        } \
-        TYPE Group::Max(TYPE v)                       { EMULATED_GROUP_REDUCE_CMP(TYPE, max)                                                                  } \
-        TYPE Group::Min(TYPE v)                       { EMULATED_GROUP_REDUCE_CMP(TYPE, min)                                                                  } \
-        TYPE Group::InclusivePrefixSum (TYPE v)       { return PrefixSum(v) + v;                                                                              } \
-        TYPE Group::InclusivePrefixProduct (TYPE v)   { return PrefixProduct(v) * v;                                                                          } \
-        TYPE Group::PrefixSum (TYPE v)                { EMULATED_GROUP_PREFIX(TYPE, +, (TYPE)0)                                                               } \
-        TYPE Group::PrefixProduct (TYPE v)            { EMULATED_GROUP_PREFIX(TYPE, *, (TYPE)1)                                                               } \
-        TYPE Group::ReadThreadAt(TYPE v, uint i)      { g_Scratch[groupIndex] = asuint(v); GroupMemoryBarrierWithGroupSync(); return as##TYPE(g_Scratch[i]);  } \
-        TYPE Group::ReadThreadFirst(TYPE v)           { return ReadThreadAt(v, 0u);                                                                           } \
-        TYPE Group::ReadThreadShuffle(TYPE v, uint i) { return ReadThreadAt(v, i);                                                                            } \
+    #define DEFINE_API_FOR_TYPE_GROUP(TYPE)                                                                                                                                                       \
+        bool Group::AllEqual(TYPE v)                  { return AllTrue(ReadThreadFirst(v) == v);                                                                                                } \
+        TYPE Group::Product(TYPE v)                   { EMULATED_GROUP_REDUCE(TYPE, *)                                                                                                          } \
+        TYPE Group::Sum(TYPE v)                       { EMULATED_GROUP_REDUCE(TYPE, +)                                                                                                          } \
+        TYPE Group::Max(TYPE v)                       { EMULATED_GROUP_REDUCE_CMP(TYPE, max)                                                                                                    } \
+        TYPE Group::Min(TYPE v)                       { EMULATED_GROUP_REDUCE_CMP(TYPE, min)                                                                                                    } \
+        TYPE Group::InclusivePrefixSum (TYPE v)       { return PrefixSum(v) + v;                                                                                                                } \
+        TYPE Group::InclusivePrefixProduct (TYPE v)   { return PrefixProduct(v) * v;                                                                                                            } \
+        TYPE Group::PrefixSum (TYPE v)                { EMULATED_GROUP_PREFIX(TYPE, +, (TYPE)0)                                                                                                 } \
+        TYPE Group::PrefixProduct (TYPE v)            { EMULATED_GROUP_PREFIX(TYPE, *, (TYPE)1)                                                                                                 } \
+        TYPE Group::ReadThreadAt(TYPE v, uint i)      { GroupMemoryBarrierWithGroupSync(); g_Scratch[groupIndex] = asuint(v); GroupMemoryBarrierWithGroupSync(); return as##TYPE(g_Scratch[i]); } \
+        TYPE Group::ReadThreadFirst(TYPE v)           { return ReadThreadAt(v, 0u);                                                                                                             } \
+        TYPE Group::ReadThreadShuffle(TYPE v, uint i) { return ReadThreadAt(v, i);                                                                                                              } \
 
     // Currently just support scalars.
     DEFINE_API_FOR_TYPE_GROUP(uint)
@@ -139,6 +135,8 @@ namespace Threading
         uint indexDw = groupIndex % 32u;
         uint offsetDw = (groupIndex / 32u) * 32u;
         uint indexScratch = offsetDw + indexDw;
+
+        GroupMemoryBarrierWithGroupSync();
 
         g_Scratch[groupIndex] = v << indexDw;
 

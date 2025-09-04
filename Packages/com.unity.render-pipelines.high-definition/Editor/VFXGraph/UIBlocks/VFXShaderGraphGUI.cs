@@ -15,6 +15,9 @@ namespace UnityEditor.Rendering.HighDefinition
         {
             uiBlocks.Clear();
             uiBlocks.Add(new SurfaceOptionUIBlock(MaterialUIBlock.ExpandableBit.Base, features: vfxSurfaceOptionFeatures));
+            //VFX inspector UI is taking a shortcut here:
+            //We aren't doing distinction between LightingShaderGraphGUI & LitShaderGUI
+            //Only refraction has to be added to cover all settings cases
             uiBlocks.Add(new TransparencyUIBlock(MaterialUIBlock.ExpandableBit.Transparency, TransparencyUIBlock.Features.Refraction));
         }
     }
@@ -27,6 +30,19 @@ namespace UnityEditor.Rendering.HighDefinition
         {
             uiBlocks.Clear();
             uiBlocks.Add(new SurfaceOptionUIBlock(MaterialUIBlock.ExpandableBit.Base, features: vfxSurfaceOptionFeatures));
+        }
+    }
+
+    internal class VFXShaderGraphGUISixWay : SixWayGUI
+    {
+        const SurfaceOptionUIBlock.Features vfxSurfaceOptionFeatures = SurfaceOptionUIBlock.Features.Lit
+                                                                       | SurfaceOptionUIBlock.Features.ShowDepthOffsetOnly ^ SurfaceOptionUIBlock.Features.PreserveSpecularLighting;
+
+        public VFXShaderGraphGUISixWay()
+        {
+            uiBlocks.Clear();
+            uiBlocks.Add(new SurfaceOptionUIBlock(MaterialUIBlock.ExpandableBit.Base, features: vfxSurfaceOptionFeatures ));
+            uiBlocks.Add(new SixWayUIBlock(MaterialUIBlock.ExpandableBit.Base));
         }
     }
 }

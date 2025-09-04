@@ -55,28 +55,48 @@ namespace UnityEngine.Rendering.Tests
         }
     }
 
-    // [UnityPlatform(exclude = new RuntimePlatform[] { RuntimePlatform.LinuxPlayer, RuntimePlatform.LinuxEditor })] // Disabled on Linux (case 1370861)
-    // class RuntimeProfilerTests : RuntimeProfilerTestBase
-    // {
-    //     [UnityTest]
-    //     public IEnumerator RuntimeProfilerGivesNonZeroOutput()
-    //     {
-    //         yield return Warmup();
+    // Fails on WebGL, Oculus Quest and Embedded Platforms (GLES3).
+    // Unfortunately, there is no good way to exclude Oculus Quest from the test without excluding all Android devices.
+    // https://jira.unity3d.com/browse/GFXFOUND-559
+    // https://jira.unity3d.com/browse/PLAT-13842 (GLES3 gpuFrameTime is currently only available on Android)
+    [UnityPlatform(exclude = new RuntimePlatform[] { RuntimePlatform.WebGLPlayer, RuntimePlatform.Android, RuntimePlatform.EmbeddedLinuxArm64 })]
+    class RuntimeProfilerTests : RuntimeProfilerTestBase
+    {
+        [UnityTest]
+        [UnityPlatform(exclude = new RuntimePlatform[] { RuntimePlatform.WindowsPlayer })] // Unstable: https://jira.unity3d.com/browse/UUM-112472
+        public IEnumerator RuntimeProfilerGivesNonZeroOutput()
+        {
+            if ((Application.platform == RuntimePlatform.LinuxPlayer ||
+                 Application.platform == RuntimePlatform.LinuxEditor)
+                && SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore)
+                {
+                    Assert.Ignore("Test is failing on Linux OpenGLCore. https://jira.unity3d.com/browse/GFXFOUND-559");
+                }
 
-    //         m_ToCleanup = new GameObject();
-    //         var camera = m_ToCleanup.AddComponent<Camera>();
-    //         for (int i = 0; i < k_NumFramesToRender; i++)
-    //         {
-    //             m_DebugFrameTiming.UpdateFrameTiming();
-    //             camera.Render();
-    //             yield return null;
-    //         }
+            yield return Warmup();
 
-    //         Assert.True(
-    //             m_DebugFrameTiming.m_BottleneckHistory.Histogram.Balanced > 0 ||
-    //             m_DebugFrameTiming.m_BottleneckHistory.Histogram.CPU > 0 ||
-    //             m_DebugFrameTiming.m_BottleneckHistory.Histogram.GPU > 0 ||
-    //             m_DebugFrameTiming.m_BottleneckHistory.Histogram.PresentLimited > 0);
-    //     }
-    // }
+            m_ToCleanup = new GameObject();
+            var camera = m_ToCleanup.AddComponent<Camera>();
+            for (int i = 0; i < k_NumFramesToRender; i++)
+            {
+                m_DebugFrameTiming.UpdateFrameTiming();
+
+                var rr = new UnityEngine.Rendering.RenderPipeline.StandardRequest();
+                rr.destination = RenderTexture.GetTemporary(128, 128, 24, UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_SRGB);
+                rr.mipLevel = 0;
+                rr.slice = 0;
+                rr.face = CubemapFace.Unknown;
+                UnityEngine.Rendering.RenderPipeline.SubmitRenderRequest(camera, rr);
+                RenderTexture.ReleaseTemporary(rr.destination);
+
+                yield return null;
+            }
+
+            Assert.True(
+                m_DebugFrameTiming.m_BottleneckHistory.Histogram.Balanced > 0 ||
+                m_DebugFrameTiming.m_BottleneckHistory.Histogram.CPU > 0 ||
+                m_DebugFrameTiming.m_BottleneckHistory.Histogram.GPU > 0 ||
+                m_DebugFrameTiming.m_BottleneckHistory.Histogram.PresentLimited > 0);
+        }
+    }
 }

@@ -1,12 +1,13 @@
 using System;
-using System.Collections.Generic;
-using UnityEngine.Rendering;
+using System.Diagnostics;
+using UnityEngine.Scripting.APIUpdating;
 
-namespace UnityEngine.Experimental.Rendering.RenderGraphModule
+namespace UnityEngine.Rendering.RenderGraphModule
 {
     /// <summary>
     /// Use this struct to set up a new Render Pass.
     /// </summary>
+    [MovedFrom(true, "UnityEngine.Experimental.Rendering.RenderGraphModule", "UnityEngine.Rendering.RenderGraphModule")]
     public struct RenderGraphBuilder : IDisposable
     {
         RenderGraphPass m_RenderPass;
@@ -24,7 +25,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <returns>An updated resource handle to the input resource.</returns>
         public TextureHandle UseColorBuffer(in TextureHandle input, int index)
         {
-            CheckResource(input.handle, true);
+            CheckResource(input.handle, false);
             m_Resources.IncrementWriteCount(input.handle);
             m_RenderPass.SetColorBuffer(input, index);
             return input;
@@ -38,7 +39,7 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         /// <returns>An updated resource handle to the input resource.</returns>
         public TextureHandle UseDepthBuffer(in TextureHandle input, DepthAccess flags)
         {
-            CheckResource(input.handle, true);
+            CheckResource(input.handle, false);
 
             if ((flags & DepthAccess.Write) != 0)
                 m_Resources.IncrementWriteCount(input.handle);
@@ -134,6 +135,31 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             var result = m_Resources.CreateTexture(desc, m_RenderPass.index);
             m_RenderPass.AddTransientResource(result.handle);
             return result;
+        }
+
+        /// <summary>
+        /// Specify a RayTracingAccelerationStructure resource to build during the pass.
+        /// </summary>
+        /// <param name="input">The RayTracingAccelerationStructure resource to build during the pass.</param>
+        /// <returns>An updated resource handle to the input resource.</returns>
+        public RayTracingAccelerationStructureHandle WriteRayTracingAccelerationStructure(in RayTracingAccelerationStructureHandle input)
+        {
+            CheckResource(input.handle);
+            m_Resources.IncrementWriteCount(input.handle);
+            m_RenderPass.AddResourceWrite(input.handle);
+            return input;
+        }
+
+        /// <summary>
+        /// Specify a RayTracingAccelerationStructure resource to use during the pass.
+        /// </summary>
+        /// <param name="input">The RayTracingAccelerationStructure resource to use during the pass.</param>
+        /// <returns>An updated resource handle to the input resource.</returns>
+        public RayTracingAccelerationStructureHandle ReadRayTracingAccelerationStructure(in RayTracingAccelerationStructureHandle input)
+        {
+            CheckResource(input.handle);
+            m_RenderPass.AddResourceRead(input.handle);
+            return input;
         }
 
         /// <summary>
@@ -234,6 +260,15 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
         }
 
         /// <summary>
+        /// Enable foveated rendering for this pass.
+        /// </summary>
+        /// <param name="value">True to enable foveated rendering.</param>
+        public void EnableFoveatedRasterization(bool value)
+        {
+            m_RenderPass.EnableFoveatedRasterization(value);
+        }
+
+        /// <summary>
         /// Dispose the RenderGraphBuilder instance.
         /// </summary>
         public void Dispose()
@@ -284,28 +319,30 @@ namespace UnityEngine.Experimental.Rendering.RenderGraphModule
             m_Disposed = true;
         }
 
-        void CheckResource(in ResourceHandle res, bool dontCheckTransientReadWrite = false)
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        void CheckResource(in ResourceHandle res, bool checkTransientReadWrite = true)
         {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if (res.IsValid())
+            if(RenderGraph.enableValidityChecks)
             {
-                int transientIndex = m_Resources.GetRenderGraphResourceTransientIndex(res);
-                // We have dontCheckTransientReadWrite here because users may want to use UseColorBuffer/UseDepthBuffer API to benefit from render target auto binding. In this case we don't want to raise the error.
-                if (transientIndex == m_RenderPass.index && !dontCheckTransientReadWrite)
+                if (res.IsValid())
                 {
-                    Debug.LogError($"Trying to read or write a transient resource at pass {m_RenderPass.name}.Transient resource are always assumed to be both read and written.");
-                }
+                    int transientIndex = m_Resources.GetRenderGraphResourceTransientIndex(res);
+                    // We have dontCheckTransientReadWrite here because users may want to use UseColorBuffer/UseDepthBuffer API to benefit from render target auto binding. In this case we don't want to raise the error.
+                    if (transientIndex == m_RenderPass.index && checkTransientReadWrite)
+                    {
+                        Debug.LogError($"Trying to read or write a transient resource at pass {m_RenderPass.name}.Transient resource are always assumed to be both read and written.");
+                    }
 
-                if (transientIndex != -1 && transientIndex != m_RenderPass.index)
+                    if (transientIndex != -1 && transientIndex != m_RenderPass.index)
+                    {
+                        throw new ArgumentException($"Trying to use a transient texture (pass index {transientIndex}) in a different pass (pass index {m_RenderPass.index}).");
+                    }
+                }
+                else
                 {
-                    throw new ArgumentException($"Trying to use a transient texture (pass index {transientIndex}) in a different pass (pass index {m_RenderPass.index}).");
+                    throw new ArgumentException($"Trying to use an invalid resource (pass {m_RenderPass.name}).");
                 }
             }
-            else
-            {
-                throw new ArgumentException($"Trying to use an invalid resource (pass {m_RenderPass.name}).");
-            }
-#endif
         }
 
         internal void GenerateDebugData(bool value)

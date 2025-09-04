@@ -45,8 +45,8 @@ namespace UnityEditor.VFX.Test
 
         VFXNodeController CreateNew(string name, Vector2 position, Type nodeType = null)
         {
-            var desc = VFXLibrary.GetOperators().FirstOrDefault(o => o.name.Contains(name) && (nodeType == null || o.modelType == nodeType));
-            var op = m_ViewController.AddVFXOperator(position, desc);
+            var desc = VFXLibrary.GetOperators().FirstOrDefault(o => o.variant.name == name && (nodeType == null || o.variant.modelType == nodeType));
+            var op = m_ViewController.AddVFXOperator(position, desc.variant);
             m_ViewController.LightApplyChanges();
 
             return m_ViewController.GetRootNodeController(op, 0);
@@ -131,9 +131,9 @@ namespace UnityEditor.VFX.Test
 
             Assert.AreEqual(typeof(Vector2), variableOperator.inputPorts.First(t => t.model == operatorModel.inputSlots[1]).portType);
 
-            input = variableOperator.inputPorts.Last(); //upcommingdataanchor
+            input = variableOperator.inputPorts.Last(); //upcomingdataanchor
 
-            Assert.IsTrue(input is VFXUpcommingDataAnchorController);
+            Assert.IsTrue(input is VFXUpcomingDataAnchorController);
 
             output = vector4inline.outputPorts[0];
 
@@ -142,7 +142,7 @@ namespace UnityEditor.VFX.Test
 
             Assert.AreEqual(typeof(Vector4), variableOperator.inputPorts.First(t => t.model == operatorModel.inputSlots[2]).portType);
 
-            Assert.IsTrue(variableOperator.inputPorts.Last() is VFXUpcommingDataAnchorController);
+            Assert.IsTrue(variableOperator.inputPorts.Last() is VFXUpcomingDataAnchorController);
 
             m_ViewController.LightApplyChanges();
 

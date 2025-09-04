@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -78,6 +78,10 @@ namespace UnityEngine.Rendering.HighDefinition
             for (int i = 0; i < requestsCount; ++i)
             {
                 ref var shadowRequest = ref resolutionRequests.ElementAt(fullShadowList[i].index);
+
+                if (shadowRequest.resolution == Vector2.zero)
+                    continue;
+
                 // shadow atlas layouting
                 Rect viewport = new Rect(Vector2.zero, shadowRequest.resolution);
                 curH = Mathf.Max(curH, viewport.height);
@@ -230,7 +234,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         }
 
-        public unsafe void BlitCachedIntoAtlas(RenderGraph renderGraph, TextureHandle cachedAtlasTexture, int cachedAtlasSize, Material blitMaterial, string passName, HDProfileId profileID)
+        public unsafe void BlitCachedIntoAtlas(RenderGraph renderGraph, TextureHandle cachedAtlasTexture, Vector2Int cachedAtlasSize, Material blitMaterial, string passName, HDProfileId profileID)
         {
             if (m_MixedRequestsPendingBlits.Length > 0)
             {
@@ -238,7 +242,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 {
                     passData.requestsWaitingBlits = m_MixedRequestsPendingBlits;
                     passData.blitMaterial = blitMaterial;
-                    passData.cachedShadowAtlasSize = new Vector2Int(cachedAtlasSize, cachedAtlasSize);
+                    passData.cachedShadowAtlasSize = cachedAtlasSize;
                     passData.sourceCachedAtlas = builder.ReadTexture(cachedAtlasTexture);
                     passData.atlasTexture = builder.WriteTexture(GetShadowMapDepthTexture(renderGraph));
 

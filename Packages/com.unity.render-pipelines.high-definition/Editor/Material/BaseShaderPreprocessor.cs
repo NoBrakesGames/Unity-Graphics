@@ -9,30 +9,46 @@ namespace UnityEditor.Rendering.HighDefinition
 {
     internal class ShadowKeywords
     {
-        ShaderKeyword ShadowLow;
-        ShaderKeyword ShadowMedium;
-        ShaderKeyword ShadowHigh;
+        ShaderKeyword PunctualShadowLow;
+        ShaderKeyword PunctualShadowMedium;
+        ShaderKeyword PunctualShadowHigh;
+
+        ShaderKeyword DirectionalShadowLow;
+        ShaderKeyword DirectionalShadowMedium;
+        ShaderKeyword DirectionalShadowHigh;
 
         ShaderKeyword AreaShadowMedium;
         ShaderKeyword AreaShadowHigh;
 
-        public Dictionary<HDShadowFilteringQuality, ShaderKeyword> ShadowVariants;
+        public Dictionary<HDShadowFilteringQuality, ShaderKeyword> PunctualShadowVariants;
+        public Dictionary<HDShadowFilteringQuality, ShaderKeyword> DirectionalShadowVariants;
         public Dictionary<HDAreaShadowFilteringQuality, ShaderKeyword> AreaShadowVariants;
 
         public ShadowKeywords()
         {
-            ShadowLow = new ShaderKeyword("SHADOW_LOW");
-            ShadowMedium = new ShaderKeyword("SHADOW_MEDIUM");
-            ShadowHigh = new ShaderKeyword("SHADOW_HIGH");
+            PunctualShadowLow = new ShaderKeyword("PUNCTUAL_SHADOW_LOW");
+            PunctualShadowMedium = new ShaderKeyword("PUNCTUAL_SHADOW_MEDIUM");
+            PunctualShadowHigh = new ShaderKeyword("PUNCTUAL_SHADOW_HIGH");
+
+            DirectionalShadowLow = new ShaderKeyword("DIRECTIONAL_SHADOW_LOW");
+            DirectionalShadowMedium = new ShaderKeyword("DIRECTIONAL_SHADOW_MEDIUM");
+            DirectionalShadowHigh = new ShaderKeyword("DIRECTIONAL_SHADOW_HIGH");
 
             AreaShadowMedium = new ShaderKeyword("AREA_SHADOW_MEDIUM");
             AreaShadowHigh = new ShaderKeyword("AREA_SHADOW_HIGH");
 
-            ShadowVariants = new Dictionary<HDShadowFilteringQuality, ShaderKeyword>
+            PunctualShadowVariants = new Dictionary<HDShadowFilteringQuality, ShaderKeyword>
             {
-                {HDShadowFilteringQuality.Low, ShadowLow},
-                {HDShadowFilteringQuality.Medium, ShadowMedium},
-                {HDShadowFilteringQuality.High, ShadowHigh},
+                {HDShadowFilteringQuality.Low, PunctualShadowLow},
+                {HDShadowFilteringQuality.Medium, PunctualShadowMedium},
+                {HDShadowFilteringQuality.High, PunctualShadowHigh},
+            };
+
+            DirectionalShadowVariants = new Dictionary<HDShadowFilteringQuality, ShaderKeyword>
+            {
+                {HDShadowFilteringQuality.Low, DirectionalShadowLow},
+                {HDShadowFilteringQuality.Medium, DirectionalShadowMedium},
+                {HDShadowFilteringQuality.High, DirectionalShadowHigh},
             };
 
             AreaShadowVariants = new Dictionary<HDAreaShadowFilteringQuality, ShaderKeyword>
@@ -71,6 +87,12 @@ namespace UnityEditor.Rendering.HighDefinition
         protected ShaderKeyword m_ProbeVolumesL2;
         protected ShaderKeyword m_DecalSurfaceGradient;
         protected ShaderKeyword m_EditorVisualization;
+        protected ShaderKeyword m_SupportWater;
+        protected ShaderKeyword m_WaterDecalPartial;
+        protected ShaderKeyword m_WaterDecalComplete;
+        protected ShaderKeyword m_SupportWaterCaustics;
+        protected ShaderKeyword m_SupportWaterCausticsShadow;
+        protected ShaderKeyword m_SupportWaterAbsorption;
 
         protected ShadowKeywords m_ShadowKeywords;
 
@@ -82,8 +104,6 @@ namespace UnityEditor.Rendering.HighDefinition
         protected Dictionary<HDShadowFilteringQuality, ShaderKeyword> m_ShadowVariants;
 
         public virtual int Priority => 0;
-
-        protected bool m_StripDebugVariants = false;
 
         public BaseShaderPreprocessor()
         {
@@ -114,15 +134,18 @@ namespace UnityEditor.Rendering.HighDefinition
             m_ProbeVolumesL2 = new ShaderKeyword("PROBE_VOLUMES_L2");
             m_DecalSurfaceGradient = new ShaderKeyword("DECAL_SURFACE_GRADIENT");
             m_EditorVisualization = new ShaderKeyword("EDITOR_VISUALIZATION");
+            m_SupportWater = new ShaderKeyword("SUPPORT_WATER");
+            m_WaterDecalPartial = new ShaderKeyword("WATER_DECAL_PARTIAL");
+            m_WaterDecalComplete = new ShaderKeyword("WATER_DECAL_COMPLETE");
+            m_SupportWaterCaustics = new ShaderKeyword("SUPPORT_WATER_CAUSTICS");
+            m_SupportWaterCausticsShadow = new ShaderKeyword("SUPPORT_WATER_CAUSTICS_SHADOW");
+            m_SupportWaterAbsorption = new ShaderKeyword("SUPPORT_WATER_ABSORPTION");
             m_ShadowKeywords = new ShadowKeywords();
 
 #if !ENABLE_SENSOR_SDK
             m_SensorEnableLidar = new ShaderKeyword("SENSORSDK_ENABLE_LIDAR");
             m_SensorOverrideReflectance = new ShaderKeyword("SENSORSDK_OVERRIDE_REFLECTANCE");
 #endif
-
-            var globalSettings = HDRenderPipelineGlobalSettings.Ensure();
-            m_StripDebugVariants = (!Debug.isDebugBuild || globalSettings.stripDebugVariants);
         }
 
         public bool ShadersStripper(HDRenderPipelineAsset hdrpAsset, Shader shader, ShaderSnippetData snippet,

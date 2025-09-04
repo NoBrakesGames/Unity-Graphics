@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine.Rendering;
 
 namespace UnityEngine.Experimental.Rendering
@@ -11,12 +12,17 @@ namespace UnityEngine.Experimental.Rendering
     {
         internal RenderTargetIdentifier renderTarget;
         internal RenderTextureDescriptor renderTargetDesc;
+        internal RenderTargetIdentifier motionVectorRenderTarget;
+        internal RenderTextureDescriptor motionVectorRenderTargetDesc;
         internal ScriptableCullingParameters cullingParameters;
         internal Material occlusionMeshMaterial;
+        internal float occlusionMeshScale;
         internal IntPtr foveatedRenderingInfo;
         internal int multipassId;
         internal int cullingPassId;
         internal bool copyDepth;
+        internal bool hasMotionVectorPass;
+        internal bool spaceWarpRightHandedNDC;
 
 #if ENABLE_VR && ENABLE_XR_MODULE
         internal UnityEngine.XR.XRDisplaySubsystem.XRRenderPass xrSdkRenderPass;
@@ -47,8 +53,8 @@ namespace UnityEngine.Experimental.Rendering
         /// <summary>
         /// Default allocator method for XRPass.
         /// </summary>
-        /// <param name="createInfo"></param>
-        /// <returns></returns>
+        /// <param name="createInfo"> A descriptor used to create and initialize the XRPass. </param>
+        /// <returns> Default XRPass created from createInfo descriptor. </returns>
         public static XRPass CreateDefault(XRPassCreateInfo createInfo)
         {
             XRPass pass = GenericPool<XRPass>.Get();
@@ -94,6 +100,40 @@ namespace UnityEngine.Experimental.Rendering
         public bool copyDepth { get; private set; }
 
         /// <summary>
+        ///  If true, the render pipeline is expected to generate motion data and output to the motionVectorRenderTarget.
+        /// </summary>
+        public bool hasMotionVectorPass { get; private set; }
+
+        /// <summary>
+        /// Reports which NDC convention the render pipeline should use when calculating motion vectors.
+        /// if <c>true</c>, motion vector data must use the right-handed NDC space. If <c>false</c> motion vector data 
+        /// must use the left-handed NDC space.
+        /// </summary>
+        /// <remarks>
+        /// The render pipeline must write motion vector data to the <see cref="UnityEngine.XR.XRDisplaySubsystem.XRRenderPass.motionVectorRenderTarget"/>.
+        ///
+        /// > [!NOTE]
+        /// > The OpenXR specification doesn't specify which coordinate space convention to use for the
+        /// > motion vector data. Unity only supports SpaceWarp when using the Vulkan graphics API, which uses the right-handed convention for normalized device coordinates, but
+        /// > devices still can choose either convention for motion data when the
+        /// > application is using the Vulkan graphics API.
+        /// </remarks>
+        public bool spaceWarpRightHandedNDC { get; private set; }
+
+        /// <summary>
+        /// If true, is the first pass of a xr camera
+        /// </summary>
+        public bool isFirstCameraPass => multipassId == 0;
+
+        /// <summary>
+        /// If true, is the last pass of a xr camera
+        /// Multipass last pass: pass ID == 1, viewCount == 1
+        /// Singlepass last pass: pass ID == 0, viewCount ==2
+        /// Emptypass(non-XR) last pass: pass ID == 0, viewCount == 0
+        /// </summary>
+        public bool isLastCameraPass => (multipassId == 1 && viewCount <= 1) || (multipassId == 0 && viewCount > 1) || (multipassId == 0 && viewCount == 0) /* ViewCount 0 handles the empty pass*/;
+
+        /// <summary>
         /// Index of the pass inside the frame.
         /// </summary>
         public int multipassId { get; private set; }
@@ -112,6 +152,16 @@ namespace UnityEngine.Experimental.Rendering
         /// Destination render target descriptor.
         /// </summary>
         public RenderTextureDescriptor renderTargetDesc { get; private set; }
+
+        /// <summary>
+        ///  Destination render target for motion vectors
+        /// </summary>
+        public RenderTargetIdentifier motionVectorRenderTarget { get; private set; }
+
+        /// <summary>
+        /// Destination render target descriptor for motion vectors.
+        /// </summary>
+        public RenderTextureDescriptor motionVectorRenderTargetDesc { get; private set; }
 
         /// <summary>
         /// Parameters used for culling.
@@ -134,10 +184,56 @@ namespace UnityEngine.Experimental.Rendering
         public IntPtr foveatedRenderingInfo { get; private set; }
 
         /// <summary>
+        /// Returns true when the active display has HDR enabled.
+        /// </summary>
+        public bool isHDRDisplayOutputActive
+        {
+#if ENABLE_VR && ENABLE_XR_MODULE
+            get => XRSystem.GetActiveDisplay().hdrOutputSettings?.active ?? false;
+#else
+            get => false;
+#endif
+        }
+
+        /// <summary>
+        /// Returns color gamut of the active HDR display.
+        /// </summary>
+        public ColorGamut hdrDisplayOutputColorGamut
+        {
+#if ENABLE_VR && ENABLE_XR_MODULE
+            get => XRSystem.GetActiveDisplay().hdrOutputSettings?.displayColorGamut ?? ColorGamut.sRGB;
+#else
+            get => ColorGamut.sRGB;
+#endif
+        }
+
+        /// <summary>
+        /// Returns HDR display information of the active HDR display.
+        /// </summary>
+        public HDROutputUtils.HDRDisplayInformation hdrDisplayOutputInformation
+        {
+#if ENABLE_VR && ENABLE_XR_MODULE
+            get => new HDROutputUtils.HDRDisplayInformation(
+                XRSystem.GetActiveDisplay().hdrOutputSettings?.maxFullFrameToneMapLuminance ?? -1,
+                XRSystem.GetActiveDisplay().hdrOutputSettings?.maxToneMapLuminance ?? -1,
+                XRSystem.GetActiveDisplay().hdrOutputSettings?.minToneMapLuminance ?? -1,
+                XRSystem.GetActiveDisplay().hdrOutputSettings?.paperWhiteNits ?? 160.0f
+                );
+#else
+            get => new HDROutputUtils.HDRDisplayInformation(-1, -1, -1, 160.0f);
+#endif
+        }
+
+        /// <summary>
+        /// Scaling factor used when drawing the occlusion mesh.
+        /// </summary>
+        public float occlusionMeshScale { get; private set; }
+
+        /// <summary>
         /// Returns the projection matrix for a given view.
         /// </summary>
-        /// <param name="viewIndex"></param>
-        /// <returns></returns>
+        /// <param name="viewIndex"> Index of XRView to retrieve the data from. </param>
+        /// <returns> XR projection matrix for the specified XRView. </returns>
         public Matrix4x4 GetProjMatrix(int viewIndex = 0)
         {
             return m_Views[viewIndex].projMatrix;
@@ -146,18 +242,38 @@ namespace UnityEngine.Experimental.Rendering
         /// <summary>
         /// Returns the view matrix for a given view.
         /// </summary>
-        /// <param name="viewIndex"></param>
-        /// <returns></returns>
+        /// <param name="viewIndex"> Index of XRView to retrieve the data from. </param>
+        /// <returns> XR view matrix for the specified XRView. </returns>
         public Matrix4x4 GetViewMatrix(int viewIndex = 0)
         {
             return m_Views[viewIndex].viewMatrix;
         }
 
         /// <summary>
+        /// Returns true if the previous frame view matrix for a given view is valid.
+        /// </summary>
+        /// <param name="viewIndex"> Index of XRView to retrieve the data from. </param>
+        /// <returns> Boolean describing if previous frame view matrix for a given view is valid. </returns>
+        public bool GetPrevViewValid(int viewIndex = 0)
+        {
+            return m_Views[viewIndex].isPrevViewMatrixValid;
+        }
+
+        /// <summary>
+        /// Returns the previous frame view matrix for a given view.
+        /// </summary>
+        /// <param name="viewIndex"> Index of XRView to retrieve the data from. </param>
+        /// <returns> Previous frame XR view matrix for the specified XRView. </returns>
+        public Matrix4x4 GetPrevViewMatrix(int viewIndex = 0)
+        {
+            return m_Views[viewIndex].prevViewMatrix;
+        }
+
+        /// <summary>
         /// Returns the viewport for a given view.
         /// </summary>
-        /// <param name="viewIndex"></param>
-        /// <returns></returns>
+        /// <param name="viewIndex"> Index of XRView to retrieve the data from. </param>
+        /// <returns> XR viewport rect for the specified XRView. </returns>
         public Rect GetViewport(int viewIndex = 0)
         {
             return m_Views[viewIndex].viewport;
@@ -166,8 +282,8 @@ namespace UnityEngine.Experimental.Rendering
         /// <summary>
         /// Returns the occlusion mesh for a given view.
         /// </summary>
-        /// <param name="viewIndex"></param>
-        /// <returns></returns>
+        /// <param name="viewIndex"> Index of XRView to retrieve the data from. </param>
+        /// <returns> XR occlusion mesh for the specified XRView. </returns>
         public Mesh GetOcclusionMesh(int viewIndex = 0)
         {
             return m_Views[viewIndex].occlusionMesh;
@@ -176,8 +292,8 @@ namespace UnityEngine.Experimental.Rendering
         /// <summary>
         /// Returns the destination slice index (for texture array) for a given view.
         /// </summary>
-        /// <param name="viewIndex"></param>
-        /// <returns></returns>
+        /// <param name="viewIndex"> Index of XRView to retrieve the data from. </param>
+        /// <returns> XR target slice index for the specified XRView.  </returns>
         public int GetTextureArraySlice(int viewIndex = 0)
         {
             return m_Views[viewIndex].textureArraySlice;
@@ -187,7 +303,7 @@ namespace UnityEngine.Experimental.Rendering
         /// Queue up render commands to enable single-pass techniques.
         /// Note: depending on the platform and settings, either single-pass instancing or the multiview extension will be used.
         /// </summary>
-        /// <param name="cmd"></param>
+        /// <param name="cmd">CommandBuffer to modify</param>
         public void StartSinglePass(CommandBuffer cmd)
         {
             if (enabled)
@@ -198,11 +314,11 @@ namespace UnityEngine.Experimental.Rendering
                     {
                         if (SystemInfo.supportsMultiview)
                         {
-                            cmd.EnableShaderKeyword("STEREO_MULTIVIEW_ON");
+                            cmd.EnableKeyword(SinglepassKeywords.STEREO_MULTIVIEW_ON);
                         }
                         else
                         {
-                            cmd.EnableShaderKeyword("STEREO_INSTANCING_ON");
+                            cmd.EnableKeyword(SinglepassKeywords.STEREO_INSTANCING_ON);
                             cmd.SetInstanceMultiplier((uint)viewCount);
                         }
                     }
@@ -214,15 +330,19 @@ namespace UnityEngine.Experimental.Rendering
             }
         }
 
-        public void StartSinglePass(RasterCommandBuffer cmd)
+        /// <summary>
+        /// Queue up render commands to disable single-pass techniques.
+        /// </summary>
+        /// <param name="cmd">IRasterCommandBuffer compatible command buffer to modify (This can be a RasterCommandBuffer or an UnsafeCommandBuffer)</param>
+        public void StartSinglePass(IRasterCommandBuffer cmd)
         {
-            StartSinglePass(cmd.m_WrappedCommandBuffer);
+            StartSinglePass((cmd as BaseCommandBuffer).m_WrappedCommandBuffer);
         }
 
         /// <summary>
         /// Queue up render commands to disable single-pass techniques.
         /// </summary>
-        /// <param name="cmd"></param>
+        /// <param name="cmd">CommandBuffer to modify.</param>
         public void StopSinglePass(CommandBuffer cmd)
         {
             if (enabled)
@@ -231,11 +351,11 @@ namespace UnityEngine.Experimental.Rendering
                 {
                     if (SystemInfo.supportsMultiview)
                     {
-                        cmd.DisableShaderKeyword("STEREO_MULTIVIEW_ON");
+                        cmd.DisableKeyword(SinglepassKeywords.STEREO_MULTIVIEW_ON);
                     }
                     else
                     {
-                        cmd.DisableShaderKeyword("STEREO_INSTANCING_ON");
+                        cmd.DisableKeyword(SinglepassKeywords.STEREO_INSTANCING_ON);
                         cmd.SetInstanceMultiplier(1);
                     }
                 }
@@ -246,8 +366,8 @@ namespace UnityEngine.Experimental.Rendering
         /// <summary>
         /// Queue up render commands to disable single-pass techniques.
         /// </summary>
-        /// <param name="cmd"></param>
-        public void StopSinglePass(RasterCommandBuffer cmd)
+        /// <param name="cmd">BaseCommandBuffer to modify</param>
+        public void StopSinglePass(BaseCommandBuffer cmd)
         {
             StopSinglePass(cmd.m_WrappedCommandBuffer);
         }
@@ -263,21 +383,51 @@ namespace UnityEngine.Experimental.Rendering
         /// where the corresponding view index is encoded into each vertex. The keyword
         /// "XR_OCCLUSION_MESH_COMBINED" is also enabled when rendering the combined mesh.
         /// </summary>
-        /// <param name="cmd"></param>
-        public void RenderOcclusionMesh(CommandBuffer cmd)
+        /// <param name="cmd">CommandBuffer to modify</param>
+        /// <param name="renderIntoTexture">Set to true when rendering into a render texture. Used for handling Unity yflip.</param>
+        public void RenderOcclusionMesh(CommandBuffer cmd, bool renderIntoTexture = false)
         {
-            m_OcclusionMesh.RenderOcclusionMesh(cmd);
+            if(occlusionMeshScale > 0)
+                m_OcclusionMesh.RenderOcclusionMesh(cmd, occlusionMeshScale, renderIntoTexture);
         }
-        public void RenderOcclusionMesh(RasterCommandBuffer cmd)
+
+        /// <summary>
+        /// Generate commands to render the occlusion mesh for this pass.
+        /// In single-pass mode : the meshes for all views are combined into one mesh,
+        /// where the corresponding view index is encoded into each vertex. The keyword
+        /// "XR_OCCLUSION_MESH_COMBINED" is also enabled when rendering the combined mesh.
+        /// </summary>
+        /// <param name="cmd">RasterCommandBuffer to modify</param>
+        /// <param name="renderIntoTexture">Set to true when rendering into a render texture. Used for handling Unity yflip.</param>
+        public void RenderOcclusionMesh(RasterCommandBuffer cmd, bool renderIntoTexture = false)
         {
-            m_OcclusionMesh.RenderOcclusionMesh(cmd.m_WrappedCommandBuffer);
+            if (occlusionMeshScale > 0)
+                m_OcclusionMesh.RenderOcclusionMesh(cmd.m_WrappedCommandBuffer, occlusionMeshScale, renderIntoTexture);
+        }
+
+        /// <summary>
+        /// Draw debug line for all XR views.
+        /// </summary>
+        public void RenderDebugXRViewsFrustum()
+        {
+            for(int i = 0; i < m_Views.Count; i++)
+            {
+                const float k_DebugVeiwsFrustumDepthZ = 10.0f;
+                var view = m_Views[i];
+                var corners = CoreUtils.CalculateViewSpaceCorners(view.projMatrix, k_DebugVeiwsFrustumDepthZ);
+
+                // Get world space camera pos
+                Vector3 worldSpaceCameraPos = -(view.viewMatrix).GetColumn(3);
+                for(int j = 0; j < 4; j++)
+                    Debug.DrawLine(worldSpaceCameraPos, view.viewMatrix.MultiplyPoint(corners[j]), i == 0 ? Color.green : Color.red);
+            }
         }
 
         /// <summary>
         /// Take a point that is center-relative (0.5, 0.5) and modify it to be placed relative to the view's center instead, respecting the asymmetric FOV (if it is used)
         /// </summary>
-        /// <param name="center"></param>
-        /// <returns></returns>
+        /// <param name="center"> Center relative point for symmetric FOV. </param>
+        /// <returns> View center relative points. First view center is stored in x,y components and second view center is stored in z,w components. </returns>
         public Vector4 ApplyXRViewCenterOffset(Vector2 center)
         {
             Vector4 result = Vector4.zero;
@@ -321,7 +471,7 @@ namespace UnityEngine.Experimental.Rendering
         /// <summary>
         /// Initialize the base class fields.
         /// </summary>
-        /// <param name="createInfo"></param>
+        /// <param name="createInfo"> A descriptor used to create and initialize the XRPass. </param>
         public void InitBase(XRPassCreateInfo createInfo)
         {
             m_Views.Clear();
@@ -330,7 +480,12 @@ namespace UnityEngine.Experimental.Rendering
             AssignCullingParams(createInfo.cullingPassId, createInfo.cullingParameters);
             renderTarget = new RenderTargetIdentifier(createInfo.renderTarget, 0, CubemapFace.Unknown, -1);
             renderTargetDesc = createInfo.renderTargetDesc;
+            motionVectorRenderTarget = new RenderTargetIdentifier(createInfo.motionVectorRenderTarget, 0, CubemapFace.Unknown, -1);
+            motionVectorRenderTargetDesc = createInfo.motionVectorRenderTargetDesc;
+            hasMotionVectorPass = createInfo.hasMotionVectorPass;
+            spaceWarpRightHandedNDC = createInfo.spaceWarpRightHandedNDC;
             m_OcclusionMesh.SetMaterial(createInfo.occlusionMeshMaterial);
+            occlusionMeshScale = createInfo.occlusionMeshScale;
             foveatedRenderingInfo = createInfo.foveatedRenderingInfo;
         }
 

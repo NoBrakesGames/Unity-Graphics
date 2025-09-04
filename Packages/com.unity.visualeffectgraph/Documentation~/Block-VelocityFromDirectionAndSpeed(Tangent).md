@@ -1,5 +1,8 @@
 # Velocity from Direction & Speed (Tangent)
 
+> [!IMPORTANT]
+> This feature is experimental. To use this feature, open the **Preferences** window, go to the **Visual Effects** tab, and enable **Experimental Operators/Blocks**.
+
 Menu Path : **Velocity > [Set/Add] Velocity from Direction & Speed (Tangent)**
 
 The **Velocity from Direction And Speed (Tangent)** Block calculates a velocity for the particle based on a blend ratio between the direction attribute and a tangent vector.
@@ -8,7 +11,7 @@ The tangent vector is based on the particle's current direction and a given axis
 
 The Block then scales the final direction vector by a speed, and composes it with the velocity attribute.
 
-![](Images/Block-VelocityFromDirectionAndSpeed(Tangent)Example.gif)
+<video title="A VFX Graph emits along the tangent of a circle, creating a spiraling stream of particles." src="Images/Block-VelocityFromDirectionAndSpeed(Tangent)Example.mp4" width="auto" height="auto" autoplay="true" loop="true" controls></video>
 
 ## Block compatibility
 

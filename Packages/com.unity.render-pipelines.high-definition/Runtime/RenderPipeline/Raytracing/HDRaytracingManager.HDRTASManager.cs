@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -127,6 +127,7 @@ namespace UnityEngine.Rendering.HighDefinition
             cullingConfig.materialTest.requiredShaderTags[0].tagId = new ShaderTagId("RenderPipeline");
             cullingConfig.materialTest.requiredShaderTags[0].tagValueId = new ShaderTagId("HDRenderPipeline");
             cullingConfig.materialTest.deniedShaderPasses = DecalSystem.s_MaterialDecalPassNames;
+            cullingConfig.instanceTests = new RayTracingInstanceCullingTest[9];
 
             // Setup the culling data for transparent shadows
             ShT_CT.allowOpaqueMaterials = true;
@@ -260,6 +261,12 @@ namespace UnityEngine.Rendering.HighDefinition
                     cullingConfig.sphereCenter = hdCamera.camera.transform.position;
                 }
                 break;
+                case RTASCullingMode.SolidAngle:
+                {
+                    cullingConfig.flags = RayTracingInstanceCullingFlags.EnableSolidAngleCulling;
+                    cullingConfig.minSolidAngle = rtSettings.minSolidAngle.value;
+                }
+                break;
                 default:
                 {
                     // We explicitly want no culling.
@@ -347,7 +354,11 @@ namespace UnityEngine.Rendering.HighDefinition
                 instanceTestArray.Add(PT_CT);
             }
 
-            cullingConfig.instanceTests = instanceTestArray.ToArray();
+            // avoid reallocation uf previous instanceTests array is the same size as the current one
+            if (cullingConfig.instanceTests.Length != instanceTestArray.Count)
+                cullingConfig.instanceTests = instanceTestArray.ToArray();
+            else
+                instanceTestArray.CopyTo(0, cullingConfig.instanceTests, 0, instanceTestArray.Count);
 
             return rtas.CullInstances(ref cullingConfig);
         }
@@ -373,35 +384,6 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             if (rtas != null)
                 rtas.Dispose();
-        }
-    }
-
-    class HDRayTracingLights
-    {
-        // The list of non-directional lights in the sub-scene
-        public List<HDLightRenderEntity> hdPointLightArray = new List<HDLightRenderEntity>();
-        public List<HDLightRenderEntity> hdLineLightArray = new List<HDLightRenderEntity>();
-        public List<HDLightRenderEntity> hdRectLightArray = new List<HDLightRenderEntity>();
-        public List<HDLightRenderEntity> hdLightEntityArray = new List<HDLightRenderEntity>();
-
-        // The list of directional lights in the sub-scene
-        public List<HDAdditionalLightData> hdDirectionalLightArray = new List<HDAdditionalLightData>();
-
-        // The list of reflection probes
-        public List<HDProbe> reflectionProbeArray = new List<HDProbe>();
-
-        // Counter of the current number of lights
-        public int lightCount;
-
-        internal void Reset()
-        {
-            hdDirectionalLightArray.Clear();
-            hdPointLightArray.Clear();
-            hdLineLightArray.Clear();
-            hdRectLightArray.Clear();
-            hdLightEntityArray.Clear();
-            reflectionProbeArray.Clear();
-            lightCount = 0;
         }
     }
 }

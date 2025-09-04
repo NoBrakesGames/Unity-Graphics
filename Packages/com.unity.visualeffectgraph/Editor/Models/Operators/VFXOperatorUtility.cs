@@ -22,10 +22,13 @@ namespace UnityEditor.VFX
             };
         }
 
+        public static readonly VFXExpression TrueExpression = VFXValue.Constant(true);
+        public static readonly VFXExpression FalseExpression = VFXValue.Constant(false);
         public static readonly Dictionary<VFXValueType, VFXExpression> OneExpression = GenerateExpressionConstant(1.0f);
         public static readonly Dictionary<VFXValueType, VFXExpression> MinusOneExpression = GenerateExpressionConstant(-1.0f);
         public static readonly Dictionary<VFXValueType, VFXExpression> HalfExpression = GenerateExpressionConstant(0.5f);
         public static readonly Dictionary<VFXValueType, VFXExpression> ZeroExpression = GenerateExpressionConstant(0.0f);
+        public static readonly Dictionary<VFXValueType, VFXExpression> NaNExpression = GenerateExpressionConstant(float.NaN);
         public static readonly Dictionary<VFXValueType, VFXExpression> TwoExpression = GenerateExpressionConstant(2.0f);
         public static readonly Dictionary<VFXValueType, VFXExpression> ThreeExpression = GenerateExpressionConstant(3.0f);
         public static readonly Dictionary<VFXValueType, VFXExpression> TenExpression = GenerateExpressionConstant(10.0f);
@@ -483,10 +486,12 @@ namespace UnityEditor.VFX
             var components = ExtractComponents(linear).ToArray();
             if (components.Length != 3 && components.Length != 4)
                 throw new ArgumentException("input expression must be a 3 or 4 components vector");
-
             VFXExpression exp = VFXValue.Constant(1.0f / 2.2f);
             for (int i = 0; i < 3; ++i)
-                components[i] = new VFXExpressionPow(components[i], exp);
+                components[i] = new VFXExpressionBranch(
+                    new VFXExpressionCondition(VFXValueType.Float, VFXCondition.Greater,components[i], ZeroExpression[VFXValueType.Float]),
+                    new VFXExpressionPow(components[i], exp),
+                    ZeroExpression[VFXValueType.Float]);
 
             return new VFXExpressionCombine(components);
         }
@@ -582,7 +587,7 @@ namespace UnityEditor.VFX
         static public VFXExpression FixedRandom(VFXExpression hash, VFXSeedMode mode)
         {
             VFXExpression seed = new VFXExpressionBitwiseXor(hash, VFXBuiltInExpression.SystemSeed);
-            if (mode != VFXSeedMode.PerComponent)
+            if (mode != VFXSeedMode.PerVFXComponent)
                 seed = new VFXExpressionBitwiseXor(new VFXAttributeExpression(mode == VFXSeedMode.PerParticle ? VFXAttribute.ParticleId : VFXAttribute.StripIndex), seed);
             return new VFXExpressionFixedRandom(seed);
         }
@@ -646,7 +651,7 @@ namespace UnityEditor.VFX
 
             var cos = new VFXExpressionCos(dt * VFXOperatorUtility.TauExpression[VFXValueType.Float]) as VFXExpression;
             var sin = new VFXExpressionSin(dt * VFXOperatorUtility.TauExpression[VFXValueType.Float]) as VFXExpression;
-            var left = VFXOperatorUtility.Normalize(VFXOperatorUtility.Cross(normal, up));
+            var left = VFXOperatorUtility.SafeNormalize(VFXOperatorUtility.Cross(normal, up));
 
             radius = new VFXExpressionCombine(radius, radius, radius);
             sin = new VFXExpressionCombine(sin, sin, sin);
@@ -685,12 +690,12 @@ namespace UnityEditor.VFX
             var minusTwoExp = MinusOneExpression[VFXValueType.Float] * TwoExpression[VFXValueType.Float];
 
             var zero = ZeroExpression[VFXValueType.Float];
-            var m0 = new VFXExpressionCombine(cotangent / aspect, zero, zero, zero);
-            var m1 = new VFXExpressionCombine(zero, cotangent, zero, zero);
-            var m2 = new VFXExpressionCombine(minusTwoExp * lensShift.x, minusTwoExp * lensShift.y, MinusOneExpression[VFXValueType.Float] * (zFar + zNear) / deltaZ, OneExpression[VFXValueType.Float]);
-            var m3 = new VFXExpressionCombine(zero, zero, TwoExpression[VFXValueType.Float] * zNear * zFar / deltaZ, zero);
+            var r0 = new VFXExpressionCombine(cotangent / aspect, zero, minusTwoExp * lensShift.x, zero);
+            var r1 = new VFXExpressionCombine(zero, cotangent, minusTwoExp * lensShift.y, zero);
+            var r2 = new VFXExpressionCombine(zero, zero, MinusOneExpression[VFXValueType.Float] * (zFar + zNear) / deltaZ, TwoExpression[VFXValueType.Float] * zNear * zFar / deltaZ);
+            var r3 = new VFXExpressionCombine(zero, zero, OneExpression[VFXValueType.Float], zero);
 
-            return new VFXExpressionVector4sToMatrix(m0, m1, m2, m3);
+            return new VFXExpressionRowToMatrix(r0, r1, r2, r3);
         }
 
         static public VFXExpression GetOrthographicMatrix(VFXExpression orthoSize, VFXExpression aspect, VFXExpression zNear, VFXExpression zFar)
@@ -699,19 +704,24 @@ namespace UnityEditor.VFX
             var oneOverSize = OneExpression[VFXValueType.Float] / orthoSize;
 
             var zero = ZeroExpression[VFXValueType.Float];
-            var m0 = new VFXExpressionCombine(oneOverSize / aspect, zero, zero, zero);
-            var m1 = new VFXExpressionCombine(zero, oneOverSize, zero, zero);
-            var m2 = new VFXExpressionCombine(zero, zero, MinusOneExpression[VFXValueType.Float] * TwoExpression[VFXValueType.Float] / deltaZ, zero);
-            var m3 = new VFXExpressionCombine(zero, zero, (zFar + zNear) / deltaZ, OneExpression[VFXValueType.Float]);
+            var r0 = new VFXExpressionCombine(oneOverSize / aspect, zero, zero, zero);
+            var r1 = new VFXExpressionCombine(zero, oneOverSize, zero, zero);
+            var r2 = new VFXExpressionCombine(zero, zero, MinusOneExpression[VFXValueType.Float] * TwoExpression[VFXValueType.Float] / deltaZ, (zFar + zNear) / deltaZ);
+            var r3 = new VFXExpressionCombine(zero, zero, zero, OneExpression[VFXValueType.Float]);
 
-            return new VFXExpressionVector4sToMatrix(m0, m1, m2, m3);
+            return new VFXExpressionRowToMatrix(r0, r1, r2, r3);
+        }
+
+        static public VFXExpression InverseTransposeTRS(VFXExpression matrix)
+        {
+            return new VFXExpressionTransposeMatrix(new VFXExpressionInverseTRSMatrix(matrix));
         }
 
         static public VFXExpression IsTRSMatrixZeroScaled(VFXExpression matrix)
         {
-            var i = new VFXExpressionMatrixToVector3s(matrix, VFXValue.Constant(0));
-            var j = new VFXExpressionMatrixToVector3s(matrix, VFXValue.Constant(1));
-            var k = new VFXExpressionMatrixToVector3s(matrix, VFXValue.Constant(2));
+            var i = new VFXExpressionMatrixToAxis(matrix, VFXValue.Constant(0));
+            var j = new VFXExpressionMatrixToAxis(matrix, VFXValue.Constant(1));
+            var k = new VFXExpressionMatrixToAxis(matrix, VFXValue.Constant(2));
 
             var sqrLengthI = Dot(i, i);
             var sqrLengthJ = Dot(j, j);
@@ -724,6 +734,25 @@ namespace UnityEditor.VFX
             var compareK = new VFXExpressionCondition(VFXValueType.Float, VFXCondition.Less, sqrLengthK, epsilon);
 
             var condition = new VFXExpressionLogicalOr(compareI, new VFXExpressionLogicalOr(compareJ, compareK));
+            return condition;
+        }
+
+        static public VFXExpression IsTRSMatrixUniformScaled(VFXExpression matrix)
+        {
+            var i = new VFXExpressionMatrixToAxis(matrix, VFXValue.Constant(0));
+            var j = new VFXExpressionMatrixToAxis(matrix, VFXValue.Constant(1));
+            var k = new VFXExpressionMatrixToAxis(matrix, VFXValue.Constant(2));
+
+            var sqrLengthI = Dot(i, i);
+            var sqrLengthJ = Dot(j, j);
+            var sqrLengthK = Dot(k, k);
+
+            // Same check as in Matrix4x4.cpp
+            var maxSqrLength = Max3(sqrLengthI, sqrLengthJ, sqrLengthK);
+            var minSqrLength = Min3(sqrLengthI, sqrLengthJ, sqrLengthK);
+            var ratio = Sqrt(maxSqrLength) / Sqrt(minSqrLength);
+            var condition = new VFXExpressionCondition(VFXValueType.Float, VFXCondition.Less, ratio, VFXValue.Constant(1.0f) + EpsilonExpression[VFXValueType.Float]);
+
             return condition;
         }
 

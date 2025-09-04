@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+
 using UnityEngine;
-using UnityEngine.VFX;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Logic")]
+    [VFXHelpURL("Operator-Compare")]
+    [VFXInfo(name = "Compare", category = "Logic", synonyms = new [] { "Test" })]
     class Condition : VFXOperatorDynamicType
     {
         [VFXSetting, SerializeField, Tooltip("Specifies the comparison condition between the Left and Right operands.")]

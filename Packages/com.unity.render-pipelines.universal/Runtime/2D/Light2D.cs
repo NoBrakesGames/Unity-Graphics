@@ -2,10 +2,10 @@ using System;
 using UnityEngine.Serialization;
 using UnityEngine.Scripting.APIUpdating;
 using UnityEngine.U2D;
-using Unity.Collections;
+using UnityEngine.Rendering.RenderGraphModule;
+using System.Collections.Generic;
 #if UNITY_EDITOR
 using System.Linq;
-using UnityEditor.Experimental.SceneManagement;
 #endif
 
 namespace UnityEngine.Rendering.Universal
@@ -164,10 +164,10 @@ namespace UnityEngine.Rendering.Universal
 
         Mesh m_Mesh;
 
-        [SerializeField]
+        [NonSerialized]
         private LightUtility.LightMeshVertex[] m_Vertices = new LightUtility.LightMeshVertex[1];
 
-        [SerializeField]
+        [NonSerialized]
         private ushort[] m_Triangles = new ushort[1];
 
         internal LightUtility.LightMeshVertex[] vertices { get { return m_Vertices; } set { m_Vertices = value; } }
@@ -181,9 +181,13 @@ namespace UnityEngine.Rendering.Universal
         // We use Blue Channel of LightMesh's vertex color to indicate Slot Index.
         int m_BatchSlotIndex = 0;
         internal int batchSlotIndex { get { return m_BatchSlotIndex; } set {  m_BatchSlotIndex = value; } }
-        internal int[] affectedSortingLayers => m_ApplyToSortingLayers;
 
-        private int lightCookieSpriteInstanceID => m_LightCookieSprite?.GetInstanceID() ?? 0;
+        private int lightCookieSpriteInstanceID => lightCookieSprite?.GetInstanceID() ?? 0;
+
+        internal bool useCookieSprite => (lightType == LightType.Point || lightType == LightType.Sprite) && (lightCookieSprite != null && lightCookieSprite.texture != null);
+
+        internal RTHandle m_CookieSpriteTexture = null;
+        internal TextureHandle m_CookieSpriteTextureHandle;
 
         [SerializeField]
         Bounds m_LocalBounds;
@@ -271,8 +275,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Controls the visibility of the light's volume
         /// </summary>
-        public float volumeIntensity => m_LightVolumeIntensity;
-
+        public float volumeIntensity { get => m_LightVolumeIntensity; set => m_LightVolumeIntensity = value; }
 
         /// <summary>
         /// Enables or disables the light's volume
@@ -335,6 +338,96 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public bool renderVolumetricShadows => volumetricShadowsEnabled && shadowVolumeIntensity > 0;
 
+        /// <summary>
+        /// Gets or sets the target sorting layers for the light. Contains an array of sorting layer IDs.
+        /// </summary>
+        public int[] targetSortingLayers
+        {
+            get => m_ApplyToSortingLayers;
+            set
+            {
+                var layers = new List<int>();
+                foreach (var layerID in value)
+                {
+                    if (SortingLayer.IsValid(layerID))
+                        layers.Add(layerID);
+                }
+                m_ApplyToSortingLayers = layers.ToArray();
+            }
+        }
+
+        bool IsValidLayer(string name)
+        {
+            // Have this check as SortingLayer.NameToID returns 0 (default layer) if layer is not found
+            foreach (var layer in Light2DManager.GetCachedSortingLayer())
+            {
+                if (layer.name == name)
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Adds a target sorting layer to the light.
+        /// </summary>
+        /// <param name="layerName">The sorting layer name to be added.</param>
+        /// <returns>Returns true if the sorting layer is added. Returns false if the layer name is invalid or has already been added.</returns>
+        public bool AddTargetSortingLayer(string layerName)
+        {
+            var layers = new List<int>(m_ApplyToSortingLayers);
+            var id = SortingLayer.NameToID(layerName);
+
+            // Invalid or duplicate layerID
+            if (!IsValidLayer(layerName) || layers.Contains(id))
+                return false;
+
+            layers.Add(id);
+            m_ApplyToSortingLayers = layers.ToArray();
+
+            return true;
+        }
+
+        /// <summary>
+        /// Adds a target sorting layer to the light.
+        /// </summary>
+        /// <param name="layerID">The sorting layer ID to be added.</param>
+        /// <returns>Returns true if the sorting layer is added. Returns false if the layer ID is invalid or has already been added.</returns>
+        public bool AddTargetSortingLayer(int layerID)
+        {
+            return AddTargetSortingLayer(SortingLayer.IDToName(layerID));
+        }
+
+        /// <summary>
+        /// Removes a target sorting layer from the light.
+        /// </summary>
+        /// <param name="layerName">The sorting layer name to be removed.</param>
+        /// <returns>Returns true if the sorting layer is removed. Returns false if the layer name is invalid or doesn't exist.</returns>
+        public bool RemoveTargetSortingLayer(string layerName)
+        {
+            var layers = new List<int>(m_ApplyToSortingLayers);
+            var id = SortingLayer.NameToID(layerName);
+
+            // Invalid or layerID does not exist
+            if (!IsValidLayer(layerName) || !layers.Contains(id))
+                return false;
+
+            layers.Remove(id);
+            m_ApplyToSortingLayers = layers.ToArray();
+
+            return true;
+        }
+
+        /// <summary>
+        /// Removes a target sorting layer from the light.
+        /// </summary>
+        /// <param name="layerID">The sorting layer ID to be removed.</param>
+        /// <returns>Returns true if the sorting layer is removed. Returns false if the layer ID is invalid or doesn't exist.</returns>
+        public bool RemoveTargetSortingLayer(int layerID)
+        {
+            return RemoveTargetSortingLayer(SortingLayer.IDToName(layerID));
+        }
+
         internal void MarkForUpdate()
         {
             forceUpdate = true;
@@ -373,13 +466,32 @@ namespace UnityEngine.Rendering.Universal
                 m_Vertices = new LightUtility.LightMeshVertex[1];
                 m_Triangles = new ushort[1];
             }
-            return LightUtility.GenerateSpriteMesh(this, m_LightCookieSprite, LightBatch.GetBatchColor(batchSlotIndex));
+            return LightUtility.GenerateSpriteMesh(this, m_LightCookieSprite, LightBatch.GetBatchColor());
         }
 
         internal void UpdateBatchSlotIndex()
         {
             if (lightMesh && lightMesh.colors != null && lightMesh.colors.Length != 0)
                 m_BatchSlotIndex = LightBatch.GetBatchSlotIndex(lightMesh.colors[0].b);
+        }
+
+        internal bool NeedsColorIndexBaking()
+        {
+            if (lightMesh && LightBatch.isBatchingSupported)
+            {
+                if (lightMesh.colors.Length != 0)
+                    return lightMesh.colors[0].b == 0;
+            }
+            return false;
+        }
+        
+        internal void UpdateCookieSpriteTexture()
+        {
+            m_CookieSpriteTexture?.Release();
+
+            if (useCookieSprite)
+                m_CookieSpriteTexture = RTHandles.Alloc(lightCookieSprite.texture);
+
         }
 
         internal void UpdateMesh(bool forceUpdate = false)
@@ -393,12 +505,12 @@ namespace UnityEngine.Rendering.Universal
             var shapePathHashChanged = LightUtility.CheckForChange(shapePathHash, ref m_PreviousShapePathHash);
             var lightTypeChanged = LightUtility.CheckForChange(m_LightType, ref m_PreviousLightType);
             var hashChanged = fallOffSizeChanged || parametricRadiusChanged || parametricSidesChanged ||
-                parametricAngleOffsetChanged || spriteInstanceChanged || shapePathHashChanged || lightTypeChanged;
+                parametricAngleOffsetChanged || spriteInstanceChanged || shapePathHashChanged || lightTypeChanged || NeedsColorIndexBaking();
 
             // Mesh Rebuilding
             if (hashChanged || forceUpdate)
             {
-                var batchChannelColor = LightBatch.GetBatchColor(batchSlotIndex);
+                var batchChannelColor = LightBatch.GetBatchColor();
 
                 switch (m_LightType)
                 {
@@ -416,6 +528,7 @@ namespace UnityEngine.Rendering.Universal
                         break;
                 }
 
+                UpdateCookieSpriteTexture();
                 UpdateBatchSlotIndex();
             }
         }
@@ -461,31 +574,20 @@ namespace UnityEngine.Rendering.Universal
 
         private void Awake()
         {
-#if UNITY_EDITOR
             // Default target sorting layers to "All"
             if (m_ApplyToSortingLayers == null)
-                m_ApplyToSortingLayers = SortingLayer.layers.Select(x => x.id).ToArray();
-#endif
-
-            if (m_LightCookieSprite != null)
             {
-                bool updateMesh = !hasCachedMesh || (m_LightType == LightType.Sprite && m_LightCookieSprite.packed);
-                UpdateMesh(updateMesh);
-                if (hasCachedMesh)
-                {
-                    lightMesh.SetVertexBufferParams(vertices.Length, LightUtility.LightMeshVertex.VertexLayout);
-                    lightMesh.SetVertexBufferData(vertices, 0, 0, vertices.Length);
-                    lightMesh.SetIndices(indices, MeshTopology.Triangles, 0, false);
-                }
+                m_ApplyToSortingLayers = new int[SortingLayer.layers.Length];
+                for (int i = 0; i < m_ApplyToSortingLayers.Length; ++i)
+                    m_ApplyToSortingLayers[i] = SortingLayer.layers[i].id;
             }
-
-            UpdateBatchSlotIndex();
         }
 
         void OnEnable()
         {
             m_PreviousLightCookieSprite = lightCookieSpriteInstanceID;
             Light2DManager.RegisterLight(this);
+            UpdateCookieSpriteTexture();
 
 #if UNITY_EDITOR
             SortingLayer.onLayerAdded += OnSortingLayerAdded;
@@ -496,6 +598,7 @@ namespace UnityEngine.Rendering.Universal
         private void OnDisable()
         {
             Light2DManager.DeregisterLight(this);
+            m_CookieSpriteTexture?.Release();
 
 #if UNITY_EDITOR
             SortingLayer.onLayerAdded -= OnSortingLayerAdded;

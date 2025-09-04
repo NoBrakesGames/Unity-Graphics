@@ -1,6 +1,6 @@
 # Visual Effect (Component)
 
-The Visual Effect Component creates an instance of a Visual Effect in the scene, based on a Visual Effect Graph Asset. It controls how the effect plays, renders and let the user customize the instance by editing [Exposed Properties](PropertiesAndBlackboard.md#exposed-properties).
+The Visual Effect Component creates an instance of a Visual Effect in the scene, based on a Visual Effect Graph Asset. It controls how the effect plays, renders and let the user customize the instance by editing [Exposed Properties](Blackboard.md).
 
 ## How to create a Visual Effect
 
@@ -46,6 +46,14 @@ Rendering properties control how the visual effect instance will render and rece
 | Sorting Layer         | Specifies the Renderer's group among other [SpriteRenderer](https://docs.unity3d.com/ScriptReference/SpriteRenderer.html) components.                                                                           |
 | Order in Layer        | Specifies the Renderer's order with a sorting layer relative to other [SpriteRenderer](https://docs.unity3d.com/ScriptReference/SpriteRenderer.html) components. See also [Renderer.sortingOrder](https://docs.unity3d.com/ScriptReference/Renderer-sortingOrder.html).     |
 
+#### Instancing properties
+
+Instancing properties control how the visual effect instance is used by the [Instancing](Instancing.md) feature.
+
+| Item               | Description                                                  |
+| ------------------ | ------------------------------------------------------------ |
+| Allow instancing   | Allow the Instancing feature to group this instance with others as a batch, to improve performance. Defaults to *true*. |
+
 #### Properties
 
 The properties category display any Property that is defined in the Visual Effect Graph Blackboard as an **Exposed Property**. Every property can be overridden from its default value in order to customize the Visual Effect instance in the scene. Some properties can also be edited using Gizmos directly in the scene.
@@ -60,8 +68,6 @@ To access property values, edit them using the Inspector, use the [C# API](https
 ## The Play Controls Window
 
 The Play Controls window displays UI Elements that give you control over the currently selected instance of a Visual Effect. It is displayed in the bottom-right corner of the Scene View, when a Visual Effect Game Object is selected.
-
-![](Images/PlayControls.png)
 
 The play Controls Window displays the following controls:
 
@@ -80,4 +86,3 @@ The play Controls Window displays the following controls:
 
 You can edit some properties using Gizmos in the scene. In order to enable gizmo editing, click the **Show Property Gizmos** button in the Inspector. Upon enabling property Gizmos, every property that can be edited using Gizmos will display **Edit Gizmo** buttons next to every property that can be edited using gizmos.
 
-![Property Gizmos Inspector](Images/PropertyGizmosInspector.png)

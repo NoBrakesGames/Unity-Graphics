@@ -49,10 +49,10 @@ namespace UnityEngine.Rendering.HighDefinition
         public enum LightProbeSystem
         {
             /// <summary>The legacy light probe system.</summary>
-            [InspectorName("Light Probe Groups (Legacy)")]
+            [InspectorName("Light Probe Groups")]
             LegacyLightProbes = 0,
-            /// <summary>Probe Volume system.</summary>
-            ProbeVolumes = 1,
+            /// <summary>Adaptive Probe Volumes system.</summary>
+            AdaptiveProbeVolumes = 1,
         }
 
 
@@ -125,7 +125,6 @@ namespace UnityEngine.Rendering.HighDefinition
                 msaaSampleCount = MSAASamples.None,
                 supportMotionVectors = true,
                 supportRuntimeAOVAPI = false,
-                supportDitheringCrossFade = true,
                 supportTerrainHole = false,
 
                 supportComputeThickness = false,
@@ -152,19 +151,23 @@ namespace UnityEngine.Rendering.HighDefinition
                 // Water Properties
                 supportWater = false,
                 waterSimulationResolution = WaterSimulationResolution.Medium128,
-                supportWaterDeformation = false,
-                deformationAtlasSize = WaterAtlasSize.AtlasSize512,
-                supportWaterFoam = false,
-                foamAtlasSize = WaterAtlasSize.AtlasSize512,
-                supportWaterExclusion = false,
-                waterCPUSimulation = false,
+                supportWaterExclusion = true,
 
+                supportWaterDecals = true,
+                waterDecalAtlasSize = WaterAtlasSize.AtlasSize1024,
+                maximumWaterDecalCount = 48,
+
+                waterScriptInteractionsMode = WaterScriptInteractionsMode.GPUReadback,
+                waterFullCPUSimulation = false,
+
+                supportScreenSpaceLensFlare = true,
+                supportDataDrivenLensFlare = true,
                 supportRayTracing = false,
                 supportVFXRayTracing = false,
                 supportedRayTracingMode = SupportedRayTracingMode.Both,
                 lodBias = new FloatScalableSetting(new[] { 1.0f, 1, 1 }, ScalableSettingSchemaId.With3Levels),
                 maximumLODLevel = new IntScalableSetting(new[] { 0, 0, 0 }, ScalableSettingSchemaId.With3Levels),
-                lightProbeSystem = LightProbeSystem.ProbeVolumes,
+                lightProbeSystem = LightProbeSystem.AdaptiveProbeVolumes,
                 probeVolumeMemoryBudget = ProbeVolumeTextureMemoryBudget.MemoryBudgetMedium,
                 probeVolumeBlendingMemoryBudget = ProbeVolumeBlendingTextureMemoryBudget.MemoryBudgetLow,
                 supportProbeVolumeScenarios = false,
@@ -174,6 +177,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 supportProbeVolumeDiskStreaming = false,
                 highQualityLineRenderingMemoryBudget = LineRendering.MemoryBudget.MemoryBudgetLow,
                 probeVolumeSHBands = ProbeVolumeSHBands.SphericalHarmonicsL1,
+                gpuResidentDrawerSettings = GlobalGPUResidentDrawerSettings.NewDefault()
             };
             return settings;
         }
@@ -264,16 +268,20 @@ namespace UnityEngine.Rendering.HighDefinition
         public WaterSimulationResolution waterSimulationResolution;
         /// <summary>Support Water Surfaces exclusion.</summary>
         public bool supportWaterExclusion;
+
         /// <summary>Support Water Surfaces deformation.</summary>
-        public bool supportWaterDeformation;
-        /// <summary>Defines the resolution of the deformer atlas.</summary>
-        public WaterAtlasSize deformationAtlasSize;
-        /// <summary>Support Water Surfaces foam.</summary>
-        public bool supportWaterFoam;
-        /// <summary>Defines the resolution of the foam system atlas.</summary>
-        public WaterAtlasSize foamAtlasSize;
-        /// <summary>Enable water CPU simulation.</summary>
-        public bool waterCPUSimulation;
+        public bool supportWaterDecals;
+        /// <summary>Defines the resolution of the decal atlas.</summary>
+        public WaterAtlasSize waterDecalAtlasSize;
+        /// <summary>Maximum amount of visible water decals.</summary>
+        public int maximumWaterDecalCount;
+
+        /// <summary>Defines if the script interactions should simulate water on CPU or fetch simulation from the GPU.</summary>
+        [Tooltip("Defines if the script interactions should simulate water on CPU or fetch simulation from the GPU.")]
+        public WaterScriptInteractionsMode waterScriptInteractionsMode;
+        /// <summary>Defines if the CPU simulation should be evaluated at full resolution or half resolution.</summary>
+        [Tooltip("Defines if the CPU simulation should be evaluated at full resolution or half resolution.")]
+        public bool waterFullCPUSimulation;
 
         // Compute Thickness
         /// <summary>Sample Compute Thickness algorithm.</summary>
@@ -284,6 +292,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public LayerMask computeThicknessLayerMask;
 
         /// <summary>Names for rendering layers.</summary>
+        [Obsolete("This property is obsolete. Use RenderingLayerMask API and Tags & Layers project settings instead. #from(23.3)", false)]
         public string[] renderingLayerNames
         {
             get { return (string[])HDRenderPipelineGlobalSettings.instance.renderingLayerNames.Clone(); }
@@ -358,28 +367,32 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>Support motion vectors.</summary>
         public bool supportMotionVectors;
 
+        // Post Processing
+        /// <summary>Support Screen Space Lens Flare.</summary>
+        public bool supportScreenSpaceLensFlare;
+        /// <summary>Support Data Driven Lens Flare.</summary>
+        public bool supportDataDrivenLensFlare;
+
         /// <summary>Support runtime debug display.</summary>
-        [Obsolete("Use HDRenderPipelineGlobalSettings.instance.stripDebugVariants) instead.@from(23.1)", false)]
+        [Obsolete("Use HDRenderPipelineGlobalSettings.instance.stripDebugVariants) instead. #from(23.1)", false)]
         public bool supportRuntimeDebugDisplay
         {
-            get => !HDRenderPipelineGlobalSettings.instance.stripDebugVariants;
-            set => HDRenderPipelineGlobalSettings.instance.stripDebugVariants = !value;
+            get => !HDRenderPipelineGlobalSettings.instance.m_StripDebugVariants;
+            set => HDRenderPipelineGlobalSettings.instance.m_StripDebugVariants = !value;
         }
 
-        internal bool supportProbeVolume => (lightProbeSystem == LightProbeSystem.ProbeVolumes);
+        internal bool supportProbeVolume => (lightProbeSystem == LightProbeSystem.AdaptiveProbeVolumes);
         [FormerlySerializedAs("supportProbeVolume")]
         [Obsolete("Use lightProbeSystem instead", false)]
         internal bool oldSupportProbeVolume;
 
+        /// <summary> Support LOD Dithering Cross-Fade/// </summary>
+        [Obsolete("This setting has no effect, use LOD Quality Setting instead", false)]
+        public bool supportDitheringCrossFade;
 
         /// <summary>Support runtime AOV API.</summary>
         public bool supportRuntimeAOVAPI;
-        /// <summary>Support dithered cross-fade.</summary>
-#if UNITY_EDITOR // multi_compile _ LOD_FADE_CROSSFADE
-        // Remove if dithering cross-fade is not supported
-        // [ShaderKeywordFilter.RemoveIf(true, keywordNames: "LOD_FADE_CROSSFADE")]
-#endif
-        public bool supportDitheringCrossFade;
+
         /// <summary>Support terrain holes.</summary>
         public bool supportTerrainHole;
         /// <summary>Determines what system to use.</summary>
@@ -446,6 +459,9 @@ namespace UnityEngine.Rendering.HighDefinition
 
         /// <summary>Global lighting quality settings.</summary>
         public GlobalLightingQualitySettings lightingQualitySettings;
+
+        /// <summary>Global macro batcher settings.</summary>
+        [FormerlySerializedAs("macroBatcherSettings")] public GlobalGPUResidentDrawerSettings gpuResidentDrawerSettings;
 
 #pragma warning disable 618 // Type or member is obsolete
         [Obsolete("For data migration")]

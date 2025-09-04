@@ -1,9 +1,9 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Sampling")]
+    [VFXHelpURL("Operator-LoadTexture2DArray")]
+    [VFXInfo(name = "Load Texture2DArray", category = "Sampling")]
     class LoadTexture2DArray : VFXOperator
     {
         override public string name { get { return "Load Texture2DArray"; } }

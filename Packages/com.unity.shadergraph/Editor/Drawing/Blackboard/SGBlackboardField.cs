@@ -99,7 +99,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                 property.onAfterVersionChange += () =>
                 {
                     this.typeText = property.GetPropertyTypeString();
-                    this.m_InspectorUpdateDelegate();
+                    this.m_InspectorUpdateDelegate?.Invoke();
                 };
             }
 
@@ -107,6 +107,7 @@ namespace UnityEditor.ShaderGraph.Drawing
 
             RegisterCallback<MouseDownEvent>(OnMouseDownEvent);
 
+            // setting Capabilities.Selectable adds a ClickSelector
             capabilities |= Capabilities.Selectable | Capabilities.Droppable | Capabilities.Deletable | Capabilities.Renamable;
 
             ClearClassList();
@@ -259,11 +260,8 @@ namespace UnityEditor.ShaderGraph.Drawing
             if ((e.clickCount == 2) && e.button == (int)MouseButton.LeftMouse && IsRenamable())
             {
                 OpenTextEditor();
-                e.PreventDefault();
-            }
-            else
-            {
                 e.StopPropagation();
+                focusController.IgnoreEvent(e);
             }
         }
 

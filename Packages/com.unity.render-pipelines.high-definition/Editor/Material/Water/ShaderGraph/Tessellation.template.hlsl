@@ -7,12 +7,11 @@ VaryingsMeshToDS InterpolateWithBaryCoordsMeshToDS(VaryingsMeshToDS input0, Vary
 
     UNITY_TRANSFER_INSTANCE_ID(input0, output);
 
-    // The set of values that need to interlopated is fixed
+    // The set of values that need to interpolated is fixed
     TESSELLATION_INTERPOLATE_BARY(positionRWS, baryCoords);
     TESSELLATION_INTERPOLATE_BARY(normalWS, baryCoords);
     TESSELLATION_INTERPOLATE_BARY(texCoord0, baryCoords);
     TESSELLATION_INTERPOLATE_BARY(texCoord1, baryCoords);
-    output.positionPredisplacementRWS = output.positionRWS;
 
     // Pass-Through for custom interpolator
     $splice(CustomInterpolatorInterpolateWithBaryCoordsMeshToDS)
@@ -24,9 +23,16 @@ VertexDescriptionInputs VaryingsMeshToDSToVertexDescriptionInputs(VaryingsMeshTo
 {
     VertexDescriptionInputs output;
     ZERO_INITIALIZE(VertexDescriptionInputs, output);
-    // The only two variable that needs to be propagated from vertex to domain are the relative world space postion and the normalWS
-    output.WorldSpacePosition = input.positionRWS;
-    output.WorldSpaceNormal = input.normalWS;
+
+    // texcoord1 contains the pre displacement object space position
+    // normal is marked WS but it's actually in object space :(
+    $VertexDescriptionInputs.ObjectSpacePosition:  output.ObjectSpacePosition = input.texCoord1.xyz;
+    $VertexDescriptionInputs.WorldSpacePosition:   output.WorldSpacePosition  = TransformObjectToWorld(input.texCoord1.xyz);
+    $VertexDescriptionInputs.ObjectSpaceNormal:    output.ObjectSpaceNormal   = input.normalWS;
+    $VertexDescriptionInputs.WorldSpaceNormal:     output.WorldSpaceNormal    = TransformObjectToWorldNormal(input.normalWS);
+
+    $VertexDescriptionInputs.VertexColor:          output.VertexColor         = input.color;
+
     return output;
 }
 
@@ -35,39 +41,24 @@ VertexDescriptionInputs VaryingsMeshToDSToVertexDescriptionInputs(VaryingsMeshTo
 // y - 2->0 edge
 // z - 0->1 edge
 // w - inside tessellation factor
-// The water shader graph required these four fields to be fed (not an option)
-VaryingsMeshToDS ApplyTessellationModification(VaryingsMeshToDS input, float3 timeParameters)
+void ApplyTessellationModification(VaryingsMeshToDS input, float3 timeParameters, inout VaryingsMeshToPS output, out VertexDescription vertexDescription)
 {
     // HACK: As there is no specific tessellation stage for now in shadergraph, we reuse the vertex description mechanism.
-    // It mean we store TessellationFactor inside vertex description causing extra read on both vertex and hull stage, but unusued paramater are optimize out by the shader compiler, so no impact.
+    // It mean we store TessellationFactor inside vertex description causing extra read on both vertex and hull stage, but unused parameters are optimize out by the shader compiler, so no impact.
     VertexDescriptionInputs vertexDescriptionInputs = VaryingsMeshToDSToVertexDescriptionInputs(input);
 
-    // Override time paramters with used one (This is required to correctly handle motion vector for tessellation animation based on time)
+    // Override time parameters with used one (This is required to correctly handle motion vector for tessellation animation based on time)
     $VertexDescriptionInputs.TimeParameters: vertexDescriptionInputs.TimeParameters = timeParameters;
 
     // evaluate vertex graph
-    VertexDescription vertexDescription = VertexDescriptionFunction(vertexDescriptionInputs);
+    vertexDescription = VertexDescriptionFunction(vertexDescriptionInputs);
 
-    // Convert the position to relative world space
-    float3 positionRWS = mul(_WaterSurfaceTransformRWS, float4(vertexDescription.Position, 1.0)).xyz;
+    // Backward compatibility with old graphs
+    $VertexDescriptionInputs.uv0: vertexDescription.Displacement = vertexDescription.uv0.xyz;
+    $VertexDescriptionInputs.uv1: vertexDescription.LowFrequencyHeight = vertexDescription.uv1.x;
 
-    // Export for the following stage
-    input.positionRWS = positionRWS;
-    input.normalWS = vertexDescription.Normal;
-    input.texCoord0 = vertexDescription.uv0;
-    input.texCoord1 = vertexDescription.uv1;
-
-    return input;
-}
-
-#ifdef USE_CUSTOMINTERP_SUBSTRUCT
-
-// This will evaluate the custom interpolator and update the varying structure
-void VertMeshTesselationCustomInterpolation(VaryingsMeshToDS input, inout VaryingsMeshToPS output)
-{
+    // Custom interpolators
     $splice(CustomInterpolatorVertMeshTesselationCustomInterpolation)
 }
-
-#endif // USE_CUSTOMINTERP_SUBSTRUCT
 
 #endif // TESSELLATION_ON

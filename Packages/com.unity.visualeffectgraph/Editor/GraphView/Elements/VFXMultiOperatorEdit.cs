@@ -1,56 +1,48 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 using UnityEngine.UIElements;
-using UnityEngine.VFX;
-using UnityEditor.VFX.UIElements;
 
 namespace UnityEditor.VFX.UI
 {
     class VFXUniformOperatorEdit<T, U> : VisualElement, IControlledElement<T> where U : VFXOperatorDynamicOperand, IVFXOperatorUniform where T : VFXUniformOperatorController<U>
     {
-        Label m_TypePopup;
+        readonly PopupField<Type> m_PopupField;
+
         public VFXUniformOperatorEdit()
         {
             this.AddStyleSheetPathWithSkinVariant("VFXControls");
             AddToClassList("VFXUniformOperatorEdit");
-            m_TypePopup = new Label();
-            m_TypePopup.AddToClassList("PopupButton");
-            m_TypePopup.AddManipulator(new DownClickable(() => OnTypeMenu()));
-
-            Add(m_TypePopup);
-        }
-
-        void OnTypeMenu()
-        {
-            var op = controller.model;
-            GenericMenu menu = new GenericMenu();
-            var selectedType = op.GetOperandType();
-            foreach (var type in op.validTypes)
+            m_PopupField = new PopupField<Type>();
+            m_PopupField.formatListItemCallback += x => x.UserFriendlyName();
+            m_PopupField.formatSelectedValueCallback += x => x.UserFriendlyName();
+            m_PopupField.RegisterValueChangedCallback(OnChangeType);
+            m_PopupField.RegisterCallback<MouseDownEvent>(e =>
             {
-                menu.AddItem(EditorGUIUtility.TrTextContent(type.UserFriendlyName()), selectedType == type, OnChangeType, type);
-            }
-            menu.DropDown(m_TypePopup.worldBound);
+                if (e.button == 0)
+                    OnUpdateChoices();
+            });
+
+            Add(m_PopupField);
         }
 
-        void OnChangeType(object type)
+        void OnUpdateChoices()
         {
-            var op = controller.model;
+            m_PopupField.choices = controller.model.validTypes.ToList();
+        }
 
-            op.SetOperandType((Type)type);
+        void OnChangeType(ChangeEvent<Type> evt)
+        {
+            controller.model.SetOperandType(evt.newValue);
         }
 
         T m_Controller;
-        Controller IControlledElement.controller
-        {
-            get { return m_Controller; }
-        }
+        Controller IControlledElement.controller => m_Controller;
+
         public T controller
         {
-            get { return m_Controller; }
+            get => m_Controller;
             set
             {
                 if (m_Controller != value)
@@ -67,24 +59,23 @@ namespace UnityEditor.VFX.UI
                 }
             }
         }
+
         void IControlledElement.OnControllerChanged(ref ControllerChangedEvent e)
         {
             if (e.controller == controller)
             {
-                m_TypePopup.text = controller.model.GetOperandType().UserFriendlyName();
+                m_PopupField.value = controller.model.GetOperandType();
             }
         }
     }
     class VFXMultiOperatorEdit<T, U> : VFXReorderableList, IControlledElement<T> where U : VFXOperatorNumeric, IVFXOperatorNumericUnified where T : VFXUnifiedOperatorControllerBase<U>
     {
         T m_Controller;
-        Controller IControlledElement.controller
-        {
-            get { return m_Controller; }
-        }
+        Controller IControlledElement.controller => m_Controller;
+
         public T controller
         {
-            get { return m_Controller; }
+            get => m_Controller;
             set
             {
                 if (m_Controller != value)
@@ -102,57 +93,51 @@ namespace UnityEditor.VFX.UI
             }
         }
 
-        public VFXMultiOperatorEdit()
-        {
-        }
-
-        int m_CurrentIndex = -1;
-        void OnTypeMenu(Label button, int index)
+        void OnTypeMenu(PopupField<Type> dropdown, int index)
         {
             var op = controller.model;
-            GenericMenu menu = new GenericMenu();
-            var selectedType = op.GetOperandType(index);
-
-            IVFXOperatorNumericUnifiedConstrained constraintInterface = op as IVFXOperatorNumericUnifiedConstrained;
-
-            if (constraintInterface != null && constraintInterface.slotIndicesThatCanBeScalar.Contains(index))
+            var choices = new List<Type>();
+            if (op is IVFXOperatorNumericUnifiedConstrained constraintInterface && constraintInterface.slotIndicesThatCanBeScalar.Contains(index))
             {
-                VFXSlot otherSlotWithConstraint = op.inputSlots.Where((t, i) => constraintInterface.slotIndicesThatMustHaveSameType.Contains(i) && !constraintInterface.slotIndicesThatCanBeScalar.Contains(i)).FirstOrDefault();
+                var otherSlotWithConstraint = op.inputSlots.Where((t, i) => constraintInterface.slotIndicesThatMustHaveSameType.Contains(i) && !constraintInterface.slotIndicesThatCanBeScalar.Contains(i)).FirstOrDefault();
 
                 foreach (var type in op.validTypes)
                 {
                     if (otherSlotWithConstraint == null || otherSlotWithConstraint.property.type == type || VFXUnifiedConstraintOperatorController.GetMatchingScalar(otherSlotWithConstraint.property.type) == type)
-                        menu.AddItem(EditorGUIUtility.TrTextContent(type.UserFriendlyName()), selectedType == type, OnChangeType, type);
+                        choices.Add(type);
                 }
             }
             else
             {
                 foreach (var type in op.validTypes)
                 {
-                    menu.AddItem(EditorGUIUtility.TrTextContent(type.UserFriendlyName()), selectedType == type, OnChangeType, type);
+                    choices.Add(type);
                 }
             }
-            m_CurrentIndex = index;
-            menu.DropDown(button.worldBound);
+            dropdown.userData = index;
+            dropdown.choices = choices;
+            dropdown.value = op.GetOperandType(index);
+            dropdown.formatListItemCallback += x => x.UserFriendlyName();
+            dropdown.formatSelectedValueCallback += x => x.UserFriendlyName();
+            dropdown.RegisterValueChangedCallback(OnChangeType);
         }
 
-        void OnChangeType(object type)
+        void OnChangeType(ChangeEvent<Type> evt)
         {
+            var type = evt.newValue;
+            var currentIndex = (int)((VisualElement)evt.target).userData;
             var op = controller.model;
+            op.SetOperandType(currentIndex, type);
 
-            op.SetOperandType(m_CurrentIndex, (Type)type);
-
-            IVFXOperatorNumericUnifiedConstrained constraintInterface = op as IVFXOperatorNumericUnifiedConstrained;
-
-            if (constraintInterface != null)
+            if (op is IVFXOperatorNumericUnifiedConstrained constraintInterface)
             {
-                if (!constraintInterface.slotIndicesThatCanBeScalar.Contains(m_CurrentIndex))
+                if (!constraintInterface.slotIndicesThatCanBeScalar.Contains(currentIndex))
                 {
                     foreach (var index in constraintInterface.slotIndicesThatMustHaveSameType)
                     {
-                        if (index != m_CurrentIndex && (!constraintInterface.slotIndicesThatCanBeScalar.Contains(index) || VFXUnifiedConstraintOperatorController.GetMatchingScalar((Type)type) != op.GetOperandType(index)))
+                        if (index != currentIndex && (!constraintInterface.slotIndicesThatCanBeScalar.Contains(index) || VFXUnifiedConstraintOperatorController.GetMatchingScalar(type) != op.GetOperandType(index)))
                         {
-                            op.SetOperandType(index, (Type)type);
+                            op.SetOperandType(index, type);
                         }
                     }
                 }
@@ -204,7 +189,7 @@ namespace UnityEditor.VFX.UI
 
         protected class OperandInfoBase : VisualElement
         {
-            Label type;
+            PopupField<Type> type;
             public VFXMultiOperatorEdit<T, U> m_Owner;
 
             public int index;
@@ -213,22 +198,14 @@ namespace UnityEditor.VFX.UI
             {
                 this.AddStyleSheetPathWithSkinVariant("VFXControls");
                 m_Owner = owner;
-                type = new Label();
+                type = new PopupField<Type>();
                 this.index = index;
-                type.AddToClassList("PopupButton");
-                type.AddManipulator(new DownClickable(OnTypeMenu));
-
-                Add(type);
-            }
-
-            void OnTypeMenu()
-            {
                 m_Owner.OnTypeMenu(type, index);
+                Add(type);
             }
 
             public virtual void Set(U op)
             {
-                type.text = op.GetOperandType(index).UserFriendlyName();
             }
         }
     }

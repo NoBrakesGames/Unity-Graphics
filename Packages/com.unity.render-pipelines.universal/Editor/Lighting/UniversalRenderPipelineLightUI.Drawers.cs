@@ -5,6 +5,9 @@ using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+#if XR_MANAGEMENT_4_0_1_OR_NEWER
+using UnityEditor.XR.Management;
+#endif
 
 namespace UnityEditor.Rendering.Universal
 {
@@ -188,17 +191,6 @@ namespace UnityEditor.Rendering.Universal
                     serializedLight.settings.lightmapping.intValue = (int)LightmapBakeType.Baked;
                     serializedLight.Apply();
                 }
-
-                if (lightType != LightType.Rectangle && !serializedLight.settings.isCompletelyBaked && UniversalRenderPipeline.asset.useRenderingLayers && !isInPreset)
-                {
-                    EditorGUI.BeginChangeCheck();
-                    EditorUtils.DrawRenderingLayerMask(serializedLight.renderingLayers, Styles.RenderingLayers);
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        if (!serializedLight.customShadowLayers.boolValue)
-                            SyncLightAndShadowLayers(serializedLight, serializedLight.renderingLayers);
-                    }
-                }
             }
         }
 
@@ -275,8 +267,28 @@ namespace UnityEditor.Rendering.Universal
 
         static void DrawRenderingContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
         {
-            serializedLight.settings.DrawRenderMode();
+            if (serializedLight.settings.light.type != LightType.Rectangle &&
+                !serializedLight.settings.isCompletelyBaked)
+            {
+                EditorGUI.BeginChangeCheck();
+                GUI.enabled = UniversalRenderPipeline.asset.useRenderingLayers;
+                EditorUtils.DrawRenderingLayerMask(
+                    serializedLight.renderingLayers,
+                    UniversalRenderPipeline.asset.useRenderingLayers ? Styles.RenderingLayers : Styles.RenderingLayersDisabled
+                );
+                GUI.enabled = true;
+                if (EditorGUI.EndChangeCheck())
+                {
+                    if (!serializedLight.customShadowLayers.boolValue)
+                        SyncLightAndShadowLayers(serializedLight, serializedLight.renderingLayers);
+                }
+            }
+
             EditorGUILayout.PropertyField(serializedLight.settings.cullingMask, Styles.CullingMask);
+            if (serializedLight.settings.cullingMask.intValue != -1)
+            {
+                EditorGUILayout.HelpBox(Styles.CullingMaskWarning.text, MessageType.Info);
+            }
         }
 
         static void DrawShadowsContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
@@ -334,10 +346,30 @@ namespace UnityEditor.Rendering.Universal
                         // this min bound should match the calculation in SharedLightData::GetNearPlaneMinBound()
                         float nearPlaneMinBound = Mathf.Min(0.01f * serializedLight.settings.range.floatValue, 0.1f);
                         EditorGUILayout.Slider(serializedLight.settings.shadowsNearPlane, nearPlaneMinBound, 10.0f, Styles.ShadowNearPlane);
+                        var isHololens = false;
+                        var isQuest = false;
+#if XR_MANAGEMENT_4_0_1_OR_NEWER
+                        var buildTargetGroup = BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget);
+                        var buildTargetSettings = XRGeneralSettingsPerBuildTarget.XRGeneralSettingsForBuildTarget(buildTargetGroup);
+                        if (buildTargetSettings != null && buildTargetSettings.AssignedSettings != null && buildTargetSettings.AssignedSettings.activeLoaders.Count > 0)
+                        {
+                            isHololens = buildTargetGroup == BuildTargetGroup.WSA;
+                            isQuest = buildTargetGroup == BuildTargetGroup.Android;
+                        }
 
+#endif
                         // Soft Shadow Quality
                         if (serializedLight.settings.light.shadows == LightShadows.Soft)
                             EditorGUILayout.PropertyField(serializedLight.softShadowQualityProp, Styles.SoftShadowQuality);
+
+                        if (isHololens || isQuest)
+                        {
+                            EditorGUILayout.HelpBox(
+                                "Per-light soft shadow quality level is not supported on HoloLens and Oculus platforms. Use the Soft Shadow Quality setting in the URP Asset instead",
+                                MessageType.Warning
+                            );
+                        }
+
                     }
 
                     if (UniversalRenderPipeline.asset.useRenderingLayers)
@@ -440,7 +472,7 @@ namespace UnityEditor.Rendering.Universal
                     }
                     else
                     {
-                        if (GraphicsSettings.renderPipelineAsset is UniversalRenderPipelineAsset urpAsset)
+                        if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset urpAsset)
                             EditorGUILayout.LabelField($"{urpAsset.GetAdditionalLightsShadowResolution(shadowResolutionTier)} ({urpAsset.name})", GUILayout.ExpandWidth(false));
                     }
                     if (checkScope.changed)

@@ -205,17 +205,18 @@ namespace UnityEditor.ShaderGraph
             };
         }
 
+        // Do we want to return "" in case shaderName is null?
+        private string ProcessShaderName(string shaderName)
+            => shaderName?.Replace("{Name}", m_PrimaryShaderFullName, StringComparison.Ordinal);
+
         // temporary used by BuildShader()
         ShaderStringBuilder m_Builder;
         GeneratedShader BuildShader(string additionalShaderID, List<BlockNode> outTemporaryBlocks = null)
         {
             bool isPrimaryShader = string.IsNullOrEmpty(additionalShaderID);
-            string shaderName =
-                isPrimaryShader ?
-                    m_PrimaryShaderFullName :
-                    additionalShaderID.Replace("{Name}", m_PrimaryShaderFullName, StringComparison.Ordinal);
+            string shaderName = isPrimaryShader ? m_PrimaryShaderFullName : ProcessShaderName(additionalShaderID);
 
-            var activeNodeList = Pool.ListPool<AbstractMaterialNode>.Get();
+            var activeNodeList = Pool.HashSetPool<AbstractMaterialNode>.Get();
             bool ignoreActiveState = (m_Mode == GenerationMode.Preview);  // for previews, we ignore node active state
             if (m_OutputNode == null)
             {
@@ -252,18 +253,24 @@ namespace UnityEditor.ShaderGraph
                 }
             }
 
+            var variantLimit = this.m_Mode == GenerationMode.Preview
+                ? Mathf.Min(ShaderGraphPreferences.previewVariantLimit, ShaderGraphProjectSettings.instance.shaderVariantLimit)
+                : ShaderGraphProjectSettings.instance.shaderVariantLimit;
+            if (!ShaderGraphProjectSettings.instance.overrideShaderVariantLimit)
+                variantLimit = ShaderGraphProjectSettings.defaultVariantLimit;
+
             // Send an action about our current variant usage. This will either add or clear a warning if it exists
-            var action = new ShaderVariantLimitAction(shaderKeywords.permutations.Count, ShaderGraphPreferences.variantLimit);
+            var action = new ShaderVariantLimitAction(shaderKeywords.permutations.Count, variantLimit);
             m_GraphData.owner?.graphDataStore?.Dispatch(action);
 
-            if (shaderKeywords.permutations.Count > ShaderGraphPreferences.variantLimit)
+            if (shaderKeywords.permutations.Count > variantLimit)
             {
                 // ideally we would not rely on the graph having an asset guid / asset path here (to support compiling asset-less graph datas)
                 string path = AssetDatabase.GUIDToAssetPath(m_GraphData.assetGuid);
                 return ErrorShader(shaderName, $"Error in Shader Graph {path}: {ShaderKeyword.kVariantLimitWarning}");
             }
 
-            foreach (var activeNode in activeNodeList.OfType<AbstractMaterialNode>())
+            foreach (var activeNode in activeNodeList)
             {
                 activeNode.SetUsedByGenerator();
                 activeNode.CollectShaderProperties(shaderProperties, m_Mode);
@@ -339,7 +346,7 @@ namespace UnityEditor.ShaderGraph
                 foreach (var shaderDependency in shaderDependencies)
                 {
                     if (shaderDependency.dependencyName != lastDependencyName)
-                        m_Builder.AppendLine($"Dependency \"{shaderDependency.dependencyName}\" = \"{shaderDependency.shaderName}\"");
+                        m_Builder.AppendLine($"Dependency \"{shaderDependency.dependencyName}\" = \"{ProcessShaderName(shaderDependency.shaderName)}\"");
                     lastDependencyName = shaderDependency.dependencyName;
                 }
 
@@ -492,7 +499,7 @@ namespace UnityEditor.ShaderGraph
             var generatedShader = new GeneratedShader
             {
                 codeString = m_Builder.ToCodeBlock(),
-                shaderName = kernel.name.Replace("{Name}", m_PrimaryShaderFullName, StringComparison.Ordinal),
+                shaderName = ProcessShaderName(kernel.name),
                 assignedTextures = null,
                 errorMessage = null
             };
@@ -662,7 +669,7 @@ namespace UnityEditor.ShaderGraph
             // Get active fields from upstream Node requirements
             Profiler.BeginSample("GetActiveFieldsFromUpstreamNodes");
             ShaderGraphRequirementsPerKeyword graphRequirements;
-            GenerationUtils.GetActiveFieldsAndPermutationsForNodes(pass, keywordCollector, vertexNodes, pixelNodes,
+            GenerationUtils.GetActiveFieldsAndPermutationsForNodes(pass, keywordCollector, vertexNodes, pixelNodes, new bool[4] { false, false, false, false },
                 vertexNodePermutations, pixelNodePermutations, activeFields, out graphRequirements);
             Profiler.EndSample();
 
@@ -808,6 +815,12 @@ namespace UnityEditor.ShaderGraph
                 spliceCommands.Add("PassKeywords", command);
             }
             Profiler.EndSample();
+
+            List<StructDescriptor> originalPassStructs = new List<StructDescriptor>(passStructs);
+
+            // Note: The code below is copy/pasted into GeneratePassStructsAndInterpolators() in GeneratorDerivativeUtils.cs. If any changes are made to this code,
+            // then a corresponding change needs to be made in that function.
+
             // -----------------------------
             // Generated structs and Packing code
             Profiler.BeginSample("StructsAndPacking");
@@ -892,6 +905,8 @@ namespace UnityEditor.ShaderGraph
                 passStructBuilder.AppendLine("//Pass Structs: <None>");
             spliceCommands.Add("PassStructs", passStructBuilder.ToCodeBlock());
             Profiler.EndSample();
+            // Note: End of code copy/pasted into GeneratePassStructsAndInterpolators() in GeneratorDerivativeUtils.cs.
+
 
             // --------------------------------------------------
             // Graph Vertex
@@ -1034,7 +1049,7 @@ namespace UnityEditor.ShaderGraph
                     {
                         m_GraphData.ForeachHLSLProperty(h =>
                         {
-                            if (!h.IsObjectType())
+                            if (!h.IsObjectType() && h.declaration != HLSLDeclaration.Global)
                                 h.AppendTo(propertyBuilder);
                         });
                     }
@@ -1147,6 +1162,24 @@ namespace UnityEditor.ShaderGraph
                 string command = GenerationUtils.GetSpliceCommand(postGraphIncludeBuilder.ToCodeBlock(), "PostGraphIncludes");
                 spliceCommands.Add("PostGraphIncludes", command);
             }
+
+            GeneratorDerivativeUtils.ApplyAnalyticDerivatives(
+                m_Targets[targetIndex],
+                spliceCommands,
+                pass,
+                activeFields,
+                subShaderProperties,
+                propertyCollector,
+                keywordCollector,
+                vertexNodes,
+                pixelNodes,
+                vertexNodePermutations,
+                pixelNodePermutations,
+                originalPassStructs,
+                pass.analyticDerivativesApplyEmulate,
+                m_HumanReadable,
+                m_PrimaryShaderFullName,
+                m_GraphData.graphDefaultConcretePrecision);
 
             // --------------------------------------------------
             // Debug

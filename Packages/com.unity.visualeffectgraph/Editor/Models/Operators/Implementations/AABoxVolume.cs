@@ -1,10 +1,9 @@
-using System;
-using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-Volume(AxisAlignedBox)")]
+    [VFXInfo(name = "Volume (Axis Aligned Box)", category = "Math/Geometry", synonyms = new []{ "aabox" })]
     class AABoxVolume : VFXOperator
     {
         public class InputProperties

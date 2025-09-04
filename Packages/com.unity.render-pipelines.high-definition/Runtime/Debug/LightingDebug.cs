@@ -356,6 +356,25 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>Distance at which clusters will be visualized.</summary>
         public float clusterDebugDistance = 1.0f;
 
+        /// <summary>Light category for cluster debug view.</summary>
+        public ClusterLightCategoryDebug clusterLightCategory = ClusterLightCategoryDebug.All;
+
+
+        /// <summary>Enable to make HDRP mix the albedo of the Material with its material capture.</summary>
+        public bool matCapMixAlbedo = false ;
+
+        /// <summary>Set the intensity of the material capture. This increases the brightness of the Scene. This is useful if the albedo darkens the Scene considerably.</summary>
+        public float matCapMixScale = 1.0f;
+
+#if UNITY_EDITOR
+        public LightingDebugSettings()
+        {
+            var matCapMode = HDRenderPipelinePreferences.matCapMode;
+            matCapMixAlbedo = matCapMode.mixAlbedo.value;
+            matCapMixScale = matCapMode.viewScale.value;
+        }
+#endif
+
         // Internal APIs
         internal bool IsDebugDisplayRemovePostprocess()
         {
@@ -397,6 +416,25 @@ namespace UnityEngine.Rendering.HighDefinition
                 colors[i] = new Vector4(0, 0, 0);
 
             return colors;
+        }
+
+        internal int ComputeOverrideHash()
+        {
+            int hash = (overrideSmoothness ? 1 : 0);
+            hash |= (overrideAlbedo ? 1 : 0) << 1;
+            hash |= (overrideNormal ? 1 : 0) << 2;
+            hash |= (overrideAmbientOcclusion ? 1 : 0) << 3;
+            hash |= (overrideSpecularColor ? 1 : 0) << 4;
+            hash |= (overrideEmissiveColor ? 1 : 0) << 5;
+            unchecked
+            {
+                hash = hash * 23 + overrideSmoothnessValue.GetHashCode();
+                hash = hash * 23 + overrideAlbedoValue.GetHashCode();
+                hash = hash * 23 + overrideAmbientOcclusionValue.GetHashCode();
+                hash = hash * 23 + overrideSpecularColorValue.GetHashCode();
+                hash = hash * 23 + overrideEmissiveColorValue.GetHashCode();
+            }
+            return hash;
         }
     }
 }

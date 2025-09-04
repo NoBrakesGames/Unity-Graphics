@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine.Assertions;
 
 namespace UnityEngine.Rendering
@@ -7,7 +8,7 @@ namespace UnityEngine.Rendering
     /// <summary>
     /// An Asset which holds a set of settings to use with a <see cref="Volume"/>.
     /// </summary>
-    [CoreRPHelpURL("Volume-Profile", "com.unity.render-pipelines.high-definition")]
+    [CurrentPipelineHelpURL("Volume-Profile")]
     [Icon("Packages/com.unity.render-pipelines.core/Editor/Icons/Processed/VolumeProfile Icon.asset")]
     public sealed class VolumeProfile : ScriptableObject
     {
@@ -21,8 +22,28 @@ namespace UnityEngine.Rendering
         /// A dirty check used to redraw the profile inspector when something has changed. This is
         /// currently only used in the editor.
         /// </summary>
-        [NonSerialized]
-        public bool isDirty = true; // Editor only, doesn't have any use outside of it
+        [Obsolete("This field was only public for editor access. #from(6000.0)")]
+        public bool isDirty
+        {
+            get => dirtyState != DirtyState.None;
+            set
+            {
+                if (value)
+                    dirtyState |= DirtyState.Other;
+                else
+                    dirtyState &= ~DirtyState.Other;
+            }
+        }
+
+        [Flags] internal enum DirtyState
+        {
+            None = 0,
+            DirtyByComponentChange = 1,
+            DirtyByProfileReset = 2,
+            Other = 4
+        }
+
+        internal DirtyState dirtyState;
 
         void OnEnable()
         {
@@ -54,9 +75,7 @@ namespace UnityEngine.Rendering
         /// Volume Profile editor when you modify the Asset via script instead of the Inspector.
         /// </summary>
         public void Reset()
-        {
-            isDirty = true;
-        }
+            => dirtyState |= DirtyState.DirtyByProfileReset;
 
         /// <summary>
         /// Adds a <see cref="VolumeComponent"/> to this Volume Profile.
@@ -85,7 +104,7 @@ namespace UnityEngine.Rendering
         /// <param name="overrides">Specifies whether Unity should automatically override all the settings when
         /// you add a <see cref="VolumeComponent"/> to the Volume Profile.</param>
         /// <returns>The instance created for the given type that has been added to the profile</returns>
-        /// <see cref="Add{T}"/>
+        /// <seealso cref="Add{T}"/>
         public VolumeComponent Add(Type type, bool overrides = false)
         {
             if (Has(type))
@@ -98,7 +117,7 @@ namespace UnityEngine.Rendering
 #endif
             component.SetAllOverridesTo(overrides);
             components.Add(component);
-            isDirty = true;
+            dirtyState |= DirtyState.DirtyByComponentChange;
             return component;
         }
 
@@ -140,7 +159,7 @@ namespace UnityEngine.Rendering
             if (toRemove >= 0)
             {
                 components.RemoveAt(toRemove);
-                isDirty = true;
+                dirtyState |= DirtyState.DirtyByComponentChange;
             }
         }
 
@@ -244,7 +263,7 @@ namespace UnityEngine.Rendering
         }
 
         /// <summary>
-        /// Gets the <seealso cref="VolumeComponent"/>, which is a subclass of <paramref name="type"/>, if
+        /// Gets the <see cref="VolumeComponent"/>, which is a subclass of <paramref name="type"/>, if
         /// it exists.
         /// </summary>
         /// <typeparam name="T">A type of <see cref="VolumeComponent"/>.</typeparam>
@@ -274,12 +293,12 @@ namespace UnityEngine.Rendering
         }
 
         /// <summary>
-        /// Gets all the <seealso cref="VolumeComponent"/> that are subclasses of the specified type,
+        /// Gets all the <see cref="VolumeComponent"/> that are subclasses of the specified type,
         /// if there are any.
         /// </summary>
         /// <typeparam name="T">A type of <see cref="VolumeComponent"/>.</typeparam>
         /// <param name="type">A type that inherits from <see cref="VolumeComponent"/>.</param>
-        /// <param name="result">The output list that contains all the <seealso cref="VolumeComponent"/>
+        /// <param name="result">The output list that contains all the <see cref="VolumeComponent"/>
         /// if any. Note that Unity does not clear this list.</param>
         /// <returns><c>true</c> if any <see cref="VolumeComponent"/> have been found in the profile,
         /// <c>false</c> otherwise.</returns>
@@ -340,5 +359,19 @@ namespace UnityEngine.Rendering
                 if (components[i] == null)
                     components.RemoveAt(i);
         }
+
+#if UNITY_EDITOR
+        void OnValidate()
+        {
+            // Delay the callback because when undoing the deletion of a VolumeComponent from a profile,
+            // it's possible VolumeComponent.OnEnable() has not yet been called, resulting in a crash when trying to
+            // update the default state.
+            EditorApplication.delayCall += () =>
+            {
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.OnVolumeProfileChanged(this);
+            };
+        }
+#endif
     }
 }

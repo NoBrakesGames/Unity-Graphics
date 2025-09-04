@@ -1,7 +1,7 @@
 #ifndef UNITY_INSTANCING_INCLUDED
 #define UNITY_INSTANCING_INCLUDED
 
-#if SHADER_TARGET >= 35 && (defined(SHADER_API_D3D11) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLCORE) || defined(SHADER_API_XBOXONE) || defined(SHADER_API_GAMECORE) || defined(SHADER_API_PSSL) || defined(SHADER_API_VULKAN) || defined(SHADER_API_METAL))
+#if SHADER_TARGET >= 35 && (defined(SHADER_API_D3D11) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLCORE) || defined(SHADER_API_XBOXONE) || defined(SHADER_API_GAMECORE) || defined(SHADER_API_PSSL) || defined(SHADER_API_VULKAN) || defined(SHADER_API_METAL) || defined(SHADER_API_WEBGPU))
     #define UNITY_SUPPORT_INSTANCING
 #endif
 
@@ -9,12 +9,12 @@
     #define UNITY_SUPPORT_INSTANCING
 #endif
 
-#if defined(SHADER_API_D3D11) || defined(SHADER_API_GLCORE) || defined(SHADER_API_GLES3) || defined(SHADER_API_VULKAN)
+#if defined(SHADER_API_D3D11) || defined(SHADER_API_GLCORE) || defined(SHADER_API_GLES3) || defined(SHADER_API_VULKAN) || (defined(SHADER_API_METAL) && !defined(UNITY_COMPILER_DXC))
     #define UNITY_SUPPORT_STEREO_INSTANCING
 #endif
 
 // These platforms support dynamically adjusting the instancing CB size according to the current batch.
-#if defined(SHADER_API_D3D11) || defined(SHADER_API_GLCORE) || defined(SHADER_API_GLES3) || defined(SHADER_API_METAL) || defined(SHADER_API_PSSL) || defined(SHADER_API_VULKAN) || defined(SHADER_API_SWITCH)
+#if defined(SHADER_API_D3D11) || defined(SHADER_API_GLCORE) || defined(SHADER_API_GLES3) || defined(SHADER_API_METAL) || defined(SHADER_API_PSSL) || defined(SHADER_API_VULKAN) || defined(SHADER_API_SWITCH) || defined(SHADER_API_WEBGPU)
     #define UNITY_INSTANCING_SUPPORT_FLEXIBLE_ARRAY_SIZE
 #endif
 
@@ -67,7 +67,7 @@
     #endif
 #endif
 
-#if defined(SHADER_API_GLES3) || defined(SHADER_API_GLCORE) || defined(SHADER_API_METAL) || defined(SHADER_API_VULKAN)
+#if defined(SHADER_API_GLES3) || defined(SHADER_API_GLCORE) || defined(SHADER_API_METAL) || defined(SHADER_API_VULKAN) || defined(SHADER_API_WEBGPU)
     // These platforms have constant buffers disabled normally, but not here (see CBUFFER_START/CBUFFER_END in HLSLSupport.cginc).
     #define UNITY_INSTANCING_CBUFFER_SCOPE_BEGIN(name)  cbuffer name {
     #define UNITY_INSTANCING_CBUFFER_SCOPE_END          }
@@ -188,6 +188,11 @@
 #if UNITY_ANY_INSTANCING_ENABLED
     void UnitySetupInstanceID(uint inputInstanceID)
     {
+		#if defined(UNITY_SUPPORT_INSTANCING) && defined(DOTS_INSTANCING_ON)
+            const int localBaseInstanceId = 0;		// base instance id is always 0 in BRG (avoid using useless UnityDrawCallInfo cbuffer)
+		#else
+            const int localBaseInstanceId = unity_BaseInstanceID;
+		#endif
         #ifdef UNITY_STEREO_INSTANCING_ENABLED
             #if !defined(SHADEROPTIONS_XR_MAX_VIEWS) || SHADEROPTIONS_XR_MAX_VIEWS <= 2
                 #if defined(SHADER_API_GLES3)
@@ -199,21 +204,21 @@
                     // emitting the bitfieldInsert function and thereby increase the number of devices we
                     // can run stereo instancing on.
                     unity_StereoEyeIndex = round(fmod(inputInstanceID, 2.0));
-                    unity_InstanceID = unity_BaseInstanceID + (inputInstanceID >> 1);
+                    unity_InstanceID = localBaseInstanceId + (inputInstanceID >> 1);
                 #else
                     // stereo eye index is automatically figured out from the instance ID
                     unity_StereoEyeIndex = inputInstanceID & 0x01;
-                    unity_InstanceID = unity_BaseInstanceID + (inputInstanceID >> 1);
+                    unity_InstanceID = localBaseInstanceId + (inputInstanceID >> 1);
                 #endif
             #else
                 unity_StereoEyeIndex = inputInstanceID % _XRViewCount;
-                unity_InstanceID = unity_BaseInstanceID + (inputInstanceID / _XRViewCount);
+                unity_InstanceID = localBaseInstanceId + (inputInstanceID / _XRViewCount);
             #endif
         #elif defined(SHADER_STAGE_RAY_TRACING)
             // InstanceIndex() intrinsic is the global ray tracing instance index in the TLAS and unity_BaseInstanceID is where the array of instances starts in the TLAS
-            unity_InstanceID = InstanceIndex() - unity_BaseInstanceID;
+            unity_InstanceID = InstanceIndex() - localBaseInstanceId;
         #else
-            unity_InstanceID = inputInstanceID + unity_BaseInstanceID;
+            unity_InstanceID = inputInstanceID + localBaseInstanceId;
         #endif
     }
 
@@ -253,15 +258,11 @@
     #ifdef UNITY_FORCE_MAX_INSTANCE_COUNT
         #define UNITY_INSTANCED_ARRAY_SIZE  UNITY_FORCE_MAX_INSTANCE_COUNT
     #elif defined(UNITY_INSTANCING_SUPPORT_FLEXIBLE_ARRAY_SIZE)
-        #ifdef UNITY_DOTS_INSTANCING_ENABLED
-            #define UNITY_INSTANCED_ARRAY_SIZE  4 // in BRG, minimal indexed size is 4 ( because of encoding some data in the first 4 elements )
-        #else
-            #define UNITY_INSTANCED_ARRAY_SIZE  2 // minimum array size that ensures dynamic indexing
-        #endif
+        #define UNITY_INSTANCED_ARRAY_SIZE  2 // minimum array size that ensures dynamic indexing
     #elif defined(UNITY_MAX_INSTANCE_COUNT)
         #define UNITY_INSTANCED_ARRAY_SIZE  UNITY_MAX_INSTANCE_COUNT
     #else
-        #if (defined(SHADER_API_VULKAN) && defined(SHADER_API_MOBILE)) || defined(SHADER_API_SWITCH)
+        #if (defined(SHADER_API_VULKAN) && defined(SHADER_API_MOBILE)) || defined(SHADER_API_SWITCH) || defined(SHADER_API_WEBGPU)
             #define UNITY_INSTANCED_ARRAY_SIZE  250
         #else
             #define UNITY_INSTANCED_ARRAY_SIZE  500
@@ -280,6 +281,7 @@
         #define UNITY_SETUP_INSTANCE_ID(input) {\
             DEFAULT_UNITY_SETUP_INSTANCE_ID(input);\
             SetupDOTSVisibleInstancingData();\
+            UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES();\
             UNITY_SETUP_DOTS_SH_COEFFS;\
             UNITY_SETUP_DOTS_RENDER_BOUNDS; }
     #endif

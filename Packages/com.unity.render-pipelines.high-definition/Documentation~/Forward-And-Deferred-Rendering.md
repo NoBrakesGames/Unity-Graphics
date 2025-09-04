@@ -1,12 +1,10 @@
 # Forward and Deferred rendering
 
-The High Definition Render Pipeline (HDRP) allows you to render Lit Materials using either Forward or Deferred rendering. You can configure your Unity Project to only use one of these modes, or allow it to use both and switch at runtime on a per-[Camera](HDRP-Camera.md) basis.
+The High Definition Render Pipeline (HDRP) allows you to render Lit Materials using either Forward or Deferred rendering. You can configure your Unity Project to only use one of these modes, or allow it to use both and switch at runtime on a per-[Camera](hdrp-camera-component-reference.md) basis.
 
-## Using Forward or Deferred rendering
+## Use Forward or Deferred rendering
 
 Before you use forward or deferred rendering in your Unity Project, you must make sure your [HDRP Asset](HDRP-Asset.md) supports them.
-
-![](Images/ForwardAndDeferred1.png)
 
 To set the default support for forward or deferred rendering in your Project:
 
@@ -48,7 +46,7 @@ Forward and Deferred rendering both implement the same features, but the quality
 
 ## Differences between Forward and Deferred rendering in HDRP
 
-| **Feature** | **Forward Rendering** | **Defferred** |
+| **Feature** | **Forward Rendering** | **Deferred** |
 |---|---|---|
 | **Normal shadow bias** | HDRP uses the geometric normal (the vertex normal) of the Material for shadow bias, so Forward Rendering produces fewer shadow artifacts. | HDRP uses the pixel normal of the Material for shadow bias, so Deferred Rendering produces more shadow artifacts. |
 | **Emissive Color** | Ambient Occlusion doesn't affect Emissive Color. | Ambient Occlusion affects Emissive Color due to technical constraints. |

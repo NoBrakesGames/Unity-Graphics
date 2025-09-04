@@ -25,12 +25,13 @@ namespace UnityEngine.Rendering.HighDefinition
         public int dataIndex;
         public int lightIndex;
         public HDShadowRequestSetHandle shadowRequestSetHandle;
-        public LightType lightType;
         public int splitCount;
-        public int shadowRequestCount;
         public int sortKeyIndex;
-        public bool willRenderShadowMap;
-        public BitArray8 isSplitValidArray;
+        public ShadowMapUpdateType shadowUpdateType;
+        public BitArray8 isSplitValidMask;
+        public BitArray8 needCacheUpdateMask;
+
+        public bool HasShadowCacheUpToDate(int splitIndex) => shadowUpdateType == ShadowMapUpdateType.Cached && !needCacheUpdateMask[(uint)splitIndex];
     }
 
     //Class representing lights in the context of a view.
@@ -87,6 +88,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public NativeArray<uint> sortKeys => m_SortKeys;
         public NativeArray<uint> sortSupportArray => m_SortSupportArray;
         public NativeArray<int> shadowLightsDataIndices => m_ShadowLightsDataIndices;
+        public NativeBitArray shadowRequestValidityArray => m_ShadowRequestValidityArray;
 
         //Resets internal size of processed lights.
         public void Reset()
@@ -144,6 +146,7 @@ namespace UnityEngine.Rendering.HighDefinition
         private NativeArray<ShadowIndicesAndVisibleLightData> m_VisibleLightsAndIndicesBuffer;
         private NativeList<ShadowIndicesAndVisibleLightData> m_SplitVisibleLightsAndIndicesBuffer;
         private UnsafeList<ShadowIndicesAndVisibleLightData> m_PointVisibleLightsAndIndices;
+        private NativeBitArray m_ShadowRequestValidityArray;
 
         private int m_Capacity = 0;
         private int m_Size = 0;
@@ -171,6 +174,16 @@ namespace UnityEngine.Rendering.HighDefinition
                 m_SplitVisibleLightsAndIndicesBuffer = new NativeList<ShadowIndicesAndVisibleLightData>(Allocator.Persistent);
 
             m_SplitVisibleLightsAndIndicesBuffer.Capacity = m_Capacity;
+
+            var newLightWillRenderToShadowMapArray = new NativeBitArray(m_Capacity, Allocator.Persistent);
+            if (m_ShadowRequestValidityArray.IsCreated)
+            {
+                int numBitsToCopy = Math.Min(m_ShadowRequestValidityArray.Length, newLightWillRenderToShadowMapArray.Length);
+                newLightWillRenderToShadowMapArray.Copy(0, ref m_ShadowRequestValidityArray, 0, numBitsToCopy);
+
+                m_ShadowRequestValidityArray.Dispose();
+            }
+            m_ShadowRequestValidityArray = newLightWillRenderToShadowMapArray;
         }
 
         public void Cleanup()
@@ -195,6 +208,7 @@ namespace UnityEngine.Rendering.HighDefinition
             m_SortKeys.Dispose();
             m_ShadowLightsDataIndices.Dispose();
             m_SplitVisibleLightsAndIndicesBuffer.Dispose();
+            m_ShadowRequestValidityArray.Dispose();
 
             m_Capacity = 0;
             m_Size = 0;

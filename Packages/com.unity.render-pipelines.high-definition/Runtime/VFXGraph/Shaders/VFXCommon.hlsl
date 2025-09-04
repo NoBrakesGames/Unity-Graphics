@@ -37,14 +37,13 @@ void VFXTransformPSInputs(inout VFX_VARYING_PS_INPUTS input)
 }
 #endif
 
-float4 VFXTransformFinalColor(float4 color)
+float4 VFXTransformFinalColor(float4 color, float4 positionCS)
 {
 #ifdef DEBUG_DISPLAY
     if (_DebugFullScreenMode == FULLSCREENDEBUGMODE_TRANSPARENCY_OVERDRAW)
     {
         color = _DebugTransparencyOverdrawWeight * float4(TRANSPARENCY_OVERDRAW_COST, TRANSPARENCY_OVERDRAW_COST, TRANSPARENCY_OVERDRAW_COST, TRANSPARENCY_OVERDRAW_A);
     }
-
 #endif
     return color;
 }
@@ -53,6 +52,46 @@ float2 VFXGetNormalizedScreenSpaceUV(float4 clipPos)
 {
     //_ScreenParams.z is 1 + 1.0/width
     return clipPos.xy * frac(_ScreenParams.zw);
+}
+
+float4x4 VFXGetObjectToWorldMatrix()
+{
+    #if defined(SHADER_STAGE_RAY_TRACING)
+    float3x4 objToWorld3x4 = ObjectToWorld3x4();
+    float4x4 objToWorld = float4x4(
+        objToWorld3x4._m00, objToWorld3x4._m01, objToWorld3x4._m02, objToWorld3x4._m03,
+        objToWorld3x4._m10, objToWorld3x4._m11, objToWorld3x4._m12, objToWorld3x4._m13,
+        objToWorld3x4._m20, objToWorld3x4._m21, objToWorld3x4._m22, objToWorld3x4._m23,
+        0,0,0,1);
+    return objToWorld;
+    #else
+    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_M)
+    #if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
+    return GetSGVFXUnityObjectToWorld();
+    #else
+    return GetObjectToWorldMatrix();
+    #endif
+    #endif
+}
+
+float4x4 VFXGetWorldToObjectMatrix()
+{
+    #if defined(SHADER_STAGE_RAY_TRACING)
+    float3x4 worldToObj3x4 = WorldToObject3x4();
+    float4x4 worldToObj = float4x4(
+        worldToObj3x4._m00, worldToObj3x4._m01, worldToObj3x4._m02, worldToObj3x4._m03,
+        worldToObj3x4._m10, worldToObj3x4._m11, worldToObj3x4._m12, worldToObj3x4._m13,
+        worldToObj3x4._m20, worldToObj3x4._m21, worldToObj3x4._m22, worldToObj3x4._m23,
+        0,0,0,1);
+    return worldToObj;
+    #else
+    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_I_M)
+    #if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
+    return GetSGVFXUnityWorldToObject();
+    #else
+    return GetWorldToObjectMatrix();
+    #endif
+    #endif
 }
 
 float4 VFXTransformPositionWorldToClip(float3 posWS)
@@ -65,7 +104,7 @@ float4 VFXTransformPositionWorldToClip(float3 posWS)
 
 float4 VFXTransformPositionObjectToNonJitteredClip(float3 posOS)
 {
-    float3 posWS = TransformObjectToWorld(posOS);
+    float3 posWS = mul(VFXGetObjectToWorldMatrix(), float4(posOS,1)).xyz;
     return mul(UNITY_MATRIX_UNJITTERED_VP, float4(posWS, 1.0f));
 }
 
@@ -82,7 +121,7 @@ float3 VFXTransformPreviousObjectToWorld(float3 posOS)
 
 float4 VFXTransformPositionObjectToClip(float3 posOS)
 {
-    float3 posWS = TransformObjectToWorld(posOS);
+    float3 posWS = mul(VFXGetObjectToWorldMatrix(), float4(posOS,1)).xyz;
     return VFXTransformPositionWorldToClip(posWS);
 }
 
@@ -100,46 +139,6 @@ float3 VFXTransformPositionWorldToCameraRelative(float3 posWS)
     return GetCameraRelativePositionWS(posWS);
 #else
     return posWS;
-#endif
-}
-
-float4x4 VFXGetObjectToWorldMatrix()
-{
-#if defined(SHADER_STAGE_RAY_TRACING)
-    float3x4 objToWorld3x4 = ObjectToWorld3x4();
-    float4x4 objToWorld = float4x4(
-        objToWorld3x4._m00, objToWorld3x4._m01, objToWorld3x4._m02, objToWorld3x4._m03,
-        objToWorld3x4._m10, objToWorld3x4._m11, objToWorld3x4._m12, objToWorld3x4._m13,
-        objToWorld3x4._m20, objToWorld3x4._m21, objToWorld3x4._m22, objToWorld3x4._m23,
-        0,0,0,1);
-    return objToWorld;
-#else
-    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_M)
-#if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
-    return GetSGVFXUnityObjectToWorld();
-    #else
-        return GetObjectToWorldMatrix();
-    #endif
-#endif
-}
-
-float4x4 VFXGetWorldToObjectMatrix()
-{
-#if defined(SHADER_STAGE_RAY_TRACING)
-    float3x4 worldToObj3x4 = WorldToObject3x4();
-    float4x4 worldToObj = float4x4(
-        worldToObj3x4._m00, worldToObj3x4._m01, worldToObj3x4._m02, worldToObj3x4._m03,
-        worldToObj3x4._m10, worldToObj3x4._m11, worldToObj3x4._m12, worldToObj3x4._m13,
-        worldToObj3x4._m20, worldToObj3x4._m21, worldToObj3x4._m22, worldToObj3x4._m23,
-        0,0,0,1);
-    return worldToObj;
-#else
-    // NOTE: If using the new generation path, explicitly call the object matrix (since the particle matrix is now baked into UNITY_MATRIX_I_M)
-#if defined(HAVE_VFX_MODIFICATION) && !defined(SHADER_STAGE_COMPUTE)
-    return GetSGVFXUnityWorldToObject();
-    #else
-        return GetWorldToObjectMatrix();
-    #endif
 #endif
 }
 
@@ -243,4 +242,9 @@ float4 VFXApplyPreExposure(float4 color, VFX_VARYING_PS_INPUTS input)
 float3 VFXGetCameraWorldDirection()
 {
     return -_CameraViewMatrix._m20_m21_m22;
+}
+
+#define VFXComputePixelOutputToNormalBuffer(i,normalWS,uvData,outNormalBuffer) \
+{ \
+    outNormalBuffer = 0; \
 }

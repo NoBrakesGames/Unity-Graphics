@@ -1,8 +1,10 @@
+using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Vector")]
+    [VFXHelpURL("Operator-LookAT")]
+    [VFXInfo(category = "Math/Vector", synonyms = new []{ "Orient" })]
     class LookAt : VFXOperator
     {
         public class InputProperties
@@ -20,9 +22,9 @@ namespace UnityEditor.VFX.Operator
             public Transform o = Transform.defaultValue;
         }
 
-        override public string name { get { return "Look At"; } }
+        public override string name => "Look At";
 
-        override protected VFXExpression[] BuildExpression(VFXExpression[] inputExpression)
+        protected override VFXExpression[] BuildExpression(VFXExpression[] inputExpression)
         {
             VFXExpression from = inputExpression[0];
             VFXExpression to = inputExpression[1];
@@ -34,8 +36,39 @@ namespace UnityEditor.VFX.Operator
             VFXExpression x = VFXOperatorUtility.Normalize(VFXOperatorUtility.Cross(up, z));
             VFXExpression y = VFXOperatorUtility.Cross(z, x);
 
-            VFXExpression matrix = new VFXExpressionVector3sToMatrix(x, y, z, from);
+            VFXExpression matrix = new VFXExpressionAxisToMatrix(x, y, z, from);
             return new[] { matrix };
+        }
+
+        internal sealed override void GenerateErrors(VFXErrorReporter report)
+        {
+            var context = new VFXExpression.Context(VFXExpressionContextOption.ConstantFolding);
+            var fromExpr = GetInputSlot(0).GetExpression();
+            var toExpr = GetInputSlot(1).GetExpression();
+            var upExpr = GetInputSlot(2).GetExpression();
+            context.RegisterExpression(fromExpr);
+            context.RegisterExpression(toExpr);
+            context.RegisterExpression(upExpr);
+            context.Compile();
+
+            if (context.GetReduced(fromExpr) is { } from && from.Is(VFXExpression.Flags.Constant) &&
+                context.GetReduced(toExpr) is { } to && to.Is(VFXExpression.Flags.Constant))
+            {
+
+                if ((from.Get<Vector3>() - to.Get<Vector3>()).sqrMagnitude < Mathf.Epsilon)
+                {
+                    report.RegisterError("LookAtFromEqualTo", VFXErrorType.Error, "From and To positions cannot be equal", this);
+                }
+            }
+
+            if (context.GetReduced(upExpr) is { } up && up.Is(VFXExpression.Flags.Constant))
+            {
+                var sqrLength = up.Get<Vector3>().sqrMagnitude;
+                if (sqrLength is 0 or float.NaN)
+                {
+                    report.RegisterError("LookAtUpIsZeroLength", VFXErrorType.Error, "Up vector cannot be zero length", this);
+                }
+            }
         }
     }
 }

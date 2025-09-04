@@ -1,5 +1,7 @@
+using System;
 using UnityEngine;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
@@ -8,68 +10,83 @@ namespace UnityEngine.Rendering.Universal
     internal class CaptureMotionVectorsPass : ScriptableRenderPass
     {
         static ProfilingSampler s_ProfilingSampler = new ProfilingSampler("MotionVecTest");
-        static Material s_Material;
-        static float s_intensity;
+        Material m_Material;
+        float m_intensity;
+
+        static readonly int s_MotionVectorTexture = Shader.PropertyToID("_MotionVectorTexture");
+        static readonly int s_MotionVectorDepthTexture = Shader.PropertyToID("_MotionVectorDepthTexture");
 
         public CaptureMotionVectorsPass(Material material)
         {
-            s_Material = material;
+            m_Material = material;
             renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing + 1;
         }
 
         public void SetIntensity(float intensity)
         {
-            s_intensity = intensity;
+            m_intensity = intensity;
         }
 
+        [Obsolete("This rendering path is for compatibility mode only (when Render Graph is disabled). Use Render Graph API instead.", false)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
-            //Todo: test code is not working for XR
-            CommandBuffer cmd = CommandBufferPool.Get();
+            CommandBuffer rawcmd = CommandBufferPool.Get();
+            var cmd = CommandBufferHelpers.GetRasterCommandBuffer(rawcmd);
 
-            ExecutePass(renderingData.cameraData.renderer.cameraColorTargetHandle, cmd, renderingData.cameraData);
+            ExecutePass(renderingData.cameraData.renderer.cameraColorTargetHandle, cmd, renderingData.cameraData.camera, m_Material, m_intensity);
 
-            context.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
+            context.ExecuteCommandBuffer(rawcmd);
+            rawcmd.Clear();
 
-            CommandBufferPool.Release(cmd);
+            CommandBufferPool.Release(rawcmd);
         }
 
-        static void ExecutePass(RTHandle targetHandle, CommandBuffer cmd, CameraData cameraData)
+
+        static void ExecutePass(RTHandle targetHandle, RasterCommandBuffer cmd, Camera camera, Material material, float motionIntensity)
         {
-            var camera = cameraData.camera;
             if (camera.cameraType != CameraType.Game)
                 return;
 
-            if (s_Material == null)
+            if (material == null)
                 return;
-
 
             using (new ProfilingScope(cmd, s_ProfilingSampler))
             {
-                s_Material.SetFloat("_Intensity", s_intensity);
-                Blitter.BlitCameraTexture(cmd, targetHandle, targetHandle, s_Material, 0);
+                material.SetFloat("_Intensity", motionIntensity);
+                Blitter.BlitTexture(cmd, targetHandle, Vector2.one, material, 0);
             }
         }
         internal class PassData
         {
             internal TextureHandle target;
-            internal CameraData cameraData;
+            internal Camera camera;
+            internal Material material;
+            internal float intensity;
         }
 
-        public override void RecordRenderGraph(RenderGraph renderGraph, FrameResources frameResources, ref RenderingData renderingData)
+        public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
-            using (var builder = renderGraph.AddRenderPass<PassData>("Capture Motion Vector Pass", out var passData, s_ProfilingSampler))
+            // TODO: Make this use a raster pass it likely doesn't need LowLevel. On the other hand probably ok as-is for the tests.
+            using (var builder = renderGraph.AddRasterRenderPass<PassData>("Capture Motion Vector Pass", out var passData, s_ProfilingSampler))
             {
-                UniversalRenderer renderer = (UniversalRenderer) renderingData.cameraData.renderer;
+                UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
+                UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
 
-                TextureHandle color = renderer.activeColorTexture;
-                passData.target = builder.UseColorBuffer(color, 0);
-                passData.cameraData = renderingData.cameraData;
+                if (resourceData.motionVectorColor.IsValid())
+                    builder.UseGlobalTexture(s_MotionVectorTexture);
+                if (resourceData.motionVectorDepth.IsValid())
+                    builder.UseGlobalTexture(s_MotionVectorDepthTexture);
 
-                builder.SetRenderFunc((PassData data, RenderGraphContext rgContext) =>
+                TextureHandle color = resourceData.activeColorTexture;
+                passData.target = color;
+                builder.SetRenderAttachment(color, 0, AccessFlags.Write);
+                passData.camera = cameraData.camera;
+                passData.material = m_Material;
+                passData.intensity = m_intensity;
+
+                builder.SetRenderFunc((PassData data,  RasterGraphContext rgContext) =>
                 {
-                    ExecutePass(data.target, rgContext.cmd, data.cameraData);
+                    ExecutePass(data.target, rgContext.cmd, data.camera, data.material, data.intensity);
                 });
             }
         }

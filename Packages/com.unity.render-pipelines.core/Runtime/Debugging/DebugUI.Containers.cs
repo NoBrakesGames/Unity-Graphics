@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace UnityEngine.Rendering
 {
@@ -176,15 +178,75 @@ namespace UnityEngine.Rendering
             /// </summary>
             public List<ContextMenuItem> contextMenuItems = null;
 
+            private bool m_Dirty;
+            private string[] m_ColumnLabels;
+            private string[] m_ColumnTooltips;
+
             /// <summary>
             /// List of columns labels.
             /// </summary>
-            public string[] columnLabels { get; set; } = null;
+            public string[] columnLabels
+            {
+                get => m_ColumnLabels;
+                set
+                {
+                    m_ColumnLabels = value;
+                    m_Dirty = true;
+                }
+            }
 
             /// <summary>
             /// List of columns label tooltips.
             /// </summary>
-            public string[] columnTooltips { get; set; } = null;
+            public string[] columnTooltips
+            {
+                get => m_ColumnTooltips;
+                set
+                {
+                    m_ColumnTooltips = value;
+                    m_Dirty = true;
+                }
+            }
+
+            private List<GUIContent> m_RowContents = new();
+            internal List<GUIContent> rowContents
+            {
+                get
+                {
+                    if (m_Dirty)
+                    {
+                        if (m_ColumnTooltips == null)
+                        {
+                            m_ColumnTooltips = new string[m_ColumnLabels.Length];
+                            Array.Fill(columnTooltips, string.Empty);
+                        }
+                        else
+                        {
+                            if (m_ColumnTooltips.Length != m_ColumnLabels.Length)
+                                throw new Exception(
+                                    $"Dimension for labels and tooltips on {nameof(DebugUI.Foldout)} - {displayName}, do not match");
+                        }
+
+                        m_RowContents.Clear();
+                        for (int i = 0; i < m_ColumnLabels.Length; ++i)
+                        {
+                            string label = columnLabels[i] ?? string.Empty;
+                            string tooltip = m_ColumnTooltips[i] ?? string.Empty;
+                            m_RowContents.Add(
+#if UNITY_EDITOR
+                            EditorGUIUtility.TrTextContent(label, tooltip)
+#else
+                            new GUIContent(label, tooltip)
+#endif
+                            );
+                        }
+
+                        m_Dirty = false;
+                    }
+
+                    return m_RowContents;
+                }
+            }
 
             /// <summary>
             /// Constructor.
@@ -269,6 +331,11 @@ namespace UnityEngine.Rendering
         /// </summary>
         public class Table : Container
         {
+            static GUIStyle columnHeaderStyle = new GUIStyle()
+            {
+                alignment = TextAnchor.MiddleCenter
+            };
+
             /// <summary>Row Container.</summary>
             public class Row : Foldout
             {
@@ -379,26 +446,28 @@ namespace UnityEngine.Rendering
                         }
                     }
 
-                    UnityEditor.IMGUI.Controls.MultiColumnHeaderState.Column CreateColumn(string name)
+                    UnityEditor.IMGUI.Controls.MultiColumnHeaderState.Column CreateColumn(string name, string tooltip)
                     {
                         var col = new UnityEditor.IMGUI.Controls.MultiColumnHeaderState.Column()
                         {
                             canSort = false,
                             headerTextAlignment = TextAlignment.Center,
-                            headerContent = new GUIContent(name),
+                            headerContent = new GUIContent(name, tooltip ?? string.Empty)
                         };
 
-                        GUIStyle style = UnityEditor.IMGUI.Controls.MultiColumnHeader.DefaultStyles.columnHeaderCenterAligned;
-                        style.CalcMinMaxWidth(col.headerContent, out col.width, out float _);
+                        columnHeaderStyle.CalcMinMaxWidth(col.headerContent, out col.width, out float _);
                         col.width = Mathf.Min(col.width, 50f);
                         return col;
                     }
 
                     var cols = new UnityEditor.IMGUI.Controls.MultiColumnHeaderState.Column[m_ColumnCount + 1];
-                    cols[0] = CreateColumn(displayName);
+                    cols[0] = CreateColumn(displayName, tooltip);
                     cols[0].allowToggleVisibility = false;
                     for (int i = 0; i < m_ColumnCount; i++)
-                        cols[i + 1] = CreateColumn(((Container)children[0]).children[i].displayName);
+                    {
+                        var elem = ((Container) children[0]).children[i];
+                        cols[i + 1] = CreateColumn(elem.displayName, elem.tooltip);
+                    }
 
                     var state = new UnityEditor.IMGUI.Controls.MultiColumnHeaderState(cols);
                     m_Header = new UnityEditor.IMGUI.Controls.MultiColumnHeader(state) { height = 23 };

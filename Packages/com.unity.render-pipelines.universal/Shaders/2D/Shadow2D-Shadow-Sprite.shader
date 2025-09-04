@@ -11,7 +11,7 @@ Shader "Hidden/Shadow2DShadowSprite"
         Tags { "RenderType"="Opaque" }
 
         Cull Off
-        BlendOp Add
+        BlendOp Max
         Blend One One
         ZWrite Off
         ZTest Always
@@ -19,6 +19,8 @@ Shader "Hidden/Shadow2DShadowSprite"
         // Process the shadow
         Pass
         {
+            Name "Draw Sprite Shadow (R)"
+
             ColorMask R
 
             HLSLPROGRAM

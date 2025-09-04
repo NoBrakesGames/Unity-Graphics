@@ -5,6 +5,7 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     // specularOcclusion need to be init ahead of decal to quiet the compiler that modify the SurfaceData struct
     // however specularOcclusion can come from the graph, so need to be init here so it can be override.
     surfaceData.specularOcclusion = 1.0;
+    surfaceData.thickness = 0.0;
 
     $SurfaceDescription.BaseColor:                  surfaceData.baseColor =                 surfaceDescription.BaseColor;
     $SurfaceDescription.Smoothness:                 surfaceData.perceptualSmoothness =      surfaceDescription.Smoothness;
@@ -12,7 +13,7 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     $SurfaceDescription.SpecularOcclusion:          surfaceData.specularOcclusion =         surfaceDescription.SpecularOcclusion;
     $SurfaceDescription.Metallic:                   surfaceData.metallic =                  surfaceDescription.Metallic;
     $SurfaceDescription.SubsurfaceMask:             surfaceData.subsurfaceMask =            surfaceDescription.SubsurfaceMask;
-    $SurfaceDescription.TransmissionMask:           surfaceData.transmissionMask =          surfaceDescription.TransmissionMask;
+    $SurfaceDescription.TransmissionMask:           surfaceData.transmissionMask =          surfaceDescription.TransmissionMask.xxx;
     $SurfaceDescription.Thickness:                  surfaceData.thickness =                 surfaceDescription.Thickness;
     $SurfaceDescription.DiffusionProfileHash:       surfaceData.diffusionProfileHash =      asuint(surfaceDescription.DiffusionProfileHash);
     $SurfaceDescription.Specular:                   surfaceData.specularColor =             surfaceDescription.Specular;
@@ -56,6 +57,13 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
         surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_LIT_TRANSMISSION;
     #endif
 
+    #ifdef _MATERIAL_FEATURE_COLORED_TRANSMISSION
+        surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_LIT_TRANSMISSION;
+        surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_LIT_COLORED_TRANSMISSION;
+
+        $SurfaceDescription.TransmissionTint: surfaceData.transmissionMask = surfaceDescription.TransmissionTint;
+    #endif
+
     #ifdef _MATERIAL_FEATURE_ANISOTROPY
         surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_LIT_ANISOTROPY;
 
@@ -83,10 +91,7 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
 
     float3 doubleSidedConstants = GetDoubleSidedConstants();
 
-    // normal delivered to master node
-    $SurfaceDescription.NormalOS: GetNormalWS_SrcOS(fragInputs, surfaceDescription.NormalOS, surfaceData.normalWS, doubleSidedConstants);
-    $SurfaceDescription.NormalTS: GetNormalWS(fragInputs, surfaceDescription.NormalTS, surfaceData.normalWS, doubleSidedConstants);
-    $SurfaceDescription.NormalWS: GetNormalWS_SrcWS(fragInputs, surfaceDescription.NormalWS, surfaceData.normalWS, doubleSidedConstants);
+    ApplyDecalAndGetNormal(fragInputs, posInput, surfaceDescription, surfaceData);
 
     surfaceData.geomNormalWS = fragInputs.tangentToWorld[2];
 
@@ -96,31 +101,26 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     $SurfaceDescription.TangentTS: surfaceData.tangentWS = TransformTangentToWorld(surfaceDescription.TangentTS, fragInputs.tangentToWorld);
     $SurfaceDescription.TangentWS: surfaceData.tangentWS = surfaceDescription.TangentWS;
 
-    #if HAVE_DECALS
-        if (_EnableDecals)
-        {
-            float alpha = 1.0;
-            $SurfaceDescription.Alpha: alpha = surfaceDescription.Alpha;
-
-            // Both uses and modifies 'surfaceData.normalWS'.
-            DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, fragInputs, alpha);
-            ApplyDecalToSurfaceData(decalSurfaceData, fragInputs.tangentToWorld[2], surfaceData);
-        }
-    #endif
-
     bentNormalWS = surfaceData.normalWS;
     $BentNormal: GetNormalWS(fragInputs, surfaceDescription.BentNormal, bentNormalWS, doubleSidedConstants);
 
     surfaceData.tangentWS = Orthonormalize(surfaceData.tangentWS, surfaceData.normalWS);
 
     #ifdef DEBUG_DISPLAY
+    #if !defined(SHADER_STAGE_RAY_TRACING)
+        // Mipmap mode debugging isn't supported with ray tracing as it relies on derivatives
         if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
         {
-            // TODO: need to update mip info
+            #ifdef FRAG_INPUTS_USE_TEXCOORD0
+                surfaceData.baseColor = GET_TEXTURE_STREAMING_DEBUG(posInput.positionSS, fragInputs.texCoord0);
+            #else
+                surfaceData.baseColor = GET_TEXTURE_STREAMING_DEBUG_NO_UV(posInput.positionSS);
+            #endif
             surfaceData.metallic = 0;
         }
+    #endif
 
-        // We need to call ApplyDebugToSurfaceData after filling the surfarcedata and before filling builtinData
+        // We need to call ApplyDebugToSurfaceData after filling the surfaceData and before filling builtinData
         // as it can modify attribute use for static lighting
         ApplyDebugToSurfaceData(fragInputs.tangentToWorld, surfaceData);
     #endif

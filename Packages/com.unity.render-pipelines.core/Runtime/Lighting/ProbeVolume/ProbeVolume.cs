@@ -6,8 +6,9 @@ namespace UnityEngine.Rendering
     /// <summary>
     /// A marker to determine what area of the scene is considered by the Probe Volumes system
     /// </summary>
+    [CoreRPHelpURL("probevolumes-options-override-reference", "com.unity.render-pipelines.high-definition")]
     [ExecuteAlways]
-    [AddComponentMenu("Light/Probe Volume")]
+    [AddComponentMenu("Rendering/Adaptive Probe Volume")]
     public partial class ProbeVolume : MonoBehaviour
     {
         /// <summary>Indicates which renderers should be considerer for the Probe Volume bounds when baking</summary>
@@ -25,7 +26,7 @@ namespace UnityEngine.Rendering
         /// If is a global bolume
         /// </summary>
         [Tooltip("When set to Global this Probe Volume considers all renderers with Contribute Global Illumination enabled. Local only considers renderers in the scene.\nThis list updates every time the Scene is saved or the lighting is baked.")]
-        public Mode mode = Mode.Scene;
+        public Mode mode = Mode.Local;
 
         /// <summary>
         /// The size
@@ -59,7 +60,7 @@ namespace UnityEngine.Rendering
         /// The highest subdivision level override
         /// </summary>
         [HideInInspector]
-        public int highestSubdivLevelOverride = -1;
+        public int highestSubdivLevelOverride = ProbeBrickIndex.kMaxSubdivisionLevels;
 
         /// <summary>
         /// If the subdivision levels need to be overriden
@@ -72,9 +73,9 @@ namespace UnityEngine.Rendering
         [SerializeField] internal Matrix4x4 cachedTransform;
         [SerializeField] internal int cachedHashCode;
 
-        /// <summary>Whether spaces with no renderers need to be filled with bricks at lowest subdivision level.</summary>
+        /// <summary>Whether spaces with no renderers need to be filled with bricks at highest subdivision level.</summary>
         [HideInInspector]
-        [Tooltip("Whether HDRP should fill empty space between renderers with bricks at the lowest subdivision level.")]
+        [Tooltip("Whether Unity should fill empty space between renderers with bricks at the highest subdivision level.")]
         public bool fillEmptySpaces = false;
 
 #if UNITY_EDITOR
@@ -85,6 +86,11 @@ namespace UnityEngine.Rendering
         public Vector3 GetExtents()
         {
             return size;
+        }
+
+        public Matrix4x4 GetVolume()
+        {
+            return Matrix4x4.TRS(transform.position, transform.rotation, GetExtents());
         }
 
         internal Bounds ComputeBounds(GIContributors.ContributorFilter filter, Scene? scene = null)
@@ -116,18 +122,8 @@ namespace UnityEngine.Rendering
 
         internal void UpdateGlobalVolume(GIContributors.ContributorFilter filter)
         {
-            var scene = gameObject.scene;
-
-            // Get minBrickSize from scene profile if available
             float minBrickSize = ProbeReferenceVolume.instance.MinBrickSize();
-            if (ProbeReferenceVolume.instance.sceneData != null)
-            {
-                var profile = ProbeReferenceVolume.instance.sceneData.GetBakingSetForScene(scene);
-                if (profile != null)
-                    minBrickSize = profile.minBrickSize;
-            }
-
-            var bounds = ComputeBounds(filter, scene);
+            var bounds = ComputeBounds(filter, gameObject.scene);
             transform.position = bounds.center;
             size = Vector3.Max(bounds.size + new Vector3(minBrickSize, minBrickSize, minBrickSize), Vector3.zero);
         }
@@ -168,16 +164,18 @@ namespace UnityEngine.Rendering
             return hash;
         }
 
-        internal float GetMinSubdivMultiplier()
+        internal void GetSubdivisionOverride(int maxSubdivisionLevel, out int minLevel, out int maxLevel)
         {
-            float maxSubdiv = ProbeReferenceVolume.instance.GetMaxSubdivision() - 1;
-            return overridesSubdivLevels ? Mathf.Clamp(lowestSubdivLevelOverride / maxSubdiv, 0.0f, 1.0f) : 0.0f;
-        }
-
-        internal float GetMaxSubdivMultiplier()
-        {
-            float maxSubdiv = ProbeReferenceVolume.instance.GetMaxSubdivision() - 1;
-            return overridesSubdivLevels ? Mathf.Clamp(highestSubdivLevelOverride / maxSubdiv, 0.0f, 1.0f) : 1.0f;
+            if (overridesSubdivLevels)
+            {
+                maxLevel = Mathf.Min(highestSubdivLevelOverride, maxSubdivisionLevel);
+                minLevel = Mathf.Min(lowestSubdivLevelOverride, maxLevel);
+            }
+            else
+            {
+                maxLevel = maxSubdivisionLevel;
+                minLevel = 0;
+            }
         }
 
         // Momentarily moving the gizmo rendering for bricks and cells to Probe Volume itself,
@@ -212,24 +210,33 @@ namespace UnityEngine.Rendering
         // Only the first PV of the available ones will draw gizmos.
         bool IsResponsibleToDrawGizmo() => instances.Count > 0 && instances[0] == this;
 
-        internal bool ShouldCullCell(Vector3 cellPosition, Vector3 originWS = default(Vector3))
+        internal bool ShouldCullCell(Vector3 cellPosition)
         {
             var cellSizeInMeters = ProbeReferenceVolume.instance.MaxBrickSize();
+            var probeOffset = ProbeReferenceVolume.instance.ProbeOffset() + ProbeVolumeDebug.currentOffset;
             var debugDisplay = ProbeReferenceVolume.instance.probeVolumeDebug;
             if (debugDisplay.realtimeSubdivision)
             {
-                var profile = ProbeReferenceVolume.instance.sceneData.GetBakingSetForScene(gameObject.scene);
-                if (profile == null)
+                var bakingSet = ProbeVolumeBakingSet.GetBakingSetForScene(gameObject.scene);
+                if (bakingSet == null)
                     return true;
-                cellSizeInMeters = profile.cellSizeInMeters;
-            }
 
-            if (Camera.current == null)
+                // Use the non-backed data to display real-time info
+                cellSizeInMeters = ProbeVolumeBakingSet.GetMinBrickSize(bakingSet.minDistanceBetweenProbes) * ProbeVolumeBakingSet.GetCellSizeInBricks(bakingSet.simplificationLevels);
+                probeOffset = bakingSet.probeOffset + ProbeVolumeDebug.currentOffset;
+            }
+            Camera activeCamera = Camera.current;
+#if UNITY_EDITOR
+            if (activeCamera == null)
+                activeCamera = UnityEditor.SceneView.lastActiveSceneView.camera;
+#endif
+
+            if (activeCamera == null)
                 return true;
 
-            var cameraTransform = Camera.current.transform;
+            var cameraTransform = activeCamera.transform;
 
-            Vector3 cellCenterWS = cellPosition * cellSizeInMeters + originWS + Vector3.one * (cellSizeInMeters / 2.0f);
+            Vector3 cellCenterWS = probeOffset + cellPosition * cellSizeInMeters + Vector3.one * (cellSizeInMeters / 2.0f);
 
             // Round down to cell size distance
             float roundedDownDist = Mathf.Floor(Vector3.Distance(cameraTransform.position, cellCenterWS) / cellSizeInMeters) * cellSizeInMeters;
@@ -237,7 +244,7 @@ namespace UnityEngine.Rendering
             if (roundedDownDist > ProbeReferenceVolume.instance.probeVolumeDebug.subdivisionViewCullingDistance)
                 return true;
 
-            var frustumPlanes = GeometryUtility.CalculateFrustumPlanes(Camera.current);
+            var frustumPlanes = GeometryUtility.CalculateFrustumPlanes(activeCamera);
             var volumeAABB = new Bounds(cellCenterWS, cellSizeInMeters * Vector3.one);
 
             return !GeometryUtility.TestPlanesAABB(frustumPlanes, volumeAABB);
@@ -258,22 +265,24 @@ namespace UnityEngine.Rendering
         {
             Gizmos.DrawIcon(transform.position, s_gizmosLocationPath + "ProbeVolume.png", true);
 
-            if (!ProbeReferenceVolume.instance.isInitialized || !IsResponsibleToDrawGizmo() || ProbeReferenceVolume.instance.sceneData == null)
+            if (!ProbeReferenceVolume.instance.isInitialized || !IsResponsibleToDrawGizmo())
                 return;
 
             var debugDisplay = ProbeReferenceVolume.instance.probeVolumeDebug;
 
-            var cellSizeInMeters = ProbeReferenceVolume.instance.MaxBrickSize();
             float minBrickSize = ProbeReferenceVolume.instance.MinBrickSize();
+            var cellSizeInMeters = ProbeReferenceVolume.instance.MaxBrickSize();
+            var probeOffset = ProbeReferenceVolume.instance.ProbeOffset() + ProbeVolumeDebug.currentOffset;
             if (debugDisplay.realtimeSubdivision)
             {
-                var profile = ProbeReferenceVolume.instance.sceneData.GetBakingSetForScene(gameObject.scene);
-                if (profile == null)
+                var bakingSet = ProbeVolumeBakingSet.GetBakingSetForScene(gameObject.scene);
+                if (bakingSet == null)
                     return;
 
                 // Overwrite settings with data from profile
-                cellSizeInMeters = profile.cellSizeInMeters;
-                minBrickSize = profile.minBrickSize;
+                minBrickSize = ProbeVolumeBakingSet.GetMinBrickSize(bakingSet.minDistanceBetweenProbes);
+                cellSizeInMeters = ProbeVolumeBakingSet.GetCellSizeInBricks(bakingSet.simplificationLevels) * minBrickSize;
+                probeOffset = bakingSet.probeOffset;
             }
 
             if (debugDisplay.drawBricks)
@@ -302,7 +311,7 @@ namespace UnityEngine.Rendering
                             if (!cell.loaded)
                                 continue;
 
-                            if (ShouldCullCell(cell.desc.position, ProbeReferenceVolume.instance.GetTransform().posWS))
+                            if (ShouldCullCell(cell.desc.position))
                                 continue;
 
                             if (cell.data.bricks == null)
@@ -325,7 +334,7 @@ namespace UnityEngine.Rendering
 
                     float brickSize = minBrickSize * ProbeReferenceVolume.CellSize(brick.subdivisionLevel);
                     Vector3 scaledSize = new Vector3(brickSize, brickSize, brickSize);
-                    Vector3 scaledPos = new Vector3(brick.position.x * minBrickSize, brick.position.y * minBrickSize, brick.position.z * minBrickSize) + scaledSize / 2;
+                    Vector3 scaledPos = probeOffset + new Vector3(brick.position.x * minBrickSize, brick.position.y * minBrickSize, brick.position.z * minBrickSize) + scaledSize / 2;
                     brickGizmos.AddWireCube(scaledPos, scaledSize, subdivColors[brick.subdivisionLevel]);
                 }
 
@@ -338,6 +347,7 @@ namespace UnityEngine.Rendering
                 {
                     Color s_LoadedColor = new Color(0, 1, 0.5f, 0.2f);
                     Color s_UnloadedColor = new Color(1, 0.0f, 0.0f, 0.2f);
+                    Color s_StreamingColor = new Color(0.0f, 0.0f, 1.0f, 0.2f);
                     Color s_LowScoreColor = new Color(0, 0, 0, 0.2f);
                     Color s_HighScoreColor = new Color(1, 1, 0, 0.2f);
 
@@ -358,27 +368,29 @@ namespace UnityEngine.Rendering
                     {
                         foreach (var cell in ProbeReferenceVolume.instance.cells.Values)
                         {
-                            if (ShouldCullCell(cell.desc.position, prv.GetTransform().posWS))
+                            if (ShouldCullCell(cell.desc.position))
                                 continue;
 
                             var positionF = new Vector4(cell.desc.position.x, cell.desc.position.y, cell.desc.position.z, 0.0f);
                             var output = new CellDebugData();
-                            output.center = positionF * cellSizeInMeters + cellSizeInMeters * 0.5f * Vector4.one;
+                            output.center = (Vector4)probeOffset + positionF * cellSizeInMeters + cellSizeInMeters * 0.5f * Vector4.one;
                             if (debugDisplay.displayCellStreamingScore)
                             {
-                                float lerpFactor = (cell.streamingScore - minStreamingScore) / streamingScoreRange;
+                                float lerpFactor = (cell.streamingInfo.streamingScore - minStreamingScore) / streamingScoreRange;
                                 output.color = Color.Lerp(s_HighScoreColor, s_LowScoreColor, lerpFactor);
                             }
                             else
                             {
-                                output.color = cell.loaded ? s_LoadedColor : s_UnloadedColor;
+                                if (cell.streamingInfo.IsStreaming())
+                                    output.color = s_StreamingColor;
+                                else
+                                    output.color = cell.loaded ? s_LoadedColor : s_UnloadedColor;
                             }
                             yield return output;
                         }
                     }
                 }
 
-                Matrix4x4 trs = Matrix4x4.TRS(ProbeReferenceVolume.instance.GetTransform().posWS, ProbeReferenceVolume.instance.GetTransform().rot, Vector3.one);
                 var oldGizmoMatrix = Gizmos.matrix;
 
                 if (cellGizmo == null)
@@ -387,7 +399,7 @@ namespace UnityEngine.Rendering
                 foreach (var cell in GetVisibleCellDebugData())
                 {
                     Gizmos.color = cell.color;
-                    Gizmos.matrix = trs;
+                    Gizmos.matrix = Matrix4x4.identity;
 
                     Gizmos.DrawCube(cell.center, Vector3.one * cellSizeInMeters);
                     var wireColor = cell.color;

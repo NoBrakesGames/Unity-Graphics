@@ -14,74 +14,50 @@ namespace UnityEngine.Rendering.HighDefinition
         public bool foam = false;
 
         /// <summary>
-        /// Defines the resolution of the internal foam texture.
-        /// </summary>
-        public enum WaterFoamResolution
-        {
-            /// <summary>
-            /// The water foam is rendered in a 256x256 texture.
-            /// </summary>
-            Resolution256 = 256,
-            /// <summary>
-            /// The water foam is rendered in a 512x512 texture.
-            /// </summary>
-            Resolution512 = 512,
-            /// <summary>
-            /// The water foam is rendered in a 1024x1024 texture.
-            /// </summary>
-            Resolution1024 = 1024,
-            /// <summary>
-            /// The water foam is rendered in a 2048x2048 texture.
-            /// </summary>
-            Resolution2048 = 2048,
-        }
-
-        /// <summary>
         /// Specifies the resolution of the foam texture.
         /// </summary>
         [Tooltip("Specifies the resolution of the foam texture.")]
-        public WaterFoamResolution foamResolution = WaterFoamResolution.Resolution512;
-
-        /// <summary>
-        /// Specifies the size of the foam area in meters.
-        /// </summary>
-        [Tooltip("Specifies the size of the foam area in meters.")]
-        public Vector2 foamAreaSize = new Vector2(200.0f, 200.0f);
-
-        /// <summary>
-        /// Specifies the offset of the foam area in meters.
-        /// </summary>
-        [Tooltip("Specifies the offset of the foam area in meters.")]
-        public Vector2 foamAreaOffset = new Vector2(0.0f, 0.0f);
+        public WaterDecalRegionResolution foamResolution = WaterDecalRegionResolution.Resolution512;
 
         /// <summary>
         /// Specifies the foam persistence multiplier. A higher value will lead to the foam remaining visible longer.
         /// </summary>
-        [Tooltip("Specifies the foam persistence multiplier. A higher value will lead to the foam remaining visible longer.")]
+        [Range(0.0f, 1.0f)]
         public float foamPersistenceMultiplier = 0.5f;
+
+        /// <summary>
+        /// Specifies the influence of current on foam.
+        /// </summary>
+        [Range(0.0f, 1.0f)]
+        public float foamCurrentInfluence = 0.6f;
+
+        /// <summary>
+        /// Set the foam color.
+        /// </summary>
+        public Color foamColor = Color.white;
 
         /// <summary>
         /// Set the per meter tiling for the foam texture.
         /// </summary>
-        [Tooltip("Set the per meter tiling for the foam texture.")]
+        [Min(0.0f)]
         public float foamTextureTiling = 0.2f;
 
         /// <summary>
         /// Controls the surface foam smoothness.
         /// </summary>
-        [Tooltip("Controls the surface foam smoothness.")]
+        [Range(0.0f, 1.0f)]
         public float foamSmoothness = 0.3f;
-
-        /// <summary>
-        /// When enabled, the water surface will receive foam from the simulation on the crest of the waves.
-        /// </summary>
-        public bool simulationFoam = true;
 
         /// <summary>
         /// Controls the simulation foam amount. Higher values generate larger foam patches. Foam presence is highly dependent on the wind speed and choppiness values.
         /// </summary>
-        [Tooltip("Controls the simulation foam amount. Higher values generate larger foam patches. Foam presence is highly dependent on the wind speed and choppiness values.")]
+        [Range(0.0f, 1.0f)]
         public float simulationFoamAmount = 0.3f;
+
+        /// <summary>
+        /// Set the texture used to attenuate or suppress the simulation foam.
+        /// </summary>
+        public bool supportSimulationFoamMask = false;
 
         /// <summary>
         /// Set the texture used to attenuate or suppress the simulation foam.
@@ -104,11 +80,23 @@ namespace UnityEngine.Rendering.HighDefinition
         public AnimationCurve simulationFoamWindCurve = new AnimationCurve(new Keyframe(0f, 0.0f), new Keyframe(0.2f, 0.0f), new Keyframe(0.3f, 1.0f), new Keyframe(1.0f, 1.0f));
         #endregion
 
+        /// <summary>
+        /// Function that returns the foam buffer for the water surface. If the feature is disabled or the resource is not available the function returns null.
+        /// </summary>
+        /// <param name="foamArea">Output parameter that returns the size of the foam region.</param>
+        /// <seealso cref="WaterSurface.GetDecalRegion"/>
+        /// <returns>An RG texture that holds the surface foam (red channel) and deep foam (green channel) of the water surface.</returns>
+        public Texture GetFoamBuffer(out Vector2 foamArea)
+        {
+            foamArea = decalRegionSize;
+            return GetFoamBuffer(HDRenderPipeline.currentPipeline?.waterSystem, true);
+        }
+
         // GPU foam data
         internal RTHandle[] foamBuffers = new RTHandle[2];
-        internal float4 previousFoamData;
+        internal float4 previousFoamRegionScaleOffset;
 
-        internal void CheckFoamResources()
+        internal void CheckFoamResources(CommandBuffer cmd)
         {
             if (foam)
             {
@@ -120,8 +108,11 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 if (foamBuffers[0] == null)
                 {
-                    foamBuffers[0] = RTHandles.Alloc(resolution, resolution, 1, dimension: TextureDimension.Tex2D, colorFormat: GraphicsFormat.R16G16_SFloat, enableRandomWrite: true, wrapMode: TextureWrapMode.Clamp);
-                    foamBuffers[1] = RTHandles.Alloc(resolution, resolution, 1, dimension: TextureDimension.Tex2D, colorFormat: GraphicsFormat.R16G16_SFloat, enableRandomWrite: true, wrapMode: TextureWrapMode.Clamp);
+                    foamBuffers[0] = RTHandles.Alloc(resolution, resolution, 1, dimension: TextureDimension.Tex2D, colorFormat: GraphicsFormat.R16G16_SFloat, enableRandomWrite: true, wrapMode: TextureWrapMode.Clamp, name: "Water Foam");
+                    foamBuffers[1] = RTHandles.Alloc(resolution, resolution, 1, dimension: TextureDimension.Tex2D, colorFormat: GraphicsFormat.R16G16_SFloat, enableRandomWrite: true, wrapMode: TextureWrapMode.Clamp, name: "Water Foam Tmp");
+
+                    // Clear buffer 0 only
+                    CoreUtils.SetRenderTarget(cmd, foamBuffers[0], ClearFlag.Color, Color.black);
                 }
             }
             else
@@ -143,7 +134,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         internal bool HasSimulationFoam()
         {
-            return foam && simulationFoam && surfaceType != WaterSurfaceType.Pool;
+            return foam && simulationFoamAmount > 0.0f && surfaceType != WaterSurfaceType.Pool;
         }
 
         internal RTHandle FoamBuffer()
@@ -154,6 +145,11 @@ namespace UnityEngine.Rendering.HighDefinition
         internal RTHandle TmpFoamBuffer()
         {
             return foamBuffers[1];
+        }
+
+        internal Texture GetFoamBuffer(WaterSystem system, bool frameSetting, Texture defaultValue = null)
+        {
+            return frameSetting && system != null && system.HasActiveFoam() && foam ? FoamBuffer() : defaultValue;
         }
     }
 }

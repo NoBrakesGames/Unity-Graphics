@@ -8,22 +8,29 @@ namespace UnityEngine.Rendering
     {
         static class Styles
         {
-            public static readonly GUIContent enableDilation = new GUIContent("Enable Dilation", "Replace invalid probe data with valid data from neighboring probes during baking.");
+            public static readonly GUIContent enableDilation = new GUIContent("Dilation", "Replace invalid probe data with valid data from neighboring probes during baking.");
             public static readonly GUIContent dilationDistance = new GUIContent("Search Radius", "How far to search from invalid probes when looking for valid neighbors. Higher values include more distant probes which may be unwanted.");
             public static readonly GUIContent dilationValidity = new GUIContent("Validity Threshold", "The threshold of backfaces seen by probes before they are invalidated during baking. Higher values mean the probe is more likely to be marked invalid.");
             public static readonly GUIContent dilationIterationCount = new GUIContent("Dilation Iterations", "The number of times Unity repeats the Dilation calculation. This will cause the area of dilation to grow.");
             public static readonly GUIContent dilationSquaredDistanceWeighting = new GUIContent("Squared Distance Weighting", "During dilation, weight the contribution of neighbouring probes by squared distance, rather than linear distance.");
-            public static readonly GUIContent useVirtualOffset = EditorGUIUtility.TrTextContent("Enable Virtual Offset", "Push invalid probes outside of geometry to prevent backface hits. Produces better visual results than Dilation, but increases baking times.");
+            public static readonly GUIContent useVirtualOffset = EditorGUIUtility.TrTextContent("Virtual Offset", "Push invalid probes outside of geometry to prevent backface hits. Produces better visual results than Dilation, but increases baking times.");
+            public static readonly GUIContent virtualOffsetThreshold = EditorGUIUtility.TrTextContent("Validity Threshold", "The threshold of backfaces or sky seen by probes before virtual offset is applied. Higher values mean probes are more likely to be offseted.");
             public static readonly GUIContent virtualOffsetSearchMultiplier = EditorGUIUtility.TrTextContent("Search Distance Multiplier", "Determines the length of the sampling ray Unity uses to search for valid probe positions.");
             public static readonly GUIContent virtualOffsetBiasOutGeometry = EditorGUIUtility.TrTextContent("Geometry Bias", "Determines how far Unity pushes a probe out of geometry after a ray hit.");
             public static readonly GUIContent virtualOffsetRayOriginBias = EditorGUIUtility.TrTextContent("Ray Origin Bias", "Distance from the probe position used to determine the origin of the sampling ray.");
-            public static readonly GUIContent virtualOffsetMaxHitsPerRay = EditorGUIUtility.TrTextContent("Max Ray Hits", "How many collisions to allow per ray before determining the Virtual Offset probe position.");
             public static readonly GUIContent virtualOffsetCollisionMask = EditorGUIUtility.TrTextContent("Layer Mask", "Layers to include in collision calculations for Virtual Offset.");
 
             public static readonly GUIContent dilationSettingsTitle = EditorGUIUtility.TrTextContent("Probe Dilation Settings");
             public static readonly GUIContent virtualOffsetSettingsTitle = EditorGUIUtility.TrTextContent("Virtual Offset Settings");
+        }
 
-            public static GUIStyle voButtonStyle = new GUIStyle(EditorStyles.miniButton);
+        static internal bool IndentedButton(GUIContent content)
+        {
+            GUILayout.BeginHorizontal();
+            EditorGUILayout.Space(15 * EditorGUI.indentLevel, false);
+            bool value = GUILayout.Button(content, EditorStyles.miniButton);
+            GUILayout.EndHorizontal();
+            return value;
         }
 
         // PropertyDrawer are not made to use GUILayout, so it will try to reserve a rect before calling OnGUI
@@ -40,13 +47,8 @@ namespace UnityEngine.Rendering
             // prefab override logic works on the entire property.
             EditorGUI.BeginProperty(position, label, property);
 
-            using (new EditorGUI.IndentLevelScope())
-                if (ProbeVolumeLightingTab.Foldout(Styles.dilationSettingsTitle, ProbeVolumeLightingTab.Expandable.SettingsDilation, false))
-                    DrawDilationSettings(dilationSettings);
-
-            using (new EditorGUI.IndentLevelScope())
-                if (ProbeVolumeLightingTab.Foldout(Styles.virtualOffsetSettingsTitle, ProbeVolumeLightingTab.Expandable.SettingsVirtualOffset, false))
-                    DrawVirtualOffsetSettings(virtualOffsetSettings);
+            DrawDilationSettings(dilationSettings);
+            DrawVirtualOffsetSettings(virtualOffsetSettings);
 
             EditorGUI.EndProperty();
         }
@@ -55,8 +57,10 @@ namespace UnityEngine.Rendering
         {
             var enableDilation = dilationSettings.FindPropertyRelative("enableDilation");
             EditorGUILayout.PropertyField(enableDilation, Styles.enableDilation);
+            if (!enableDilation.boolValue)
+                return;
 
-            using (new EditorGUI.DisabledScope(!enableDilation.boolValue))
+            using (new EditorGUI.IndentLevelScope())
             {
                 var maxDilationSampleDistance = dilationSettings.FindPropertyRelative("dilationDistance");
                 var dilationValidityThreshold = dilationSettings.FindPropertyRelative("dilationValidityThreshold");
@@ -72,14 +76,11 @@ namespace UnityEngine.Rendering
 
                 if (Unsupported.IsDeveloperMode())
                 {
-                    GUILayout.BeginHorizontal();
-                    EditorGUILayout.Space(15 * EditorGUI.indentLevel, false);
-                    if (GUILayout.Button(EditorGUIUtility.TrTextContent("Refresh Dilation"), EditorStyles.miniButton))
+                    if (IndentedButton(EditorGUIUtility.TrTextContent("Refresh Dilation")))
                     {
-                        ProbeGIBaking.RevertDilation();
-                        ProbeGIBaking.PerformDilation();
+                        AdaptiveProbeVolumes.RevertDilation();
+                        AdaptiveProbeVolumes.PerformDilation();
                     }
-                    GUILayout.EndHorizontal();
                 }
             }
         }
@@ -88,28 +89,27 @@ namespace UnityEngine.Rendering
         {
             var enableVirtualOffset = virtualOffsetSettings.FindPropertyRelative("useVirtualOffset");
             EditorGUILayout.PropertyField(enableVirtualOffset, Styles.useVirtualOffset);
+            if (!enableVirtualOffset.boolValue)
+                return;
 
-            using (new EditorGUI.DisabledScope(!enableVirtualOffset.boolValue))
+            using (new EditorGUI.IndentLevelScope())
             {
+                var validity = virtualOffsetSettings.FindPropertyRelative("validityThreshold");
                 var virtualOffsetGeometrySearchMultiplier = virtualOffsetSettings.FindPropertyRelative("searchMultiplier");
                 var virtualOffsetBiasOutOfGeometry = virtualOffsetSettings.FindPropertyRelative("outOfGeoOffset");
                 var virtualOffsetRayOriginBias = virtualOffsetSettings.FindPropertyRelative("rayOriginBias");
-                var virtualOffsetMaxHitsPerRay = virtualOffsetSettings.FindPropertyRelative("maxHitsPerRay");
                 var virtualOffsetCollisionMask = virtualOffsetSettings.FindPropertyRelative("collisionMask");
 
+                validity.floatValue = 1.0f - EditorGUILayout.Slider(Styles.virtualOffsetThreshold, 1.0f - validity.floatValue, 0f, 0.95f);
                 EditorGUILayout.PropertyField(virtualOffsetGeometrySearchMultiplier, Styles.virtualOffsetSearchMultiplier);
                 EditorGUILayout.PropertyField(virtualOffsetBiasOutOfGeometry, Styles.virtualOffsetBiasOutGeometry);
                 EditorGUILayout.PropertyField(virtualOffsetRayOriginBias, Styles.virtualOffsetRayOriginBias);
-                EditorGUILayout.PropertyField(virtualOffsetMaxHitsPerRay, Styles.virtualOffsetMaxHitsPerRay);
                 EditorGUILayout.PropertyField(virtualOffsetCollisionMask, Styles.virtualOffsetCollisionMask);
 
-                GUILayout.BeginHorizontal();
-                EditorGUILayout.Space(15 * EditorGUI.indentLevel, false);
-                if (GUILayout.Button(EditorGUIUtility.TrTextContent("Refresh Virtual Offset Debug", "Re-run the virtual offset simulation; it will be applied only for debug visualization sake and not affect baked data."), Styles.voButtonStyle))
+                if (IndentedButton(EditorGUIUtility.TrTextContent("Refresh Virtual Offset Debug", "Re-run the virtual offset simulation; it will be applied only for debug visualization sake and not affect baked data.")))
                 {
-                    ProbeGIBaking.RecomputeVOForDebugOnly();
+                    AdaptiveProbeVolumes.RecomputeVOForDebugOnly();
                 }
-                GUILayout.EndHorizontal();
             }
         }
     }

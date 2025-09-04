@@ -1,10 +1,9 @@
-using System;
-using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Math/Geometry")]
+    [VFXHelpURL("Operator-InvertTRS(Matrix)")]
+    [VFXInfo(name = "Transform (Matrix)", category = "Math/Geometry")]
     class TransformMatrix : VFXOperator
     {
         public class InputProperties

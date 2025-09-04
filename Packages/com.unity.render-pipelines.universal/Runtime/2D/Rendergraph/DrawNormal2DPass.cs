@@ -1,67 +1,71 @@
 using System;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule;
+using CommonResourceData = UnityEngine.Rendering.Universal.UniversalResourceData;
 
 namespace UnityEngine.Rendering.Universal
 {
     internal class DrawNormal2DPass : ScriptableRenderPass
     {
-        private static readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler("Normals2DPass");
-        private static readonly ProfilingSampler m_ExecuteProfilingSampler = new ProfilingSampler("Draw Normals");
+        static readonly string k_NormalPass = "Normal2D Pass";
+
+        private static readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(k_NormalPass);
         private static readonly ShaderTagId k_NormalsRenderingPassName = new ShaderTagId("NormalsRendering");
 
         private class PassData
         {
-            internal RenderingData renderingData;
-            internal FilteringSettings filterSettings;
-            internal DrawingSettings drawSettings;
+            internal RendererListHandle rendererList;
         }
 
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             throw new NotImplementedException();
         }
 
-        private static void Execute(ScriptableRenderContext context, PassData passData, ref RenderingData renderingData)
+        private static void Execute(RasterCommandBuffer cmd, PassData passData)
         {
-            var cmd = renderingData.commandBuffer;
-            using (new ProfilingScope(cmd, m_ExecuteProfilingSampler))
-            {
-                cmd.ClearRenderTarget(RTClearFlags.Color, RendererLighting.k_NormalClearColor, 1, 0);
-                context.ExecuteCommandBuffer(cmd);
-                cmd.Clear();
-
-                var param = new RendererListParams(renderingData.cullResults, passData.drawSettings, passData.filterSettings);
-                var rl = context.CreateRendererList(ref param);
-                cmd.DrawRendererList(rl);
-            }
+            cmd.DrawRendererList(passData.rendererList);
         }
 
-        public void Render(RenderGraph graph, ref RenderingData renderingData, ref LayerBatch layerBatch, in TextureHandle normalTexture, in TextureHandle depthTexture)
+        public void Render(RenderGraph graph, ContextContainer frameData, Renderer2DData rendererData, ref LayerBatch layerBatch, int batchIndex)
         {
-            if (!layerBatch.lightStats.useNormalMap)
+            Universal2DResourceData universal2DResourceData = frameData.Get<Universal2DResourceData>();
+            CommonResourceData commonResourceData = frameData.Get<CommonResourceData>();
+
+            if (!layerBatch.useNormals)
                 return;
 
-            using (var builder = graph.AddRenderPass<PassData>("Normals 2D Pass", out var passData, m_ProfilingSampler))
-            {
+            UniversalRenderingData renderingData = frameData.Get<UniversalRenderingData>();
+            UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+            UniversalLightData lightData = frameData.Get<UniversalLightData>();
 
-                var filterSettings = new FilteringSettings();
-                filterSettings.renderQueueRange = RenderQueueRange.all;
-                filterSettings.layerMask = -1;
-                filterSettings.renderingLayerMask = 0xFFFFFFFF;
-                filterSettings.sortingLayerRange = new SortingLayerRange(layerBatch.layerRange.lowerBound, layerBatch.layerRange.upperBound);
-                var drawSettings = CreateDrawingSettings(k_NormalsRenderingPassName, ref renderingData, SortingCriteria.CommonTransparent);
+            using (var builder = graph.AddRasterRenderPass<PassData>(k_NormalPass, out var passData, m_ProfilingSampler))
+            {
+                LayerUtility.GetFilterSettings(rendererData, ref layerBatch, out var filterSettings);
+
+                var drawSettings = CreateDrawingSettings(k_NormalsRenderingPassName, renderingData, cameraData, lightData, SortingCriteria.CommonTransparent);
+                var sortSettings = drawSettings.sortingSettings;
+                RendererLighting.GetTransparencySortingMode(rendererData, cameraData.camera, ref sortSettings);
+                drawSettings.sortingSettings = sortSettings;
 
                 builder.AllowPassCulling(false);
-                builder.UseColorBuffer(in normalTexture, 0);
-                builder.UseDepthBuffer(depthTexture, DepthAccess.Write);
 
-                passData.filterSettings = filterSettings;
-                passData.drawSettings = drawSettings;
-                passData.renderingData = renderingData;
+                builder.SetRenderAttachment(universal2DResourceData.normalsTexture[batchIndex], 0);
 
-                builder.SetRenderFunc((PassData data, RenderGraphContext context) =>
+                // Depth needed for sprite mask stencil or z test for 3d meshes
+                if (rendererData.useDepthStencilBuffer)
                 {
-                    Execute(context.renderContext, data, ref data.renderingData);
+                    var depth = universal2DResourceData.normalsDepth.IsValid() ? universal2DResourceData.normalsDepth : commonResourceData.activeDepthTexture;
+                    builder.SetRenderAttachmentDepth(depth);
+                }
+
+                var param = new RendererListParams(renderingData.cullResults, drawSettings, filterSettings);
+                passData.rendererList = graph.CreateRendererList(param);
+                builder.UseRendererList(passData.rendererList);
+
+                builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
+                {
+                    Execute(context.cmd, data);
                 });
             }
         }

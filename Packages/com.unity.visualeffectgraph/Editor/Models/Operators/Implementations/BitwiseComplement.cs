@@ -1,9 +1,9 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Bitwise")]
+    [VFXHelpURL("Operator-BitwiseComplement")]
+    [VFXInfo(name = "Complement", category = "Bitwise")]
     class BitwiseComplement : VFXOperator
     {
         override public string name { get { return "Complement"; } }

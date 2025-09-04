@@ -23,7 +23,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
+        [Range(WaterConsts.k_SwellMinPatchSize, WaterConsts.k_SwellMaxPatchSize)]
         public float repetitionSize = 500.0f;
 
         /// <summary>
@@ -34,16 +34,19 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         ///
         /// </summary>
+        [Range(0, WaterConsts.k_SwellMaximumWindSpeed)]
         public float largeWindSpeed = 30.0f;
 
         /// <summary>
         ///
         /// </summary>
+        [Range(0, 1.0f)]
         public float largeChaos = 0.8f;
 
         /// <summary>
         ///
         /// </summary>
+        [Range(0, 1.0f)]
         public float largeBand0Multiplier = 1.0f;
 
         /// <summary>
@@ -54,37 +57,32 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public float largeBand0FadeStart = 1500.0f;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public float largeBand0FadeDistance = 3000.0f;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
+        [Range(0, 1.0f)]
         public float largeBand1Multiplier = 1.0f;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public FadeMode largeBand1FadeMode = FadeMode.Automatic;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public float largeBand1FadeStart = 300.0f;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public float largeBand1FadeDistance = 800.0f;
         #endregion
 
@@ -97,136 +95,161 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public WaterPropertyOverrideMode ripplesMotionMode = WaterPropertyOverrideMode.Inherit;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public float ripplesOrientationValue = 0.0f;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
+        [Range(0, WaterConsts.k_RipplesMaxWindSpeed)]
         public float ripplesWindSpeed = 8.0f;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
+        [Range(0.0f, 1.0f)]
         public float ripplesChaos = 0.8f;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public FadeMode ripplesFadeMode = FadeMode.Automatic;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public float ripplesFadeStart = 50.0f;
 
         /// <summary>
         ///
         /// </summary>
-        [Tooltip("")]
         public float ripplesFadeDistance = 200.0f;
         #endregion
+
+        /// <summary>Used to sync different water surfaces simulation time, for example across network.</summary>
+        public DateTime simulationStart
+        {
+            get
+            {
+                float timeScale = Time.timeScale * timeMultiplier;
+                if (timeScale == 0.0f) timeScale = 1.0f;
+
+                return DateTime.Now - TimeSpan.FromSeconds(simulation != null ? simulation.simulationTime / timeScale : 0.0f);
+            }
+            set
+            {
+                TimeSpan elapsed = DateTime.Now - value;
+                if (simulation != null)
+                    simulation.simulationTime = (float)elapsed.TotalSeconds * Time.timeScale * timeMultiplier;
+            }
+        }
+
+        /// <summary>Current simulation time in seconds.</summary>
+        public float simulationTime
+        {
+            get
+            {
+                return simulation?.simulationTime ?? 0.0f;
+            }
+            set
+            {
+                if (simulation != null)
+                    simulation.simulationTime = value;
+            }
+        }
+
+        internal int numActiveBands => WaterSystem.EvaluateBandCount(surfaceType, ripples);
+
+        // Optional CPU simulation data
+        internal AsyncTextureSynchronizer<half4> displacementBufferSynchronizer = new AsyncTextureSynchronizer<half4>(GraphicsFormat.R16G16B16A16_SFloat);
 
         // Internal simulation data
         internal WaterSimulationResources simulation = null;
 
-        internal void CheckResources(int bandResolution, int bandCount, bool activeFoam, bool cpuSimActive, out bool gpuSpectrumValid, out bool cpuSpectrumValid, out bool historyValid)
+        internal void CheckResources(int bandResolution, bool gpuReadback)
         {
-            // By default we shouldn't need an update
-            gpuSpectrumValid = true;
-            cpuSpectrumValid = true;
-            historyValid = true;
+            int bandCount = numActiveBands;
+            bool foam = HasSimulationFoam();
 
             // If the previously existing resources are not valid, just release them
-            if (simulation != null && !simulation.ValidResources(bandResolution, bandCount))
+            if (simulation != null && !simulation.ValidResources(bandResolution, bandCount, foam))
             {
                 simulation.ReleaseSimulationResources();
                 simulation = null;
             }
 
             // Will we need to enable the CPU simulation?
-            bool cpuSimulationActive = cpuSimActive && cpuSimulation;
+            bool cpuSimulationActive = scriptInteractions && !gpuReadback;
 
             // If the resources have not been allocated for this water surface, allocate them
             if (simulation == null)
             {
-                // In this case the CPU buffers are invalid and we need to rebuild them
-                gpuSpectrumValid = false;
-                cpuSpectrumValid = false;
-                historyValid = false;
-
                 // Create the simulation resources
                 simulation = new WaterSimulationResources();
 
                 // Initialize for the allocation
-                simulation.InitializeSimulationResources(bandResolution, bandCount);
+                simulation.InitializeSimulationResources(bandResolution, bandCount, foam);
 
                 // GPU buffers should always be allocated
-                simulation.AllocateSimulationBuffersGPU(activeFoam);
+                simulation.AllocateSimulationBuffersGPU();
 
                 // CPU buffers should be allocated only if required
                 if (cpuSimulationActive)
                     simulation.AllocateSimulationBuffersCPU();
+
+                CreatePropertyBlock();
             }
 
-            // One more case that we need check here is that if the CPU became required
+            // If the resources are no longer used, release them
             if (!cpuSimulationActive && simulation.cpuBuffers != null)
             {
                 simulation.ReleaseSimulationBuffersCPU();
-                cpuSpectrumValid = false;
+                simulation.cpuSpectrumValid = false;
             }
 
             // One more case that we need check here is that if the CPU became required
             if (cpuSimulationActive && simulation.cpuBuffers == null)
             {
                 simulation.AllocateSimulationBuffersCPU();
-                cpuSpectrumValid = false;
+                simulation.cpuSpectrumValid = false;
             }
 
             // Evaluate the spectrum parameters
             WaterSpectrumParameters spectrum = EvaluateSpectrumParams(surfaceType);
 
-            if (simulation.spectrum.numActiveBands != spectrum.numActiveBands)
-            {
-                historyValid = false;
-            }
-
             // If the spectrum defining data changed, we need to invalidate the buffers
             if (simulation.spectrum != spectrum)
             {
                 // Mark the spectrums as invalid and assign the new one
-                gpuSpectrumValid = false;
-                cpuSpectrumValid = false;
+                simulation.gpuSpectrumValid = false;
+                simulation.cpuSpectrumValid = false;
                 simulation.spectrum = spectrum;
             }
 
             // TODO: Handle properly the change of resolution to be able to not do this every frame.
-            cpuSpectrumValid = false;
+            simulation.cpuSpectrumValid = false;
 
             // Re-evaluate the simulation data
             simulation.rendering = EvaluateRenderingParams(surfaceType);
         }
 
-        bool SpectrumParametersAreValid(WaterSpectrumParameters spectrum)
-        {
-            return (simulation.spectrum == spectrum);
-        }
-
-        internal static void EvaluateWaterSurfaceMatrices(bool instancedQuads, Vector3 position, Quaternion rotation, ref float4x4 waterToWorld, ref float4x4 worldToWater)
+        internal static void EvaluateWaterSurfaceMatrices(bool quad, bool customMesh, Vector3 position, Quaternion rotation, ref float4x4 waterToWorld, ref float4x4 worldToWater, ref float4x4 worldToWater2)
         {
             // Evaluate the right transform based on the type of surface
-            waterToWorld = instancedQuads ? Matrix4x4.Translate(new Vector3(0.0f, position.y, 0.0f)):  Matrix4x4.TRS(position, rotation, Vector3.one);
-            worldToWater = math.inverse(waterToWorld);
+            if (customMesh)
+            {
+                waterToWorld = worldToWater = Matrix4x4.identity;
+                worldToWater2 = math.inverse(Matrix4x4.TRS(position, rotation, Vector3.one));
+            }
+            else
+            {
+                waterToWorld = Matrix4x4.TRS(position, rotation, Vector3.one);
+                worldToWater = worldToWater2 = math.inverse(waterToWorld);
+            }
         }
 
         // Function that evaluates the spectrum data for the ocean/sea/lake case
@@ -241,10 +264,7 @@ namespace UnityEngine.Rendering.HighDefinition
                     float swellPatchSize = repetitionSize;
 
                     // We need to evaluate the radio between the first and second band
-                    float swellSecondBandRatio = HDRenderPipeline.EvaluateSwellSecondPatchSize(swellPatchSize);
-
-                    // Propagate the high frequency bands flag
-                    spectrum.numActiveBands = ripples ? 3 : 2;
+                    float swellSecondBandRatio = WaterSystem.EvaluateSwellSecondPatchSize(swellPatchSize);
 
                     // Set the patch groups
                     spectrum.patchGroup.x = 0;
@@ -257,8 +277,8 @@ namespace UnityEngine.Rendering.HighDefinition
                     spectrum.patchSizes.z = WaterConsts.k_RipplesBandSize;
 
                     // Keep track of the directionality is used
-                    float largeAngle = HDRenderPipeline.NormalizeAngle(largeOrientationValue);
-                    float ripplesAngle = HDRenderPipeline.NormalizeAngle(ripplesOrientationValue);
+                    float largeAngle = WaterSystem.NormalizeAngle(largeOrientationValue);
+                    float ripplesAngle = WaterSystem.NormalizeAngle(ripplesOrientationValue);
                     spectrum.patchOrientation.x = largeAngle;
                     spectrum.patchOrientation.y = largeAngle;
                     spectrum.patchOrientation.z = ripplesMotionMode == WaterPropertyOverrideMode.Inherit ? largeAngle : ripplesAngle;
@@ -280,9 +300,6 @@ namespace UnityEngine.Rendering.HighDefinition
                 break;
                 case WaterSurfaceType.River:
                 {
-                    // Propagate the high frequency bands flag
-                    spectrum.numActiveBands = ripples ? 2 : 1;
-
                     // Set the patch groups
                     spectrum.patchGroup.x = 0;
                     spectrum.patchGroup.y = ripplesMotionMode == WaterPropertyOverrideMode.Inherit ? 0 : 1;
@@ -296,8 +313,8 @@ namespace UnityEngine.Rendering.HighDefinition
                     spectrum.patchWindSpeed.y = ripplesWindSpeed * WaterConsts.k_KilometerPerHourToMeterPerSecond;
 
                     // Keep track of the directionality is used
-                    float largeAngle = HDRenderPipeline.NormalizeAngle(largeOrientationValue);
-                    float ripplesAngle = HDRenderPipeline.NormalizeAngle(ripplesOrientationValue);
+                    float largeAngle = WaterSystem.NormalizeAngle(largeOrientationValue);
+                    float ripplesAngle = WaterSystem.NormalizeAngle(ripplesOrientationValue);
                     spectrum.patchOrientation.x = largeAngle;
                     spectrum.patchOrientation.y = ripplesMotionMode == WaterPropertyOverrideMode.Inherit ? largeAngle : ripplesAngle;
 
@@ -312,9 +329,6 @@ namespace UnityEngine.Rendering.HighDefinition
                 break;
                 case WaterSurfaceType.Pool:
                 {
-                    // Propagate the high frequency bands flag
-                    spectrum.numActiveBands = 1;
-
                     // Set the patch groups
                     spectrum.patchGroup.x = 1;
 
@@ -325,7 +339,7 @@ namespace UnityEngine.Rendering.HighDefinition
                     spectrum.patchWindSpeed.x = ripplesWindSpeed * WaterConsts.k_KilometerPerHourToMeterPerSecond;
 
                     // Keep track of the directionality is used
-                    spectrum.patchOrientation.x = HDRenderPipeline.NormalizeAngle(ripplesOrientationValue);
+                    spectrum.patchOrientation.x = WaterSystem.NormalizeAngle(ripplesOrientationValue);
 
                     // Set the patch groups
                     spectrum.groupOrientation.x = spectrum.patchOrientation.x;
@@ -346,6 +360,7 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 rendering.patchFadeA[index] = 0.0f;
                 rendering.patchFadeB[index] = 1.0f;
+                rendering.maxFadeDistance = float.MaxValue;
             }
             else
             {
@@ -362,6 +377,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 rendering.patchFadeA[index] = -1.0f / Mathf.Max(customDistance, 0.001f);
                 rendering.patchFadeB[index] = 1.0f - customStart * rendering.patchFadeA[index];
+                rendering.maxFadeDistance = Mathf.Max(rendering.maxFadeDistance, customStart + customDistance);
             }
         }
 
@@ -371,6 +387,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
             // Propagate the simulation time to the rendering structure
             rendering.simulationTime = simulation.simulationTime;
+            rendering.maxFadeDistance = 0.0f;
 
             switch (type)
             {
@@ -390,7 +407,7 @@ namespace UnityEngine.Rendering.HighDefinition
                     // Fade parameters
                     ComputeDistanceFade(ref rendering, 0, largeBand0FadeMode, largeBand0FadeStart, largeBand0FadeDistance);
                     ComputeDistanceFade(ref rendering, 1, largeBand1FadeMode, largeBand1FadeStart, largeBand1FadeDistance);
-                    ComputeDistanceFade(ref rendering, 2, ripplesFadeMode, ripplesFadeStart, ripplesFadeDistance);
+                    if (ripples) ComputeDistanceFade(ref rendering, 2, ripplesFadeMode, ripplesFadeStart, ripplesFadeDistance);
                 }
                 break;
                 case WaterSurfaceType.River:
@@ -405,7 +422,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
                     // Fade parameters
                     ComputeDistanceFade(ref rendering, 0, largeBand0FadeMode, largeBand0FadeStart, largeBand0FadeDistance);
-                    ComputeDistanceFade(ref rendering, 1, ripplesFadeMode, ripplesFadeStart, ripplesFadeDistance);
+                    if (ripples) ComputeDistanceFade(ref rendering, 1, ripplesFadeMode, ripplesFadeStart, ripplesFadeDistance);
                 }
                 break;
                 case WaterSurfaceType.Pool:
@@ -424,14 +441,16 @@ namespace UnityEngine.Rendering.HighDefinition
             }
 
             // Make sure the matrices are evaluated
-            EvaluateWaterSurfaceMatrices(IsInstancedQuads(), transform.position, transform.rotation, ref rendering.waterToWorldMatrix, ref rendering.worldToWaterMatrix);
+            EvaluateWaterSurfaceMatrices(IsQuad(), IsCustomMesh(), transform.position, transform.rotation, ref rendering.waterToWorldMatrix, ref rendering.worldToWaterMatrix, ref rendering.worldToWaterMatrixCustom);
             return rendering;
         }
 
         internal void ReleaseSimulationResources()
         {
+            displacementBufferSynchronizer.ReleaseATSResources();
+
             // Make sure to release the resources if they have been created (before HDRP destroys them)
-            if (simulation != null && simulation.AllocatedTextures())
+            if (simulation != null)
                 simulation.ReleaseSimulationResources();
             simulation = null;
         }

@@ -1,13 +1,11 @@
-using System;
 using UnityEngine;
 
 namespace UnityEditor.VFX.Operator
 {
-    [VFXInfo(category = "Spawn")]
+    [VFXHelpURL("Operator-SpawnState")]
+    [VFXInfo(name = "Spawn Context State", category = "Spawn")]
     class SpawnState : VFXOperator
     {
-        public override string libraryName => "Spawn Context State";
-
         public override string name => "Spawn State";
 
         public class OutputProperties

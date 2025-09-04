@@ -1,13 +1,14 @@
 using System;
-using Unity.Mathematics;
 using System.Collections.Generic;
 using UnityEditor;
-using UnityEngine.Experimental.Rendering;
-using static Unity.Mathematics.math;
-using Unity.Collections;
+using Unity.Mathematics;
+using UnityEngine.Serialization;
+
 #if UNITY_EDITOR
 using UnityEditor.SceneManagement;
 #endif
+
+using static Unity.Mathematics.math;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -78,12 +79,14 @@ namespace UnityEngine.Rendering.HighDefinition
     /// <summary>
     /// Water surface component.
     /// </summary>
+    [HDRPHelpURL("water")]
     [DisallowMultipleComponent]
     [ExecuteInEditMode]
     public partial class WaterSurface : MonoBehaviour
     {
         #region Instance Management
         // Management to avoid memory allocations at fetch time
+        // NOTE: instances tracks active instances, disabled instances can exist and are not included.
         internal static HashSet<WaterSurface> instances = new HashSet<WaterSurface>();
         internal static WaterSurface[] instancesAsArray = null;
         internal static int instanceCount = 0;
@@ -138,19 +141,16 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Sets the speed of the water simulation. This allows to slow down the waves' speed or to accelerate it.
         /// </summary>
+        [Range(0, 10)]
         public float timeMultiplier = 1.0f;
         #endregion
 
         #region Water CPU Simulation
         /// <summary>
-        /// When enabled, HDRP will evaluate the water simulation on the CPU for C# script requests. Enabling this will significantly increase the CPU cost of the feature.
+        /// When enabled, the Water System allows you to make height requests from a C# script.
         /// </summary>
-        public bool cpuSimulation = false;
-
-        /// <summary>
-        /// Specifies if the CPU simulation should be evaluated at full or half resolution. When in full resolution, the visual fidelity will be higher but the cost of the simulation will increase.
-        /// </summary>
-        public bool cpuFullResolution = false;
+        [Tooltip("When enabled, the Water System allows you to make height requests from a C# script."), FormerlySerializedAs("cpuSimulation")]
+        public bool scriptInteractions = false;
 
         /// <summary>
         /// Specifies if the CPU simulation should evaluate the ripples as part of the simulation. Including ripples will allow a higher visual fidelity but the cost of the simulation will increase.
@@ -183,6 +183,37 @@ namespace UnityEngine.Rendering.HighDefinition
         ///
         /// </summary>
         public float smoothnessFadeDistance = 500.0f;
+
+        /// <summary>
+        /// Use hardware tessellation when rendering the water surface
+        /// </summary>
+        [Tooltip("When enabled, HDRP activates tessellation for this Water Surface.\nThis improves the visual quality but may have a significant performance cost depending on the platform.")]
+        public bool tessellation = true;
+
+        /// <summary>
+        /// Sets the maximum tessellation factor for the water surface.
+        /// </summary>
+        [Range(0.0f, 10.0f), Tooltip("Sets the maximum tessellation factor for the water surface.")]
+        public float maxTessellationFactor = 3.0f;
+
+        /// <summary>
+        /// Sets the distance at which the tessellation factor start to lower.
+        /// </summary>
+        [Min(0.0f), Tooltip(" Sets the distance at which the tessellation factor start to lower.")]
+        public float tessellationFactorFadeStart = 150.0f;
+
+        /// <summary>
+        /// Sets the range at which the tessellation factor reaches zero.
+        /// </summary>
+        [Min(0.0f), Tooltip("Sets the range at which the tessellation factor reaches zero.")]
+        public float tessellationFactorFadeRange = 1850.0f;
+
+#if UNITY_EDITOR
+        static internal bool IsWaterMaterial(Material material)
+        {
+            return material.shader.FindSubshaderTagValue(0, (ShaderTagId)"ShaderGraphTargetId").name == "WaterSubTarget";
+        }
+#endif
         #endregion
 
         #region Water Refraction
@@ -196,14 +227,17 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Controls the maximum distance in meters used to clamp the underwater refraction depth. Higher value increases the distortion amount.
         /// </summary>
-        [Tooltip("Controls the maximum distance in meters used to clamp the underwater refraction depth. Higher value increases the distortion amount.")]
+        [Range(0.0f, 3.5f), Tooltip("Controls the maximum distance in meters used to clamp the underwater refraction depth. Higher value increases the distortion amount.")]
         public float maxRefractionDistance = 1.0f;
 
         /// <summary>
         /// Controls the approximative distance in meters that the camera can perceive through a water surface. This distance can vary widely depending on the intensity of the light the object receives.
         /// </summary>
-        [Tooltip("Controls the approximative distance in meters that the camera can perceive through a water surface. This distance can vary widely depending on the intensity of the light the object receives.")]
+        [Range(0.001f, 100.0f), Tooltip("Controls the approximative distance in meters that the camera can perceive through a water surface. This distance can vary widely depending on the intensity of the light the object receives.")]
         public float absorptionDistance = 5.0f;
+
+        internal Vector3 extinction => (-Mathf.Log(0.02f) / absorptionDistance) * new Vector3(Mathf.Max(1.0f - refractionColor.r, 0.01f), Mathf.Max(1.0f - refractionColor.g, 0.01f), Mathf.Max(1.0f - refractionColor.b, 0.01f));
+        internal Vector3 underWaterExtinction => extinction / absorptionDistanceMultiplier;
         #endregion
 
         #region Water Scattering
@@ -217,37 +251,37 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Controls the intensity of the ambient scattering term. This can be adjusted for artistic purposes.
         /// </summary>
-        [Tooltip("Controls the intensity of the height based scattering. The higher the vertical displacement, the more the water receives scattering. This can be adjusted for artistic purposes.")]
+        [Range(0.0f, 1.0f), Tooltip("Controls the intensity of the height based scattering. The higher the vertical displacement, the more the water receives scattering. This can be adjusted for artistic purposes.")]
         public float ambientScattering = 0.1f;
 
         /// <summary>
         /// Controls the intensity of the height based scattering. The higher the vertical displacement, the more the water receives scattering. This can be adjusted for artistic purposes.
         /// </summary>
-        [Tooltip("Controls the intensity of the height based scattering. The higher the vertical displacement, the more the water receives scattering. This can be adjusted for artistic purposes.")]
+        [Range(0.0f, 1.0f), Tooltip("Controls the intensity of the height based scattering. The higher the vertical displacement, the more the water receives scattering. This can be adjusted for artistic purposes.")]
         public float heightScattering = 0.1f;
 
         /// <summary>
         /// Controls the intensity of the displacement based scattering. The bigger horizontal displacement, the more the water receives scattering. This can be adjusted for artistic purposes.
         /// </summary>
-        [Tooltip("Controls the intensity of the displacement based scattering. The bigger horizontal displacement, the more the water receives scattering. This can be adjusted for artistic purposes.")]
+        [Range(0.0f, 1.0f), Tooltip("Controls the intensity of the displacement based scattering. The bigger horizontal displacement, the more the water receives scattering. This can be adjusted for artistic purposes.")]
         public float displacementScattering = 0.3f;
 
         /// <summary>
         /// Controls the intensity of the direct light scattering on the tip of the waves. The effect is more perceivable at grazing angles.
         /// </summary>
-        [Tooltip("Controls the intensity of the direct light scattering on the tip of the waves. The effect is more perceivable at grazing angles.")]
+        [Range(0.0f, 1.0f), Tooltip("Controls the intensity of the direct light scattering on the tip of the waves. The effect is more perceivable at grazing angles.")]
         public float directLightTipScattering = 0.6f;
 
         /// <summary>
         /// Controls the intensity of the direct light scattering on the body of the waves. The effect is more perceivable at grazing angles.
         /// </summary>
-        [Tooltip("Controls the intensity of the direct light scattering on the body of the waves. The effect is more perceivable at grazing angles.")]
+        [Range(0.0f, 1.0f), Tooltip("Controls the intensity of the direct light scattering on the body of the waves. The effect is more perceivable at grazing angles.")]
         public float directLightBodyScattering = 0.4f;
 
         /// <summary>
         /// Specifies a maximum wave height that overrides the simulation to support scattering properly for deformers.
         /// </summary>
-        [Tooltip("Specifies a maximum wave height that overrides the simulation to support scattering properly for deformers.")]
+        [Min(0.0f), Tooltip("Specifies a maximum wave height that overrides the simulation to support scattering properly for deformers.")]
         public float maximumHeightOverride = 0.0f;
         #endregion
 
@@ -261,12 +295,14 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Sets the intensity of the under-water caustics.
         /// </summary>
+        [Min(0.0f)]
         [Tooltip("Sets the intensity of the under-water caustics.")]
         public float causticsIntensity = 0.5f;
 
         /// <summary>
         /// Sets the vertical blending distance for the water caustics.
         /// </summary>
+        [Min(0.0f)]
         [Tooltip("Sets the vertical blending distance for the water caustics.")]
         public float causticsPlaneBlendDistance = 1.0f;
 
@@ -278,14 +314,17 @@ namespace UnityEngine.Rendering.HighDefinition
             /// <summary>
             /// The water caustics are rendered at 256x256
             /// </summary>
+            [InspectorName("Low 256")]
             Caustics256 = 256,
             /// <summary>
             /// The water caustics are rendered at 512x512
             /// </summary>
+            [InspectorName("Medium 512")]
             Caustics512 = 512,
             /// <summary>
             /// The water caustics are rendered at 1024x1024
             /// </summary>
+            [InspectorName("High 1024")]
             Caustics1024 = 1024,
         }
 
@@ -304,11 +343,13 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Sets the distance at which the simulated caustics are projected. High values generate sharper caustics but can cause artifacts.
         /// </summary>
+        [Min(0.001f)]
         public float virtualPlaneDistance = 5.0f;
 
         /// <summary>
         /// Sets a tiling factor for the water caustics.
         /// </summary>
+        [Min(0.001f)]
         public float causticsTilingFactor = 1.0f;
 
         /// <summary>
@@ -319,6 +360,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Sets the water caustics dimmer value for the directional shadow.
         /// </summary>
+        [Range(0.0f, 1.0f)]
         public float causticsDirectionalShadowDimmer = 0.25f;
         #endregion
 
@@ -327,7 +369,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// Specifies the rendering layers that affect the water surface.
         /// </summary>
         [Tooltip("Specifies the rendering layers that affect the water surface.")]
-        public RenderingLayerMask renderingLayerMask = RenderingLayerMask.Default;
+        public RenderingLayerMask renderingLayerMask = (RenderingLayerMask) (uint) UnityEngine.RenderingLayerMask.defaultRenderingLayerMask;
 
         /// <summary>
         /// Sets the debug mode for a given water surface.
@@ -359,7 +401,6 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// When enabled, HDRP will apply a fog and color shift to the final image when the camera is under the surface. This feature has a cost even when the camera is above the water surface.
         /// </summary>
-        [Tooltip("When enabled, HDRP will apply a fog and color shift to the final image when the camera is under the surface. This feature has a cost even when the camera is above the water surface.")]
         public bool underWater = false;
 
         /// <summary>
@@ -371,42 +412,37 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Sets maximum depth at which the underwater effect is evaluated for infinite surfaces.
         /// </summary>
-        [Tooltip("Sets maximum depth at which the underwater effect is evaluated for infinite surfaces.")]
+        [Min(0.0f), Tooltip("Sets maximum depth at which the underwater effect is evaluated for infinite surfaces.")]
         public float volumeDepth = 50.0f;
 
         /// <summary>
         /// Sets the maximum height at which the underwater effect is evaluated for infinite surfaces. This allows to cover the underwater scenario when deformers are higher than waves or ripples.
         /// </summary>
-        [Tooltip("Sets the maximum height at which the underwater effect is evaluated for infinite surfaces. This allows to cover the underwater scenario when deformers are higher than waves or ripples.")]
+        [Min(0.0f), Tooltip("Sets the maximum height at which the underwater effect is evaluated for infinite surfaces. This allows to cover the underwater scenario when deformers are higher than waves or ripples.")]
         public float volumeHeight = 0.0f;
 
         /// <summary>
         /// Sets a priority value that is used to define which surface should be considered for underwater rendering in the case of multiple overlapping surfaces.
         /// </summary>
-        [Tooltip("Sets a priority value that is used to define which surface should be considered for underwater rendering in the case of multiple overlapping surfaces.")]
+        [Min(0), Tooltip("Sets a priority value that is used to define which surface should be considered for underwater rendering in the case of multiple overlapping surfaces.")]
         public int volumePrority = 0;
 
         /// <summary>
         /// Sets the multiplier for the Absorption Distance when the camera is underwater. A value of 2.0 means you will see twice as far underwater.
         /// </summary>
-        [Tooltip("Sets the multiplier for the  Absorption Distance when the camera is underwater. A value of 2.0 means you will see twice as far underwater.")]
+        [Min(0.001f), Tooltip("Sets the multiplier for the  Absorption Distance when the camera is underwater. A value of 2.0 means you will see twice as far underwater.")]
         public float absorptionDistanceMultiplier = 1.0f;
 
         /// <summary>
-        /// Sets the offset used to evaluated the underwater refraction. Higher values produce blurrier results but introduce aliasing artifacts.
+        /// Sets the contribution of the ambient probe luminance when multiplied by the underwater scattering color.
         /// </summary>
-        [Tooltip("Sets the offset used to evaluated the underwater refraction. Higher values produce blurrier results but introduce aliasing artifacts.")]
-        public int colorPyramidOffset = 1;
-
-        /// <summary>
-        /// Sets the contribution of the ambient probe to the underwater scattering color.
-        /// </summary>
+        [Obsolete("Will be removed in the next version.")]
         public float underWaterAmbientProbeContribution = 1.0f;
 
         /// <summary>
         /// Controls how the scattering color is evaluated for the underwater scenario.
-        /// Controls how the scattering color is evaluated for the underwater scenario.
         /// </summary>
+        [Obsolete("Will be removed in the next version.")]
         public enum UnderWaterScatteringColorMode
         {
             /// <summary>
@@ -423,30 +459,171 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Sets how the underwater scattering color is specified.
         /// </summary>
-        [Tooltip("Sets how the underwater scattering color is specified.")]
+        [Obsolete("Will be removed in the next version.")]
         public UnderWaterScatteringColorMode underWaterScatteringColorMode = UnderWaterScatteringColorMode.ScatteringColor;
 
         /// <summary>
         /// Sets the color that is used to simulate the scattering when the camera is under-water.
         /// </summary>
-        [Tooltip("Sets the color that is used to simulate the scattering when the camera is under-water.")]
         [ColorUsage(false)]
+        [Obsolete("Will be removed in the next version.")]
         public Color underWaterScatteringColor = new Color(0.0f, 0.27f, 0.23f);
-        #endregion
 
         /// <summary>
-        /// Function that returns the water surface CPU simulation resolution.
+        /// Determines if water surface should refract light when looking at objects from underwater.
+        /// This simulates the correct behavior of water but may introduce visual artifacts as it relies on screen space refraction.
         /// </summary>
-        /// <returns>A value of time WaterSimulationResolution that defines the current water surface CPU simulation resolution.</returns>
-        public WaterSimulationResolution GetSimulationResolutionCPU()
+        public bool underWaterRefraction = false;
+        #endregion
+
+        #region Constant Buffers
+        internal MaterialPropertyBlock mpb;
+        internal int surfaceIndex;
+
+        internal void CreatePropertyBlock()
         {
-            int resolution;
-            if (simulation.simulationResolution != 64)
-                resolution = cpuFullResolution ? simulation.simulationResolution : simulation.simulationResolution / 2;
-            else
-                resolution = simulation.simulationResolution;
-            return (WaterSimulationResolution)resolution;
+            // Prepare the material property block for the rendering
+            mpb = new MaterialPropertyBlock();
+            mpb.SetTexture(HDShaderIDs._WaterDisplacementBuffer, simulation.gpuBuffers.displacementBuffer);
+            mpb.SetTexture(HDShaderIDs._WaterAdditionalDataBuffer, simulation.gpuBuffers.additionalDataBuffer);
         }
+
+        internal void FillMaterialPropertyBlock(WaterSystem system, bool supportDecals)
+        {
+            var constantBuffer = HDRenderPipeline.currentPipeline.waterSystem.m_ShaderVariablesWaterPerSurface[surfaceIndex];
+            mpb.SetConstantBuffer(HDShaderIDs._ShaderVariablesWaterPerSurface, constantBuffer, 0, constantBuffer.stride);
+
+            // Textures
+            mpb.SetTexture(HDShaderIDs._SimulationFoamMask, GetSimulationFoamMaskBuffer(system, supportDecals, Texture2D.whiteTexture));
+            mpb.SetTexture(HDShaderIDs._WaterMask, GetSimulationMaskBuffer(system, supportDecals, Texture2D.whiteTexture));
+            mpb.SetTexture(HDShaderIDs._Group0CurrentMap, GetLargeCurrentBuffer(system, supportDecals, Texture2D.blackTexture));
+            mpb.SetTexture(HDShaderIDs._Group1CurrentMap, GetRipplesCurrentBuffer(system, supportDecals, Texture2D.blackTexture));
+            mpb.SetTexture(HDShaderIDs._WaterDeformationBuffer, GetDeformationBuffer(system, supportDecals, Texture2D.blackTexture));
+            mpb.SetTexture(HDShaderIDs._WaterDeformationSGBuffer, GetDeformationNormalBuffer(system, supportDecals, Texture2D.blackTexture));
+            mpb.SetTexture(HDShaderIDs._WaterFoamBuffer, GetFoamBuffer(system, supportDecals,Texture2D.blackTexture));
+
+            Texture causticsData = caustics ? simulation.gpuBuffers.causticsBuffer : Texture2D.blackTexture;
+            mpb.SetTexture(HDShaderIDs._WaterCausticsDataBuffer, causticsData);
+
+        }
+
+        /// <summary>
+        ///  Function that globally binds the textures and constant buffer for use by external systems such as VFX Graph
+        ///  As the binding is done globally, only one surface can be bound during a frame
+        /// </summary>
+        /// <returns>A boolean that indicates if the function was able to bind GlobalTextures.</returns>
+        public bool SetGlobalTextures()
+        {
+            if (simulation == null)
+                return false;
+
+            var constantBuffer = HDRenderPipeline.currentPipeline.waterSystem.m_ShaderVariablesWaterPerSurface[surfaceIndex];
+            Shader.SetGlobalTexture(HDShaderIDs._WaterDisplacementBuffer, simulation.gpuBuffers.displacementBuffer);
+            Shader.SetGlobalTexture(HDShaderIDs._WaterAdditionalDataBuffer, simulation.gpuBuffers.additionalDataBuffer);
+            Shader.SetGlobalConstantBuffer(HDShaderIDs._ShaderVariablesWaterPerSurface, constantBuffer, 0, constantBuffer.stride);
+
+            var system = HDRenderPipeline.currentPipeline.waterSystem;
+            Shader.SetGlobalTexture(HDShaderIDs._SimulationFoamMask, GetSimulationFoamMaskBuffer(system, true, Texture2D.whiteTexture));
+            Shader.SetGlobalTexture(HDShaderIDs._WaterMask, GetSimulationMaskBuffer(system, true, Texture2D.whiteTexture));
+            Shader.SetGlobalTexture(HDShaderIDs._Group0CurrentMap, GetLargeCurrentBuffer(system, true, Texture2D.blackTexture));
+            Shader.SetGlobalTexture(HDShaderIDs._Group1CurrentMap, GetRipplesCurrentBuffer(system, true, Texture2D.blackTexture));
+            Shader.SetGlobalTexture(HDShaderIDs._WaterDeformationBuffer, GetDeformationBuffer(system, true, Texture2D.blackTexture));
+            Shader.SetGlobalTexture(HDShaderIDs._WaterDeformationSGBuffer, GetDeformationNormalBuffer(system, true, Texture2D.blackTexture));
+            Shader.SetGlobalTexture(HDShaderIDs._WaterFoamBuffer, GetFoamBuffer(system, true, Texture2D.blackTexture));
+            return true;
+        }
+        #endregion
+
+        #region Water Decals
+        /// <summary>
+        /// Defines the resolution of the internal decal region textures.
+        /// </summary>
+        public enum WaterDecalRegionResolution
+        {
+            /// <summary>
+            /// The water decals are rendered in a 256x256 texture.
+            /// </summary>
+            [InspectorName("Low 256")]
+            Resolution256 = 256,
+            /// <summary>
+            /// The water decals are rendered in a 512x512 texture.
+            /// </summary>
+            [InspectorName("Medium 512")]
+            Resolution512 = 512,
+            /// <summary>
+            /// The water decals are rendered in a 1024x1024 texture.
+            /// </summary>
+            [InspectorName("High 1024")]
+            Resolution1024 = 1024,
+            /// <summary>
+            /// The water decals are rendered in a 2048x2048 texture.
+            /// </summary>
+            [InspectorName("Very High 2048")]
+            Resolution2048 = 2048,
+        }
+
+        /// <summary>
+        /// Specifies the size of the decal region in meters.
+        /// </summary>
+        public Vector2 decalRegionSize = new Vector2(200.0f, 200.0f);
+
+        /// <summary>
+        /// Specifies the center of the decal region. When null, the region will follow the main camera.
+        /// </summary>
+        public Transform decalRegionAnchor = null;
+
+        // Compute the decal region bounds for this frame
+        internal float2 frameRegionCenter, frameRegionSize;
+        internal void UpdateDecalRegion(Transform anchor)
+        {
+            if (decalRegionAnchor != null)
+                anchor = decalRegionAnchor;
+
+            frameRegionSize = decalRegionSize;
+            frameRegionCenter = anchor != null ? new float2(anchor.position.x, anchor.position.z) : 0.0f;
+            if (anchor == null)
+                return;
+
+
+            if (IsProceduralGeometry() && !IsInfinite())
+            {
+                float3 position = transform.position;
+                float size = length(new float2(abs(transform.lossyScale.x), abs(transform.lossyScale.z))) * 0.5f;
+
+                float2 waterMin = position.xz - size, waterMax = position.xz + size;
+                float2 regionMin = max(waterMin, frameRegionCenter - frameRegionSize * 0.5f);
+                float2 regionMax = min(waterMax, frameRegionCenter + frameRegionSize * 0.5f);
+
+                frameRegionCenter = (regionMin + regionMax) * 0.5f;
+                frameRegionSize = regionMax - regionMin;
+                //frameRegionSize = max(regionMax-frameRegionCenter, frameRegionCenter-regionMin) * 2.0f;
+            }
+            /*
+            else if (IsCustomMesh())
+            {
+                Vector3 decalRegionCenter = new Vector3(anchor.position.x, 0.0f, anchor.position.z);
+                if (!IsCustomMesh())
+                    decalRegionCenter = transform.rotation * decalRegionCenter;
+            }
+            */
+
+            // Move region in steps to avoid flickering under camera movement
+            // We only use the foam resolution as it's the one that gets reprojected
+            float step = max(frameRegionSize.x, frameRegionSize.y) / (float)foamResolution;
+            frameRegionCenter = round(frameRegionCenter / step) * step;
+        }
+
+        /// <summary>
+        /// Function that returns the decal region center and size.
+        /// </summary>
+        /// <param name="center">Region center, based on the anchor gameObject.</param>
+        /// <param name="size">Region size.</param>
+        public void GetDecalRegion(out float2 center, out float2 size)
+        {
+            center = frameRegionCenter;
+            size = frameRegionSize;
+        }
+        #endregion
 
         /// <summary>
         /// Function that fills a WaterSimSearchData with the data of the current water surface.
@@ -455,20 +632,47 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <returns>A boolean that defines if the function was able to fill the search data.</returns>
         public bool FillWaterSearchData(ref WaterSimSearchData wsd)
         {
-            if (simulation != null
-                && simulation.cpuBuffers != null
-                && HDRenderPipeline.currentPipeline != null
-                && HDRenderPipeline.currentPipeline.m_ActiveWaterSimulationCPU)
+            var hdrp = HDRenderPipeline.currentPipeline;
+            if (hdrp == null || !scriptInteractions)
+                return false;
+
+            if (simulation != null && simulation.ValidResources((int)hdrp.waterSystem.simationRes, numActiveBands, HasSimulationFoam()))
             {
                 // General
                 wsd.simulationTime = simulation.simulationTime;
 
                 // Simulation
-                wsd.simulationRes = (int)GetSimulationResolutionCPU();
-                wsd.displacementData = simulation.cpuBuffers.displacementBufferCPU;
+                wsd.activeBandCount = WaterSystem.EvaluateCPUBandCount(surfaceType, ripples, cpuEvaluateRipples);
+                wsd.cpuSimulation = hdrp.waterSystem.replicateSimulationOnCPU;
                 wsd.spectrum = simulation.spectrum;
                 wsd.rendering = simulation.rendering;
-                wsd.activeBandCount = HDRenderPipeline.EvaluateCPUBandCount(surfaceType, ripples, cpuEvaluateRipples);
+
+                wsd.decalWorkflow = HDRenderPipeline.currentPipeline.waterSystem.m_EnableDecalWorkflow;
+
+                GetDecalRegion(out var center, out var size);
+                wsd.decalRegionCenter = center;
+                wsd.decalRegionScale = 1.0f / size;
+
+                if (wsd.cpuSimulation)
+                {
+                    if (simulation.cpuBuffers == null)
+                        return false;
+
+                    wsd.simulationRes = (int)hdrp.waterSystem.cpuSimationRes;
+                    wsd.displacementDataCPU = simulation.cpuBuffers.displacementBufferCPU;
+                    wsd.displacementDataGPU = wsd.displacementDataCPU.Reinterpret<half4>(4 * sizeof(float));
+                }
+                else
+                {
+                    if (!displacementBufferSynchronizer.TryGetBuffer(out wsd.displacementDataGPU))
+                        return false;
+
+                    wsd.simulationRes = simulation.simulationResolution;
+                    wsd.displacementDataCPU = wsd.displacementDataGPU.Reinterpret<float4>(2 * sizeof(float));
+
+                    if (wsd.displacementDataGPU.Length == 0 || displacementBufferSynchronizer.CurrentSlices() < wsd.activeBandCount)
+                        return false;
+                }
 
                 // Mask data
                 FillWaterMaskData(ref wsd);
@@ -494,6 +698,7 @@ namespace UnityEngine.Rendering.HighDefinition
             // Invalidate the search result in case the simulation data is not available
             wsr.error = float.MaxValue;
             wsr.projectedPositionWS = float3(0, 0, 0);
+            wsr.normalWS = UpVector();
             wsr.candidateLocationWS = float3(0, 0, 0);
             wsr.currentDirectionWS = float3(1, 0, 0);
             wsr.numIterations = wsp.maxIterations;
@@ -501,10 +706,7 @@ namespace UnityEngine.Rendering.HighDefinition
             // Try to to fill the search data and run the evaluation.
             WaterSimSearchData wsd = new WaterSimSearchData();
             if (FillWaterSearchData(ref wsd))
-            {
-                HDRenderPipeline.ProjectPointOnWaterSurface(wsd, wsp, out wsr);
-                return true;
-            }
+                return WaterSystem.ProjectPointOnWaterSurface(wsd, wsp, ref wsr);
             return false;
         }
 
@@ -601,13 +803,23 @@ namespace UnityEngine.Rendering.HighDefinition
 
         internal bool IsProceduralGeometry()
         {
-            return IsInstancedQuads() || (geometryType == WaterGeometryType.Quad || meshRenderers.Count == 0);
+            return !IsCustomMesh();
+        }
+
+        internal bool IsCustomMesh()
+        {
+            return geometryType == WaterGeometryType.Custom && meshRenderers.Count != 0;
+
+        }
+
+        internal bool IsQuad()
+        {
+            return geometryType == WaterGeometryType.Quad || (geometryType == WaterGeometryType.Custom && meshRenderers.Count == 0);
         }
 
         internal float3 UpVector()
         {
-            float3 upDir = transform.up;
-            return IsInstancedQuads() ? float3(0, 1, 0) : upDir;
+            return transform.up;
         }
 
         internal void ReleaseResources()
@@ -637,22 +849,12 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             if (caustics && simulation?.gpuBuffers?.causticsBuffer != null)
             {
-                regionSize = simulation.spectrum.patchSizes[causticsBand];
+                int causticsBandIndex = WaterSystem.SanitizeCausticsBand(causticsBand, simulation.numActiveBands);
+                regionSize = simulation.spectrum.patchSizes[causticsBandIndex];
                 return simulation.gpuBuffers.causticsBuffer;
             }
             regionSize = 0.0f;
             return null;
-        }
-
-        /// <summary>
-        /// Function that returns the foam buffer for the water surface. If the feature is disabled or the resource is not available the function returns null.
-        /// </summary>
-        /// <param name="foamArea">Output parameter that returns the size of the foam region.</param>
-        /// <returns>An RG texture that holds the surface foam (red channel) and deep foam (green channel) of the water surface.</returns>
-        public Texture GetFoamBuffer(out Vector2 foamArea)
-        {
-            foamArea = foamAreaSize;
-            return FoamBuffer();
         }
     }
 }

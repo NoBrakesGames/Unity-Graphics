@@ -8,19 +8,26 @@ namespace UnityEditor.VFX.Operator
 {
     class SkinnedMeshRendererTransformProvider : VariantProvider
     {
-        protected sealed override Dictionary<string, object[]> variants
+        public override IEnumerable<Variant> GetVariants()
         {
-            get
-            {
-                return new Dictionary<string, object[]>
-                {
-                    { "transform", Enum.GetValues(typeof(VFXSkinnedTransform)).Cast<object>().ToArray() },
-                };
-            }
+            yield return new Variant(
+                "Get Skinned Mesh Local Root Transform",
+                "Sampling",
+                typeof(SkinnedMeshRendererTransform),
+                new[] {new KeyValuePair<string, object>("transform", VFXSkinnedTransform.LocalRootBoneTransform)}
+            );
+
+            yield return new Variant(
+                "Get Skinned Mesh World Root Transform",
+                "Sampling",
+                typeof(SkinnedMeshRendererTransform),
+                new[] {new KeyValuePair<string, object>("transform", VFXSkinnedTransform.WorldRootBoneTransform)}
+            );
         }
     }
 
-    [VFXInfo(category = "Sampling", variantProvider = typeof(SkinnedMeshRendererTransformProvider))]
+    [VFXHelpURL("Operator-SampleMesh")]
+    [VFXInfo(variantProvider = typeof(SkinnedMeshRendererTransformProvider))]
     class SkinnedMeshRendererTransform : VFXOperator
     {
         [VFXSetting(VFXSettingAttribute.VisibleFlags.InInspector), SerializeField]

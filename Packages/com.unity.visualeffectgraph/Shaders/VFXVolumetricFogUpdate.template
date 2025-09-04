@@ -9,6 +9,10 @@ ${VFXInclude("Shaders/VFXParticleCommon.template")}
 // Indirect draw is always enabled for volumetric fog output
 RWStructuredBuffer<uint> indirectBuffer;
 
+#if HAS_STRIPS_DATA
+StructuredBuffer<uint> stripDataBuffer;
+#endif
+
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Builtin/BuiltinData.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
@@ -40,7 +44,6 @@ uint DistanceToSlice(float distance)
 }
 
 RWStructuredBuffer<uint> maxSliceCount;
-RWStructuredBuffer<uint> maxSliceTempBuffer;
 
 RWByteAddressBuffer attributeBuffer;
 
@@ -69,19 +72,15 @@ void CSMain(uint3 groupId          : SV_GroupID,
             uint3 groupThreadId    : SV_GroupThreadID)
 {
     uint id = GetThreadId(groupId, groupThreadId, dispatchWidth);
-    //uint id = groupThreadId.x + groupId.x * NB_THREADS_PER_GROUP;
 
-    uint index = GetThreadId(groupId, 0, dispatchWidth);
-    ${VFXInitInstancing}
-    index += groupThreadId.x;
+    ${VFXInitInstancingCompute}
 
-    ContextData contextData = instancingContextData[instanceActiveIndex];
+    ${VFXLoadContextData}
     uint systemSeed = contextData.systemSeed;
     uint maxParticleCount = contextData.maxParticleCount;
     uint threadIdInGroup = groupThreadId.x;
 
 #if defined(VFX_VOLUMETRIC_FOG_PASS_CLEAR)
-    maxSliceTempBuffer[index] = 0;
     if (index <= instanceActiveIndex)
         maxSliceCount[instanceActiveIndex] = 0;
     return;
@@ -170,7 +169,7 @@ void CSMain(uint3 groupId          : SV_GroupID,
     // Fill indirect buffer
     if (attributes.alive && maxSliceCount[instanceActiveIndex] > 0 && hitSliceCount > 0)
     {
-        AppendOutputBuffer(outputBuffer, index, instanceActiveIndex, maxSliceCount[0]);
+        AppendOutputBuffer(outputBuffer, index, instanceActiveIndex, maxSliceCount[instanceActiveIndex]);
     }
 
 #endif

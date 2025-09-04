@@ -9,6 +9,7 @@ using UnityEngine.SceneManagement;
 using UnityEditor.SceneManagement;
 using UnityEngine.Rendering;
 using UnityEngine.Assertions;
+using RenderingLayerMask = UnityEngine.RenderingLayerMask;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
@@ -72,6 +73,38 @@ namespace UnityEditor.Rendering.HighDefinition
             }
         }
 
+        [MenuItem("GameObject/Light/Directional Moon Light", priority = 2)]
+        static void CreateMoonLight(MenuCommand menuCommand)
+        {
+            var parent = menuCommand.context as GameObject;
+            var go = CoreEditorUtils.CreateGameObject("Directional Moon Light", parent);
+            go.GetComponent<Transform>().eulerAngles = new Vector3(150, -30, 0);
+
+            var light = go.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var hdLight = go.AddComponent<HDAdditionalLightData>();
+            HDAdditionalLightData.InitDefaultHDAdditionalLightData(hdLight);
+
+            hdLight.celestialBodyShadingSource = HDAdditionalLightData.CelestialBodyShadingSource.ReflectSunLight;
+            hdLight.distance = 384400000;
+            hdLight.diameterMultiplerMode = false;
+            hdLight.diameterOverride = 3.0f;
+            hdLight.flareSize = 0.0f;
+
+            light.colorTemperature = 4100;
+            light.intensity = 0.5f; // 0.5 lux is actually a bit more than max moon light intensity on a full moon
+
+            if (GraphicsSettings.TryGetRenderPipelineSettings<HDRenderPipelineEditorTextures>(out var defaultRenderPipelineTextures))
+            {
+                hdLight.surfaceTexture = defaultRenderPipelineTextures.moonAlbedo;
+            }
+            else
+            {
+                Debug.LogWarning($"{go.name} is missing the {nameof(HDAdditionalLightData.surfaceTexture)} due to not being able to find {nameof(HDRenderPipelineEditorTextures.moonAlbedo)} Texture.");
+            }
+        }
+
         [MenuItem("GameObject/Volume/Sky and Fog Global Volume", priority = CoreUtils.Priorities.gameObjectMenuPriority + 1)]
         static void CreateSceneSettingsGameObject(MenuCommand menuCommand)
         {
@@ -100,6 +133,21 @@ namespace UnityEditor.Rendering.HighDefinition
             MaterialReimporter.ReimportAllMaterials();
         }
 
+        [MenuItem("Edit/Rendering/Materials/Generate Material Resources", priority = CoreUtils.Priorities.editMenuPriority)]
+        internal static void GenerateLookUpTables()
+        {
+            var resources = new List<RenderTexture>();
+
+            // Ask for each render pipeline material to build their look-ups
+            HDUtils.GetRenderPipelineMaterialList().ForEach(material => material.BuildOffline(ref resources));
+
+            // Write the resources to disk.
+            resources.ForEach(resource => HDTextureUtilities.WriteTextureToAsset(resource, $"Assets/HDRPDefaultResources/Generated/{resource.name}.asset"));
+
+            // Release
+            resources.ForEach(RenderTexture.ReleaseTemporary);
+        }
+
         [MenuItem("Edit/Rendering/Rendering Layers/Add HDRP Default Layer Mask to Loaded Mesh Renderers and Terrains", priority = CoreUtils.Priorities.editMenuPriority + 2)]
         internal static void UpgradeDefaultRenderingLayerMask()
         {
@@ -108,7 +156,7 @@ namespace UnityEditor.Rendering.HighDefinition
             foreach (var mesh in meshRenderers)
             {
                 Undo.RecordObject(mesh, "MeshRenderer Layer Mask update");
-                mesh.renderingLayerMask |= GraphicsSettings.defaultRenderingLayerMask;
+                mesh.renderingLayerMask |= RenderingLayerMask.defaultRenderingLayerMask;
                 EditorUtility.SetDirty(mesh);
             }
 
@@ -117,7 +165,7 @@ namespace UnityEditor.Rendering.HighDefinition
             foreach (var terrain in terrains)
             {
                 Undo.RecordObject(terrain, "Terrain Layer Mask update");
-                terrain.renderingLayerMask |= GraphicsSettings.defaultRenderingLayerMask;
+                terrain.renderingLayerMask |= RenderingLayerMask.defaultRenderingLayerMask;
                 EditorUtility.SetDirty(terrain);
             }
         }
@@ -136,7 +184,7 @@ namespace UnityEditor.Rendering.HighDefinition
                     if (gameObj.TryGetComponent<MeshRenderer>(out mesh))
                     {
                         Undo.RecordObject(mesh, "MeshRenderer Layer Mask update");
-                        mesh.renderingLayerMask |= GraphicsSettings.defaultRenderingLayerMask;
+                        mesh.renderingLayerMask |= RenderingLayerMask.defaultRenderingLayerMask;
                         EditorUtility.SetDirty(mesh);
                     }
 
@@ -144,9 +192,43 @@ namespace UnityEditor.Rendering.HighDefinition
                     if (gameObj.TryGetComponent<Terrain>(out terrain))
                     {
                         Undo.RecordObject(terrain, "Terrain Layer Mask update");
-                        terrain.renderingLayerMask |= GraphicsSettings.defaultRenderingLayerMask;
+                        terrain.renderingLayerMask |= RenderingLayerMask.defaultRenderingLayerMask;
                         EditorUtility.SetDirty(terrain);
                     }
+                }
+            }
+        }
+
+        static bool ContributesGI(GameObject go) => (GameObjectUtility.GetStaticEditorFlags(go) & StaticEditorFlags.ContributeGI) != 0;
+
+        [MenuItem("Edit/Rendering/Global Illumination/Convert Selected Mesh Renderers to receive GI from Light Probes", priority = CoreUtils.Priorities.editMenuPriority + 1)]
+        internal static void ConvertSelectedObjectsToAPV()
+        {
+            foreach (var obj in Selection.objects)
+            {
+                if (obj is GameObject)
+                {
+                    GameObject gameObj = obj as GameObject;
+                    if (gameObj.TryGetComponent<MeshRenderer>(out var mesh) && ContributesGI(gameObj) && mesh.receiveGI == ReceiveGI.Lightmaps)
+                    {
+                        Undo.RecordObject(mesh, "MeshRenderer Receive GI update");
+                        mesh.receiveGI = ReceiveGI.LightProbes;
+                        EditorUtility.SetDirty(mesh);
+                    }
+                }
+            }
+        }
+
+        [MenuItem("Edit/Rendering/Global Illumination/Convert Loaded Mesh Renderers to receive GI from Light Probes", priority = CoreUtils.Priorities.editMenuPriority + 1)]
+        internal static void ConvertLoadedObjectsToAPV()
+        {
+            foreach (var mesh in Resources.FindObjectsOfTypeAll<MeshRenderer>())
+            {
+                if (ContributesGI(mesh.gameObject) && mesh.receiveGI == ReceiveGI.Lightmaps)
+                {
+                    Undo.RecordObject(mesh, "MeshRenderer Receive GI update");
+                    mesh.receiveGI = ReceiveGI.LightProbes;
+                    EditorUtility.SetDirty(mesh);
                 }
             }
         }

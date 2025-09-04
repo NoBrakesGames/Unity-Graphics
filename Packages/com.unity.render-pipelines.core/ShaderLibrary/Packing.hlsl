@@ -1,7 +1,7 @@
 #ifndef UNITY_PACKING_INCLUDED
 #define UNITY_PACKING_INCLUDED
 
-#if SHADER_API_MOBILE || SHADER_API_GLES3
+#if SHADER_API_MOBILE || SHADER_API_GLES3 || SHADER_API_SWITCH || defined(UNITY_UNIFIED_SHADER_PRECISION_MODEL)
 #pragma warning (disable : 3205) // conversion of larger type to smaller
 #endif
 
@@ -65,19 +65,20 @@ float2 PackNormalOctQuadEncode(float3 n)
     // Optimized version of above code:
     n *= rcp(max(dot(abs(n), 1.0), 1e-6));
     float t = saturate(-n.z);
-    return n.xy + (n.xy >= 0.0 ? t : -t);
+    return n.xy + float2(n.x >= 0.0 ? t : -t, n.y >= 0.0 ? t : -t);
 }
 
 float3 UnpackNormalOctQuadEncode(float2 f)
 {
-    float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    // NOTE: Do NOT use abs() in this line. It causes miscompilations. (UUM-62216, UUM-70600)
+    float3 n = float3(f.x, f.y, 1.0 - (f.x < 0 ? -f.x : f.x) - (f.y < 0 ? -f.y : f.y));
 
     //float2 val = 1.0 - abs(n.yx);
     //n.xy = (n.zz < float2(0.0, 0.0) ? (n.xy >= 0.0 ? val : -val) : n.xy);
 
     // Optimized version of above code:
     float t = max(-n.z, 0.0);
-    n.xy += n.xy >= 0.0 ? -t.xx : t.xx;
+    n.xy += float2(n.x >= 0.0 ? -t : t, n.y >= 0.0 ? -t : t);
 
     return normalize(n);
 }
@@ -195,7 +196,7 @@ real3 UnpackNormalAG(real4 packedNormal, real scale = 1.0)
 }
 
 // Unpack normal as DXT5nm (1, y, 0, x) or BC5 (x, y, 0, 1)
-real3 UnpackNormalmapRGorAG(real4 packedNormal, real scale = 1.0)
+real3 UnpackNormalMapRGorAG(real4 packedNormal, real scale = 1.0)
 {
     // Convert to (?, y, 0, x)
     packedNormal.a *= packedNormal.r;
@@ -211,7 +212,7 @@ real3 UnpackNormal(real4 packedNormal)
     return UnpackNormalRGBNoScale(packedNormal);
 #else
     // Compiler will optimize the scale away
-    return UnpackNormalmapRGorAG(packedNormal, 1.0);
+    return UnpackNormalMapRGorAG(packedNormal, 1.0);
 #endif
 }
 #endif
@@ -223,7 +224,7 @@ real3 UnpackNormalScale(real4 packedNormal, real bumpScale)
 #elif defined(UNITY_NO_DXT5nm)
     return UnpackNormalRGB(packedNormal, bumpScale);
 #else
-    return UnpackNormalmapRGorAG(packedNormal, bumpScale);
+    return UnpackNormalMapRGorAG(packedNormal, bumpScale);
 #endif
 }
 
@@ -282,15 +283,6 @@ float3 UnpackFromR11G11B10f(uint rgb)
     float g = f16tof32((rgb >> 6) & 0x7FF0);
     float b = f16tof32((rgb << 5) & 0x7FE0);
     return float3(r, g, b);
-}
-
-//-----------------------------------------------------------------------------
-// Color packing
-//-----------------------------------------------------------------------------
-
-float4 UnpackFromR8G8B8A8(uint rgba)
-{
-    return float4(rgba & 255, (rgba >> 8) & 255, (rgba >> 16) & 255, (rgba >> 24) & 255) * (1.0 / 255);
 }
 
 //-----------------------------------------------------------------------------
@@ -569,9 +561,8 @@ float2 Unpack888ToFloat2(float3 x)
 // Pack 2 float values from the [0, 1] range, to an 8 bits float from the [0, 1] range
 float PackFloat2To8(float2 f)
 {
-    float x_expanded = f.x * 15.0;                        // f.x encoded over 4 bits, can have 2^4 = 16 distinct values mapped to [0, 1, ..., 15]
-    float y_expanded = f.y * 15.0;                        // f.y encoded over 4 bits, can have 2^4 = 16 distinct values mapped to [0, 1, ..., 15]
-    float x_y_expanded = x_expanded * 16.0 + y_expanded;  // f.x encoded over higher bits, f.y encoded over the lower bits - x_y values in range [0, 1, ..., 255]
+    float2 i = floor(f * 15.0);                                         // f.x & f.y encoded over 4 bits, can have 2^4 = 16 distinct values mapped to [0, 1, ..., 15]
+    float x_y_expanded = i.x * 16.0 + i.y;                       // f.x encoded over higher bits, f.y encoded over the lower bits - x_y values in range [0, 1, ..., 255]
     return x_y_expanded / 255.0;
 
     // above 4 lines equivalent to:
@@ -589,7 +580,48 @@ float2 Unpack8ToFloat2(float f)
     return float2(x, y);
 }
 
-#if SHADER_API_MOBILE || SHADER_API_GLES3
+//-----------------------------------------------------------------------------
+// Color packing
+//-----------------------------------------------------------------------------
+
+float4 UnpackFromR8G8B8A8(uint rgba)
+{
+    return float4(rgba & 255, (rgba >> 8) & 255, (rgba >> 16) & 255, (rgba >> 24) & 255) * (1.0 / 255);
+}
+
+float2 PackToR5G6B5(float3 rgb)
+{
+    uint rgb16 = (PackFloatToUInt(rgb.x, 0,  5) |
+                  PackFloatToUInt(rgb.y, 5,  6) |
+                  PackFloatToUInt(rgb.z, 11, 5));
+    return float2(PackByte(rgb16 >> 8), PackByte(rgb16 & 0xFF));
+}
+
+float3 UnpackFromR5G6B5(float2 rgb)
+{
+    uint rgb16 = (UnpackByte(rgb.x) << 8) | UnpackByte(rgb.y);
+    return float3(UnpackUIntToFloat(rgb16, 0,  5),
+                  UnpackUIntToFloat(rgb16, 5,  6),
+                  UnpackUIntToFloat(rgb16, 11, 5));
+}
+
+uint PackToR7G7B6(float3 rgb)
+{
+    uint rgb20 = (PackFloatToUInt(rgb.x, 0,  7) |
+                  PackFloatToUInt(rgb.y, 7,  7) |
+                  PackFloatToUInt(rgb.z, 14, 6));
+    return rgb20;
+}
+
+float3 UnpackFromR7G7B6(uint rgb)
+{
+    return float3(UnpackUIntToFloat(rgb, 0,  7),
+                  UnpackUIntToFloat(rgb, 7,  7),
+                  UnpackUIntToFloat(rgb, 14, 6));
+}
+
+
+#if SHADER_API_MOBILE || SHADER_API_GLES3 || SHADER_API_SWITCH
 #pragma warning (enable : 3205) // conversion of larger type to smaller
 #endif
 

@@ -1,15 +1,49 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
-using UnityEditor.ShaderGraph;
-using UnityEditor.ShaderGraph.Internal;
+
 using UnityEngine;
 
 
 namespace UnityEditor.VFX
 {
-    [VFXInfo(variantProvider = typeof(VFXPlanarPrimitiveVariantProvider))]
+    class VFXPlanarPrimitiveOutputSubVariantProvider : VariantProvider
+    {
+        private VFXPrimitiveType mainVariantType;
+
+        public VFXPlanarPrimitiveOutputSubVariantProvider(VFXPrimitiveType type) => this.mainVariantType = type;
+
+        public override IEnumerable<Variant> GetVariants()
+        {
+            foreach (var primitive in Enum.GetValues(typeof(VFXPrimitiveType)).Cast<VFXPrimitiveType>())
+            {
+                if (primitive == this.mainVariantType)
+                    continue;
+
+                yield return new Variant(
+                    "Output Particle".AppendLabel("Unlit", false).AppendLabel(primitive.ToString(), false),
+                    null,
+                    typeof(VFXPlanarPrimitiveOutput),
+                    new[] {new KeyValuePair<string, object>("primitiveType", primitive)});
+            }
+        }
+    }
+
+    class VFXPlanarPrimitiveOutputProvider : VariantProvider
+    {
+        public override IEnumerable<Variant> GetVariants()
+        {
+            yield return new Variant(
+                "Output Particle".AppendLabel("Unlit", false).AppendLabel(VFXPrimitiveType.Quad.ToString(), false),
+                VFXLibraryStringHelper.Separator("Output Basic", 2),
+                typeof(VFXPlanarPrimitiveOutput),
+                new[] {new KeyValuePair<string, object>("primitiveType", VFXPrimitiveType.Quad)},
+                () => new VFXPlanarPrimitiveOutputSubVariantProvider(VFXPrimitiveType.Quad));
+        }
+    }
+
+    [VFXHelpURL("Context-OutputPrimitive")]
+    [VFXInfo(variantProvider = typeof(VFXPlanarPrimitiveOutputProvider))]
     class VFXPlanarPrimitiveOutput : VFXShaderGraphParticleOutput
     {
         [VFXSetting(VFXSettingAttribute.VisibleFlags.InInspector), SerializeField, Tooltip("Specifies what primitive type to use for this output. Triangle outputs have fewer vertices, octagons can be used to conform the geometry closer to the texture to avoid overdraw, and quads are a good middle ground.")]
@@ -18,15 +52,7 @@ namespace UnityEditor.VFX
         //[VFXSetting(VFXSettingAttribute.VisibleFlags.InInspector)]
         public bool useGeometryShader = false;
 
-        public override string name
-        {
-            get
-            {
-                if (shaderName != string.Empty)
-                    return $"Output Particle {shaderName} {primitiveType.ToString()}";
-                return $"Output Particle {primitiveType.ToString()}";
-            }
-        }
+        public override string name => $"Output Particle".AppendLabel("Unlit", false) + $"\n{ObjectNames.NicifyVariableName(primitiveType.ToString())}";
         public override string codeGeneratorTemplate { get { return RenderPipeTemplate("VFXParticlePlanarPrimitive"); } }
         public override VFXTaskType taskType
         {
@@ -55,33 +81,6 @@ namespace UnityEditor.VFX
             }
         }
 
-        public override IEnumerable<VFXAttributeInfo> attributes
-        {
-            get
-            {
-                yield return new VFXAttributeInfo(VFXAttribute.Position, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.Color, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.Alpha, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.Alive, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AxisX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AxisY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AxisZ, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AngleX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AngleY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AngleZ, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.PivotX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.PivotY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.PivotZ, VFXAttributeMode.Read);
-
-                yield return new VFXAttributeInfo(VFXAttribute.Size, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.ScaleX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.ScaleY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.ScaleZ, VFXAttributeMode.Read);
-
-                if (usesFlipbook)
-                    yield return new VFXAttributeInfo(VFXAttribute.TexIndex, VFXAttributeMode.Read);
-            }
-        }
         protected IEnumerable<VFXPropertyWithValue> optionalInputProperties
         {
             get

@@ -78,6 +78,7 @@ namespace UnityEditor.ShaderGraph.Drawing
             {
                 if (m_GraphEditorView != null)
                 {
+                    m_GraphEditorView.UnregisterCallback<GeometryChangedEvent>(OnGeometryChanged);
                     m_GraphEditorView.RemoveFromHierarchy();
                     m_GraphEditorView.Dispose();
                 }
@@ -123,6 +124,9 @@ namespace UnityEditor.ShaderGraph.Drawing
         {
             get { return titleContent.text; }
         }
+
+        [field: NonSerialized]
+        internal bool isVisible { get; private set; }
 
         bool AssetFileExists()
         {
@@ -208,10 +212,10 @@ namespace UnityEditor.ShaderGraph.Drawing
                 m_ColorSpace = PlayerSettings.colorSpace;
             }
 
-            if (GraphicsSettings.renderPipelineAsset != m_RenderPipelineAsset)
+            if (GraphicsSettings.currentRenderPipeline != m_RenderPipelineAsset)
             {
                 graphEditorView = null;
-                m_RenderPipelineAsset = GraphicsSettings.renderPipelineAsset;
+                m_RenderPipelineAsset = GraphicsSettings.currentRenderPipeline;
             }
 
             if (EditorGUIUtility.isProSkin != m_ProTheme)
@@ -299,7 +303,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                         viewDataKey = selectedGuid,
                     };
                     m_ColorSpace = PlayerSettings.colorSpace;
-                    m_RenderPipelineAsset = GraphicsSettings.renderPipelineAsset;
+                    m_RenderPipelineAsset = GraphicsSettings.currentRenderPipeline;
                     graphObject.Validate();
 
                     // update blackboard title for the new graphEditorView
@@ -372,6 +376,11 @@ namespace UnityEditor.ShaderGraph.Drawing
                 graphEditorView.HandleGraphChanges(wasUndoRedoPerformed);
                 graphObject.graph.ClearChanges();
 
+                if (wasUndoRedoPerformed)
+                {
+                    graphEditorView.inspectorView.RefreshInspectables();
+                }
+
                 if (updateTitle)
                     UpdateTitle();
             }
@@ -414,12 +423,8 @@ namespace UnityEditor.ShaderGraph.Drawing
 
         void OnDisable()
         {
-            m_GraphEditorView?.UnregisterCallback<GeometryChangedEvent>(OnGeometryChanged);
-            m_GraphEditorView?.Dispose();
             messageManager.ClearAll();
 
-            m_GraphEditorView = null;
-            m_GraphObject = null;
             m_MessageManager = null;
             m_RenderPipelineAsset = null;
 
@@ -469,7 +474,7 @@ namespace UnityEditor.ShaderGraph.Drawing
             UpdateTitle();
         }
 
-        public void UpdateTitle()
+        public void UpdateTitle(bool ignoreUnsavedChanges = false)
         {
             string assetPath = AssetDatabase.GUIDToAssetPath(selectedGuid);
             string shaderName = Path.GetFileNameWithoutExtension(assetPath);
@@ -484,7 +489,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                 title = title + " (nothing loaded)";
             else
             {
-                if (GraphHasChangedSinceLastSerialization())
+                if (!ignoreUnsavedChanges && GraphHasChangedSinceLastSerialization())
                 {
                     hasUnsavedChanges = true;
                     // This is the message EditorWindow will show when prompting to close while dirty
@@ -988,6 +993,12 @@ namespace UnityEditor.ShaderGraph.Drawing
                         : fromSlot.concreteValueType.ToString();
                     prop.SetDisplayNameAndSanitizeForGraph(subGraph, propName);
 
+                    if (fromProperty?.useCustomSlotLabel ?? false)
+                    {
+                        prop.useCustomSlotLabel = true;
+                        prop.customSlotLabel = fromProperty.customSlotLabel;
+                    }
+
                     subGraph.AddGraphInput(prop);
                     if (fromProperty != null)
                     {
@@ -1193,7 +1204,7 @@ namespace UnityEditor.ShaderGraph.Drawing
             try
             {
                 m_ColorSpace = PlayerSettings.colorSpace;
-                m_RenderPipelineAsset = GraphicsSettings.renderPipelineAsset;
+                m_RenderPipelineAsset = GraphicsSettings.currentRenderPipeline;
 
                 var asset = AssetDatabase.LoadAssetAtPath<Object>(AssetDatabase.GUIDToAssetPath(assetGuid));
                 if (asset == null)
@@ -1232,6 +1243,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                 using (GraphLoadMarker.Auto())
                 {
                     m_LastSerializedFileContents = File.ReadAllText(path, Encoding.UTF8);
+
                     graphObject = CreateInstance<GraphObject>();
                     graphObject.hideFlags = HideFlags.HideAndDontSave;
                     graphObject.graph = new GraphData
@@ -1240,6 +1252,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                         isSubGraph = isSubGraph,
                         messageManager = messageManager
                     };
+
                     MultiJson.Deserialize(graphObject.graph, m_LastSerializedFileContents);
                     graphObject.graph.OnEnable();
                     graphObject.graph.ValidateGraph();
@@ -1253,8 +1266,7 @@ namespace UnityEditor.ShaderGraph.Drawing
                     };
                 }
 
-                UpdateTitle();
-
+                UpdateTitle(ignoreUnsavedChanges: true);
                 Repaint();
             }
             catch (Exception)
@@ -1275,7 +1287,7 @@ namespace UnityEditor.ShaderGraph.Drawing
 
         // returns true when the user is OK with closing the window or application (either they've saved dirty content, or are ok with losing it)
         // returns false when the user wants to cancel closing the window or application
-        private bool PromptSaveIfDirtyOnQuit()
+        internal bool PromptSaveIfDirtyOnQuit()
         {
             // only bother unless we've actually got data to preserve
             if (graphObject?.graph != null)
@@ -1335,6 +1347,16 @@ namespace UnityEditor.ShaderGraph.Drawing
             if (m_FrameAllAfterLayout)
                 graphEditorView.graphView.FrameAll();
             m_FrameAllAfterLayout = false;
+        }
+
+        private void OnBecameVisible()
+        {
+            isVisible = true;
+        }
+
+        private void OnBecameInvisible()
+        {
+            isVisible = false;
         }
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using NUnit;
@@ -15,6 +16,25 @@ using UnityEngine.VFX;
 
 public class HDRP_GraphicTestRunner
 {
+    private bool GPUResidentDrawerRequested()
+    {
+        bool forcedOn = false;
+        foreach (var arg in Environment.GetCommandLineArgs())
+        {
+            if (arg.Equals("-force-gpuresidentdrawer", StringComparison.InvariantCultureIgnoreCase))
+            {
+                forcedOn = true;
+                break;
+            }
+        }
+
+        var renderPipelineAsset = GraphicsSettings.currentRenderPipeline;
+        if (renderPipelineAsset is IGPUResidentRenderPipeline mbAsset)
+            return forcedOn || mbAsset.gpuResidentDrawerMode != GPUResidentDrawerMode.Disabled;
+
+        return false;
+    }
+
     [UnityTest]
     [PrebuildSetup("SetupGraphicsTestCases")]
     [UseGraphicsTestCases]
@@ -34,6 +54,7 @@ public class HDRP_GraphicTestRunner
         UnityEditor.ShaderUtil.allowAsyncCompilation = true;
         UnityEditor.EditorSettings.asyncShaderCompilation = true;
 
+		Debug.Log($"Running test case '{testCase}' with scene '{testCase.ScenePath}' {testCase.ReferenceImagePathLog}.");
         SceneManager.LoadScene(testCase.ScenePath);
 
         // Wait for scene loading to retrieve settings/camera.
@@ -47,6 +68,9 @@ public class HDRP_GraphicTestRunner
         {
             Assert.Fail("Missing camera for graphic tests.");
         }
+
+        if (!settings.gpuDrivenCompatible && GPUResidentDrawerRequested())
+            Assert.Ignore("Test scene is not compatible with GPU Driven and and will be skipped.");
 
         // Purpose is to setup proper test aspect ratio for the camera to "see" all objects and trigger related shader compilation tasks.
         int warmupTime = 1;
@@ -123,6 +147,9 @@ public class HDRP_GraphicTestRunner
 // #endif
 
 
+        if (!settings.gpuDrivenCompatible && GPUResidentDrawerRequested())
+            Assert.Ignore("Test scene is not compatible with GPU Driven and and will be skipped.");
+
         Time.captureFramerate = settings.captureFramerate;
 
         int waitFrames = settings.waitFrames;
@@ -198,12 +225,12 @@ public class HDRP_GraphicTestRunner
         if (settingsSG == null || !settingsSG.compareSGtoBI)
         {
             // Standard Test
-            ImageAssert.AreEqual(testCase.ReferenceImage, camera, settings?.ImageComparisonSettings);
+            ImageAssert.AreEqual(testCase.ReferenceImage, camera, settings?.ImageComparisonSettings, testCase.ReferenceImagePathLog);
 
             // For some reason, tests on mac os have started failing with render graph enabled by default.
             // Some tests have 400+ gcalloc in them. Unfortunately it's not reproductible outside of command line so it's impossible to debug.
             // That's why we don't test on macos anymore.
-            if (settings.checkMemoryAllocation && SystemInfo.graphicsDeviceType != GraphicsDeviceType.Metal)
+            if (settings.checkMemoryAllocation)
             {
                 yield return ImageAssert.CheckGCAllocWithCallstack(camera, settings?.ImageComparisonSettings);
             }
@@ -229,7 +256,7 @@ public class HDRP_GraphicTestRunner
             // First test: Shader Graph
             try
             {
-                ImageAssert.AreEqual(testCase.ReferenceImage, camera, (settings != null) ? settings.ImageComparisonSettings : null);
+                ImageAssert.AreEqual(testCase.ReferenceImage, camera, (settings != null) ? settings.ImageComparisonSettings : null, testCase.ReferenceImagePathLog);
             }
             catch (AssertionException)
             {
@@ -245,7 +272,7 @@ public class HDRP_GraphicTestRunner
             // Second test: HDRP/Lit Materials
             try
             {
-                ImageAssert.AreEqual(testCase.ReferenceImage, camera, (settings != null) ? settings.ImageComparisonSettings : null);
+                ImageAssert.AreEqual(testCase.ReferenceImage, camera, (settings != null) ? settings.ImageComparisonSettings : null, testCase.ReferenceImagePathLog);
             }
             catch (AssertionException)
             {
@@ -257,6 +284,18 @@ public class HDRP_GraphicTestRunner
             else if (sgFail) Assert.Fail("Shader Graph Objects failed.");
             else if (biFail) Assert.Fail("Non-Shader Graph Objects failed to match Shader Graph objects.");
         }
+
+
+        //// In Standalone, we need to reset the RTHandleSystem because on some devices with low memory we can easily run out
+        //// For example when going from MSAA4x to regular 1080p we'd have both sets of full sized buffer in memory.
+        //if (!Application.isEditor)
+        //{
+        //    HDRenderPipeline.currentPipeline?.ResetRTHandleReferenceSize(1, 1);
+
+        //    // Wait for RT dealloc to happen.
+        //    for (int i = 0; i < frameSkip; ++i)
+        //        yield return new WaitForEndOfFrame();
+        //}
 
 #if UNITY_EDITOR
         UnityEditor.ShaderUtil.allowAsyncCompilation = oldValueShaderUtil;

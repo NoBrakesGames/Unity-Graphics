@@ -21,6 +21,7 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
     float4x4 _CameraViewProjMatrix;
     float4x4 _InvViewProjMatrix;
     float4x4 _NonJitteredViewProjMatrix;
+    float4x4 _NonJitteredInvViewProjMatrix;
     float4x4 _PrevViewProjMatrix;
     float4x4 _PrevInvViewProjMatrix;
     float4 _WorldSpaceCameraPos_Internal;
@@ -34,6 +35,7 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
     float4 _DynamicResolutionFullscreenScale;
     float4 _ZBufferParams;
     float4 _ProjectionParams;
+    float4 _InvProjParams;
     float4 unity_OrthoParams;
     float4 _ScreenParams;
     float4 _FrustumPlanes[6];
@@ -46,6 +48,8 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
     float4 unity_DeltaTime;
     float4 _TimeParameters;
     float4 _LastTimeParameters;
+    float4 _PlanetCenterRadius;
+    float4 _PlanetUpAltitude;
     int _FogEnabled;
     int _PBRFogEnabled;
     int _EnableVolumetricFog;
@@ -54,7 +58,7 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
     float _FogColorMode;
     float _GlobalMipBias;
     float _GlobalMipBiasPow2;
-    float _Pad0;
+    uint _RayTracingCheckerIndex;
     float4 _MipFogParameters;
     float4 _HeightFogBaseScattering;
     float _HeightFogBaseExtinction;
@@ -82,15 +86,31 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
     float _UpDirectionX;
     float _UpDirectionY;
     float _BufferStride;
-    int _EnableUnderwater;
+    int _EnableWater;
+    float4 _WaterAmbientProbe;
+    float4 _UnderWaterScatteringExtinction;
+    float4 _UnderWaterUpHeight;
+    int _UnderWaterSurfaceIndex;
+    float _UnderWaterCausticsIntensity;
+    float _UnderWaterCausticsPlaneBlendDistance;
+    float _UnderWaterCausticsTilingFactor;
+    float4x4 _UnderWaterSurfaceTransform_Inverse;
+    float _UnderWaterCausticsMaxLOD;
+    float _UnderWaterCausticsShadowIntensity;
+    float _UnderWaterCausticsRegionSize;
+    int _CustomOutputForCustomPass;
+    int _PreRefractionPass;
     int _SpecularFade;
     uint _EnableRenderingLayers;
     int _ReflectionsMode;
-    int _UnusedPadding2;
     uint _DirectionalLightCount;
     uint _PunctualLightCount;
     uint _AreaLightCount;
     uint _EnvLightCount;
+    uint _WorldDirectionalLightCount;
+    uint _WorldPunctualLightCount;
+    uint _WorldAreaLightCount;
+    uint _WorldEnvLightCount;
     int _EnvLightSkyEnabled;
     uint _CascadeShadowCount;
     int _DirectionalShadowIndex;
@@ -159,6 +179,8 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
     uint _EnableComputeThickness;
     float _VolumetricCloudsFallBackValue;
     float4 _VolumetricCloudsShadowOriginToggle;
+    float4 _ColorPyramidUvScaleAndLimitCurrentFrame;
+    float4 _ColorPyramidUvScaleAndLimitPrevFrame;
 CBUFFER_END
 
 

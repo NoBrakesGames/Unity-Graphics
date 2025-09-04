@@ -12,6 +12,7 @@ namespace UnityEditor.Rendering.HighDefinition
         SerializedDataParameter m_ClusterCount;
         SerializedDataParameter m_SortingQuality;
         SerializedDataParameter m_TileOpacityThreshold;
+        SerializedDataParameter m_AlphaDepthWriteThreshold;
 
         public override void OnEnable()
         {
@@ -23,20 +24,24 @@ namespace UnityEditor.Rendering.HighDefinition
             m_ClusterCount         = Unpack(o.Find(x => x.clusterCount));
             m_SortingQuality       = Unpack(o.Find(x => x.sortingQuality));
             m_TileOpacityThreshold = Unpack(o.Find(x => x.tileOpacityThreshold));
+            m_AlphaDepthWriteThreshold = Unpack(o.Find(x => x.writeDepthAlphaThreshold));
         }
 
 
         public override void OnInspectorGUI()
         {
+            HDEditorUtils.EnsureFrameSetting(FrameSettingsField.HighQualityLineRendering);
+
             HDRenderPipelineAsset currentAsset = HDRenderPipeline.currentAsset;
-            if (!currentAsset?.currentPlatformRenderPipelineSettings.supportHighQualityLineRendering ?? false)
+            bool notSupported = currentAsset != null && !currentAsset.currentPlatformRenderPipelineSettings.supportHighQualityLineRendering;
+            if (notSupported)
             {
                 EditorGUILayout.Space();
-                HDEditorUtils.QualitySettingsHelpBox("The current HDRP Asset does not support High Quality Line Rendering.", MessageType.Error,
+                HDEditorUtils.QualitySettingsHelpBox("The current HDRP Asset does not support High Quality Line Rendering.", MessageType.Warning,
                     HDRenderPipelineUI.ExpandableGroup.Rendering,
                     HDRenderPipelineUI.ExpandableRendering.Water, "m_RenderPipelineSettings.supportHighQualityLineRendering");
-                return;
             }
+            using var disableScope = new EditorGUI.DisabledScope(notSupported);
 
             EditorGUILayout.LabelField("General", EditorStyles.miniLabel);
             PropertyField(m_Enable);
@@ -46,6 +51,7 @@ namespace UnityEditor.Rendering.HighDefinition
             PropertyField(m_ClusterCount);
             PropertyField(m_SortingQuality);
             PropertyField(m_TileOpacityThreshold);
+            PropertyField(m_AlphaDepthWriteThreshold);
         }
     }
 }

@@ -22,12 +22,12 @@
 
 
 // normalWS is the vertex normal if available or shading normal use to bias the shadow position
-float GetDirectionalShadowAttenuation(HDShadowContext shadowContext, float2 positionSS, float3 positionWS, float3 normalWS, int shadowDataIndex, float3 L)
+float GetDirectionalShadowAttenuation(inout HDShadowContext shadowContext, float2 positionSS, float3 positionWS, float3 normalWS, int shadowDataIndex, float3 L)
 {
 #if SHADOW_AUTO_FLIP_NORMAL
     normalWS *= FastSign(dot(normalWS, L));
 #endif
-#if defined(SHADOW_ULTRA_LOW) || defined(SHADOW_LOW) || defined(SHADOW_MEDIUM)
+#if defined(DIRECTIONAL_SHADOW_ULTRA_LOW) || defined(DIRECTIONAL_SHADOW_LOW) || defined(DIRECTIONAL_SHADOW_MEDIUM)
     return EvalShadow_CascadedDepth_Dither(shadowContext, _ShadowmapCascadeAtlas, s_linear_clamp_compare_sampler, positionSS, positionWS, normalWS, shadowDataIndex, L);
 #else
     return EvalShadow_CascadedDepth_Blend(shadowContext, _ShadowmapCascadeAtlas, s_linear_clamp_compare_sampler, positionSS, positionWS, normalWS, shadowDataIndex, L);
@@ -49,10 +49,11 @@ float GetPunctualShadowAttenuation(HDShadowContext shadowContext, float2 positio
 
     if (pointLight)
     {
-        sd.rot0 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot0;
-        sd.rot1 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot1;
-        sd.rot2 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot2;
-        sd.atlasOffset = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].atlasOffset;
+        const int cubeFaceOffset = CubeMapFaceID(-L);
+        sd.rot0 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot0;
+        sd.rot1 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot1;
+        sd.rot2 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot2;
+        sd.atlasOffset = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].atlasOffset;
     }
 
     if (sd.isInCachedAtlas > 0) // This is a scalar branch.
@@ -77,11 +78,12 @@ float GetPunctualShadowClosestDistance(HDShadowContext shadowContext, SamplerSta
 
     if (pointLight)
     {
-        sd.shadowToWorld = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].shadowToWorld;
-        sd.atlasOffset = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].atlasOffset;
-        sd.rot0 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot0;
-        sd.rot1 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot1;
-        sd.rot2 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot2;
+        const int cubeFaceOffset = CubeMapFaceID(-L);
+        sd.shadowToWorld = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].shadowToWorld;
+        sd.atlasOffset = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].atlasOffset;
+        sd.rot0 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot0;
+        sd.rot1 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot1;
+        sd.rot2 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot2;
     }
 
     if (sd.isInCachedAtlas > 0) // This is a scalar branch.

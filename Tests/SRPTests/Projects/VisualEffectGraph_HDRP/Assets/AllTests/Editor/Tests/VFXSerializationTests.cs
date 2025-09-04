@@ -4,19 +4,15 @@ using System.Collections.Generic;
 using System.Linq;
 using System.IO;
 using System.Collections;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 using NUnit.Framework;
-
+using UnityEditor.VFX.Block;
 using UnityEditor.VFX.Block.Test;
 using UnityEditor.VFX.UI;
 
 using UnityEngine;
 using UnityEngine.VFX;
 using UnityEngine.TestTools;
-
-using Task = System.Threading.Tasks.Task;
 
 namespace UnityEditor.VFX.Test
 {
@@ -30,6 +26,22 @@ namespace UnityEditor.VFX.Test
         private VisualEffectAsset CreateAssetAtPath(string path)
         {
             return VisualEffectAssetEditorUtility.CreateNewAsset(path);
+        }
+
+        [Test]
+        public void VFXMemorySerializer_Dont_Crash_But_Trigger_Exception_On_Invalid_Usage()
+        {
+            var vfxGraph = VFXTestCommon.MakeTemporaryGraph();
+            var spawner = ScriptableObject.CreateInstance<VFXBasicSpawner>();
+            vfxGraph.AddChild(spawner);
+
+            var dependencies = new HashSet<ScriptableObject>(new [] { vfxGraph });
+            vfxGraph.CollectDependencies(dependencies);
+            dependencies.Add(null); //Voluntary add an invalid element
+
+            Byte[] backup = null;
+            Assert.Throws<NullReferenceException>( () => backup = VFXMemorySerializer.StoreObjectsToByteArray(dependencies.ToArray()));
+            Assert.IsNull(backup);
         }
 
         [Test]
@@ -217,11 +229,12 @@ namespace UnityEditor.VFX.Test
                 var initialize = graph.children.OfType<VFXBasicInitialize>().FirstOrDefault(o => o.label == "position_sphere");
                 Assert.IsNotNull(initialize);
 
-                var sphereBlocks = initialize.children.OfType<Block.PositionSphere>().ToArray();
+                var sphereBlocks = initialize.children.OfType<Block.PositionShape>().Where(o => (PositionShapeBase.Type)o.GetSettingValue("shape") == PositionShapeBase.Type.Sphere).ToArray();
                 Assert.AreEqual(4, sphereBlocks.Length);
                 foreach (var block in sphereBlocks)
                 {
-                    Assert.AreEqual(3, block.inputSlots.Count);
+                    //N.B: PositionSphereDeprecatedV2 had only one dimension sequencer, it has been fixed with PositionShape
+                    Assert.AreEqual(4, block.inputSlots.Count);
 
                     if (block != sphereBlocks.Last())
                     {
@@ -229,7 +242,7 @@ namespace UnityEditor.VFX.Test
                         Assert.IsTrue(block.inputSlots[0][0][1].HasLink()); //radius
 
                         if (block == sphereBlocks.First())
-                            Assert.IsTrue(block.inputSlots[0][1]); //arc
+                            Assert.IsTrue(block.inputSlots[0][1].HasLink()); //arc
                     }
                     else
                     {
@@ -241,8 +254,10 @@ namespace UnityEditor.VFX.Test
                         Assert.AreEqual(5.0f, tArcSphere.arc);
                     }
 
-                    Assert.AreEqual(6.0f, block.inputSlots[1].value);
-                    Assert.AreEqual(0.7f, block.inputSlots[2].value);
+                    Assert.AreEqual(0.0f, block.inputSlots[1].value); //height sequencer
+                    Assert.IsTrue(block.inputSlots[1].HasLink());
+                    Assert.AreEqual(0.7f, block.inputSlots[2].value); //arc sequencer
+                    Assert.AreEqual(6.0f, block.inputSlots[3].value); //thickness
                 }
             }
 
@@ -251,7 +266,7 @@ namespace UnityEditor.VFX.Test
                 var initialize = graph.children.OfType<VFXBasicInitialize>().FirstOrDefault(o => o.label == "position_circle");
                 Assert.IsNotNull(initialize);
 
-                var circleBlock = initialize.children.OfType<Block.PositionCircle>().ToArray();
+                var circleBlock = initialize.children.OfType<Block.PositionShape>().Where(o => (PositionShapeBase.Type)o.GetSettingValue("shape") == PositionShapeBase.Type.Circle).ToArray();
                 Assert.AreEqual(4, circleBlock.Length);
                 foreach (var block in circleBlock)
                 {
@@ -275,8 +290,8 @@ namespace UnityEditor.VFX.Test
                         Assert.AreEqual(5.0f, tArcCircle.arc);
                     }
 
-                    Assert.AreEqual(6.0f, block.inputSlots[1].value);
-                    Assert.AreEqual(0.7f, block.inputSlots[2].value);
+                    Assert.AreEqual(0.7f, block.inputSlots[1].value);
+                    Assert.AreEqual(6.0f, block.inputSlots[2].value);
                 }
             }
 
@@ -285,7 +300,7 @@ namespace UnityEditor.VFX.Test
                 var initialize = graph.children.OfType<VFXBasicInitialize>().FirstOrDefault(o => o.label == "position_cone");
                 Assert.IsNotNull(initialize);
 
-                var coneBlocks = initialize.children.OfType<Block.PositionCone>().ToArray();
+                var coneBlocks = initialize.children.OfType<Block.PositionShape>().Where(o => (PositionShapeBase.Type)o.GetSettingValue("shape") == PositionShapeBase.Type.Cone).ToArray();
                 Assert.AreEqual(3, coneBlocks.Length);
                 foreach (var block in coneBlocks)
                 {
@@ -313,9 +328,9 @@ namespace UnityEditor.VFX.Test
                         Assert.AreEqual(0.7f, tArcCone.arc);
                     }
 
-                    Assert.AreEqual(8.0f, block.inputSlots[1].value);
-                    Assert.AreEqual(0.9f, block.inputSlots[2].value);
-                    Assert.AreEqual(1.0f, block.inputSlots[3].value);
+                    Assert.AreEqual(0.9f, block.inputSlots[1].value);
+                    Assert.AreEqual(1.0f, block.inputSlots[2].value);
+                    Assert.AreEqual(8.0f, block.inputSlots[3].value);
                 }
             }
 
@@ -324,11 +339,11 @@ namespace UnityEditor.VFX.Test
                 var initialize = graph.children.OfType<VFXBasicInitialize>().FirstOrDefault(o => o.label == "position_torus");
                 Assert.IsNotNull(initialize);
 
-                var torusBlocks = initialize.children.OfType<Block.PositionTorus>().ToArray();
+                var torusBlocks = initialize.children.OfType<Block.PositionShape>().Where(o => (PositionShapeBase.Type)o.GetSettingValue("shape") == PositionShapeBase.Type.Torus).ToArray();
                 Assert.AreEqual(3, torusBlocks.Length);
                 foreach (var block in torusBlocks)
                 {
-                    Assert.AreEqual(3, block.inputSlots.Count);
+                    Assert.AreEqual(4, block.inputSlots.Count);
 
                     if (block != torusBlocks.Last())
                     {
@@ -337,7 +352,7 @@ namespace UnityEditor.VFX.Test
                         Assert.IsTrue(block.inputSlots[0][0][2].HasLink()); //minorRadius
 
                         if (block == torusBlocks.First())
-                            Assert.IsTrue(block.inputSlots[0][1]); //arc
+                            Assert.IsTrue(block.inputSlots[0][1].HasLink()); //arc
                     }
                     else
                     {
@@ -350,8 +365,9 @@ namespace UnityEditor.VFX.Test
                         Assert.AreEqual(0.6f, tArcTorus.arc);
                     }
 
-                    Assert.AreEqual(7.0f, block.inputSlots[1].value);
-                    Assert.AreEqual(0.8f, block.inputSlots[2].value);
+                    Assert.IsTrue(block.inputSlots[1].HasLink()); //height sequencer
+                    Assert.AreEqual(0.8f, block.inputSlots[2].value); //arc sequencer
+                    Assert.AreEqual(7.0f, block.inputSlots[3].value); //thickness
                 }
             }
 
@@ -360,7 +376,7 @@ namespace UnityEditor.VFX.Test
                 var initialize = graph.children.OfType<VFXBasicUpdate>().FirstOrDefault(o => o.label == "kill_sphere");
                 Assert.IsNotNull(initialize);
 
-                var sphereBlocks = initialize.children.OfType<Block.KillSphere>().ToArray();
+                var sphereBlocks = initialize.children.OfType<Block.CollisionBase>().Where(o => (CollisionBase.Behavior)o.GetSetting("behavior").value == CollisionBase.Behavior.Kill).ToArray();
                 Assert.AreEqual(3, sphereBlocks.Length);
                 foreach (var block in sphereBlocks)
                 {
@@ -387,11 +403,11 @@ namespace UnityEditor.VFX.Test
                 var initialize = graph.children.OfType<VFXBasicUpdate>().FirstOrDefault(o => o.label == "collision_sphere");
                 Assert.IsNotNull(initialize);
 
-                var sphereBlocks = initialize.children.OfType<Block.CollisionSphere>().ToArray();
+                var sphereBlocks = initialize.children.OfType<Block.CollisionShape>().Where(o => (Block.CollisionShapeBase.Type)o.GetSetting("shape").value == Block.CollisionShapeBase.Type.Sphere) .ToArray();
                 Assert.AreEqual(3, sphereBlocks.Length);
                 foreach (var block in sphereBlocks)
                 {
-                    Assert.AreEqual(6, block.inputSlots.Count);
+                    Assert.AreEqual(7, block.inputSlots.Count);
 
                     if (block != sphereBlocks.Last())
                     {
@@ -409,9 +425,10 @@ namespace UnityEditor.VFX.Test
 
                     Assert.AreEqual(0.2f, block.inputSlots[1].value);
                     Assert.AreEqual(0.3f, block.inputSlots[2].value);
-                    Assert.AreEqual(0.4f, block.inputSlots[3].value);
-                    Assert.AreEqual(0.5f, block.inputSlots[4].value);
-                    Assert.AreEqual(0.6f, block.inputSlots[5].value);
+                    Assert.AreEqual(0.0f, block.inputSlots[3].value); // Overridden bounce speed threshold
+                    Assert.AreEqual(0.4f, block.inputSlots[4].value);
+                    Assert.AreEqual(0.5f, block.inputSlots[5].value);
+                    Assert.AreEqual(0.6f, block.inputSlots[6].value);
                 }
             }
 
@@ -420,11 +437,11 @@ namespace UnityEditor.VFX.Test
                 var initialize = graph.children.OfType<VFXBasicUpdate>().FirstOrDefault(o => o.label == "collision_cylinder");
                 Assert.IsNotNull(initialize);
 
-                var coneBlocks = initialize.children.OfType<Block.CollisionCone>().ToArray();
+                var coneBlocks = initialize.children.OfType<Block.CollisionShape>().Where(o => (Block.CollisionShapeBase.Type)o.GetSetting("shape").value == Block.CollisionShapeBase.Type.Cone).ToArray();
                 Assert.AreEqual(3, coneBlocks.Length);
                 foreach (var block in coneBlocks)
                 {
-                    Assert.AreEqual(6, block.inputSlots.Count);
+                    Assert.AreEqual(7, block.inputSlots.Count);
 
                     if (block != coneBlocks.Last())
                     {
@@ -446,9 +463,58 @@ namespace UnityEditor.VFX.Test
 
                     Assert.AreEqual(0.2f, block.inputSlots[1].value);
                     Assert.AreEqual(0.3f, block.inputSlots[2].value);
-                    Assert.AreEqual(0.4f, block.inputSlots[3].value);
-                    Assert.AreEqual(0.5f, block.inputSlots[4].value);
-                    Assert.AreEqual(0.6f, block.inputSlots[5].value);
+                    Assert.AreEqual(0.0f, block.inputSlots[3].value); // Overridden bounce speed threshold
+                    Assert.AreEqual(0.4f, block.inputSlots[4].value);
+                    Assert.AreEqual(0.5f, block.inputSlots[5].value);
+                    Assert.AreEqual(0.6f, block.inputSlots[6].value);
+                }
+            }
+        }
+
+        [Test]
+        public void Sanitize_Position_Block_Shape()
+        {
+            var kSourceAsset = "Assets/AllTests/Editor/Tests/VFXSanitizePositionShapeV2.vfx_";
+            var graph = VFXTestCommon.CopyTemporaryGraph(kSourceAsset);
+
+            Assert.AreEqual(2, graph.children.OfType<VFXBasicUpdate>().Count());
+
+            var updateRandom = graph.children.OfType<VFXBasicUpdate>().FirstOrDefault(o => o.label == "Random");
+            var updateCustom = graph.children.OfType<VFXBasicUpdate>().FirstOrDefault(o => o.label == "Custom");
+
+            Assert.IsNotNull(updateRandom);
+            Assert.IsNotNull(updateCustom);
+
+            Assert.AreEqual(6, updateRandom.children.Count());
+            Assert.AreEqual(6, updateCustom.children.Count());
+
+            var expectedOrder = new [] { PositionShapeBase.Type.OrientedBox, PositionShapeBase.Type.Sphere, PositionShapeBase.Type.Cone, PositionShapeBase.Type.Torus, PositionShapeBase.Type.Line, PositionShapeBase.Type.Circle };
+            for (int i = 0; i < 6; ++i)
+            {
+                var expectedShapeType = expectedOrder[i];
+                var randomBlock = updateRandom[i] as PositionShape;
+                var customBlock = updateCustom[i] as PositionShape;
+
+                Assert.IsNotNull(randomBlock);
+                Assert.IsNotNull(customBlock);
+
+                Assert.AreEqual(PositionBase.SpawnMode.Random, randomBlock.spawnMode);
+                if (expectedShapeType != PositionShapeBase.Type.OrientedBox)
+                    Assert.AreEqual(PositionBase.SpawnMode.Custom, customBlock.spawnMode);
+                Assert.AreEqual(expectedShapeType, customBlock.GetSettingValue("shape"));
+
+                if (expectedShapeType == PositionShapeBase.Type.Sphere ||
+                    expectedShapeType == PositionShapeBase.Type.Torus)
+                {
+                    var heightSequencer = customBlock.inputSlots.FirstOrDefault(o => o.name == "heightSequencer");
+                    Assert.IsNotNull(heightSequencer);
+                    Assert.IsTrue(heightSequencer.HasLink());
+
+                    var owner = heightSequencer.LinkedSlots.First().owner;
+                    Assert.IsTrue(owner is Operator.Random);
+
+                    var random = owner as Operator.Random;
+                    Assert.IsFalse(random.constant);
                 }
             }
         }
@@ -573,9 +639,8 @@ namespace UnityEditor.VFX.Test
             Assert.AreEqual(0, graph.children.OfType<VFXParameter>().SelectMany(o => o.nodes).Where(o => !o.linkedSlots.Any()).Count());
             yield return null;
 
-            var window = VFXViewWindow.GetWindow<VFXViewWindow>();
-            var resource = graph.GetResource();
-            window.LoadAsset(resource.asset, null);
+            VFXViewWindow.GetWindow((VFXGraph)null, true)
+                .LoadAsset(graph.GetResource().asset, null);
             yield return null;
 
             Assert.AreEqual(8, graph.children.OfType<VFXParameter>().Count());
@@ -918,7 +983,7 @@ namespace UnityEditor.VFX.Test
             var name = "unity";
             Action<VisualEffectAsset> write = delegate(VisualEffectAsset asset)
             {
-                var parameter = VFXLibrary.GetParameters().First(o => o.name == "Vector2").CreateInstance();
+                var parameter = VFXLibrary.GetParameters().First(o => o.modelType == typeof(Vector2)).CreateInstance();
                 parameter.SetSettingValue("m_Exposed", true);
                 parameter.SetSettingValue("m_ExposedName", name);
                 asset.GetResource().GetOrCreateGraph().AddChild(parameter);
@@ -944,7 +1009,7 @@ namespace UnityEditor.VFX.Test
             {
                 var graph = asset.GetResource().GetOrCreateGraph();
                 var add = ScriptableObject.CreateInstance<Operator.Add>();
-                var parameter = VFXLibrary.GetParameters().First(o => o.name == "Vector2").CreateInstance();
+                var parameter = VFXLibrary.GetParameters().First(o => o.modelType == typeof(Vector2)).CreateInstance();
                 add.SetOperandType(0, typeof(Vector2));
                 graph.AddChild(add);
                 graph.AddChild(parameter);
@@ -970,7 +1035,7 @@ namespace UnityEditor.VFX.Test
         {
             Action<VisualEffectAsset> write = delegate(VisualEffectAsset asset)
             {
-                var builtIn = VFXLibrary.GetOperators().First(o => o.name.StartsWith("Total Time (VFX)")).CreateInstance();
+                var builtIn = VFXLibrary.GetOperators().First(o => o.variant.name.StartsWith("Total Time (VFX)")).CreateInstance();
                 asset.GetResource().GetOrCreateGraph().AddChild(builtIn);
                 Assert.AreEqual(VFXExpressionOperation.TotalTime, builtIn.outputSlots[0].GetExpression().operation);
             };
@@ -991,7 +1056,7 @@ namespace UnityEditor.VFX.Test
             {
                 var graph = asset.GetResource().GetOrCreateGraph();
                 var add = ScriptableObject.CreateInstance<Operator.Add>();
-                var builtIn = VFXLibrary.GetOperators().First(o => o.name.StartsWith("Total Time (VFX)")).CreateInstance();
+                var builtIn = VFXLibrary.GetOperators().First(o => o.variant.name.StartsWith("Total Time (VFX)")).CreateInstance();
                 graph.AddChild(builtIn);
                 graph.AddChild(add);
                 add.inputSlots[0].Link(builtIn.outputSlots[0]);
@@ -1029,8 +1094,8 @@ namespace UnityEditor.VFX.Test
 
             Action<VisualEffectAsset> write = delegate(VisualEffectAsset asset)
             {
-                var sizeCurrent = VFXLibrary.GetOperators().First(o => o.name.Contains(testAttribute) && o.modelType == typeof(VFXAttributeParameter)).CreateInstance();
-                var sizeSource = VFXLibrary.GetOperators().First(o => o.name.Contains(testAttribute) && o.modelType == typeof(VFXAttributeParameter)).CreateInstance();
+                var sizeCurrent = VFXLibrary.GetOperators().First(o => o.variant.name.Contains(testAttribute, StringComparison.OrdinalIgnoreCase) && o.variant.modelType == typeof(VFXAttributeParameter)).CreateInstance();
+                var sizeSource = VFXLibrary.GetOperators().First(o => o.variant.name.Contains(testAttribute, StringComparison.OrdinalIgnoreCase) && o.variant.modelType == typeof(VFXAttributeParameter)).CreateInstance();
                 (sizeSource as VFXAttributeParameter).SetSettingValue("location", VFXAttributeLocation.Source);
                 asset.GetResource().GetOrCreateGraph().AddChild(sizeCurrent);
                 asset.GetResource().GetOrCreateGraph().AddChild(sizeSource);
@@ -1245,8 +1310,8 @@ namespace UnityEditor.VFX.Test
             yield return null;
 
             // Add a static mesh output
-            var staticMeshOutputContextDesc = VFXLibrary.GetContexts().Single(x => x.model is VFXStaticMeshOutput);
-            var staticMeshOutputContext = (VFXStaticMeshOutput)window.graphView.controller.AddVFXContext(Vector2.zero, staticMeshOutputContextDesc);
+            var staticMeshOutputContextDesc = VFXLibrary.GetContexts().Single(x => x.modelType == typeof(VFXStaticMeshOutput));
+            var staticMeshOutputContext = (VFXStaticMeshOutput)window.graphView.controller.AddVFXContext(Vector2.zero, staticMeshOutputContextDesc.variant);
             var shaderGraph = AssetDatabase.LoadAssetAtPath<Shader>("Assets/AllTests/Editor/Tests/Modify_SG_Property_A.shadergraph");
             staticMeshOutputContext.SetSettingValue("shader", shaderGraph);
             window.graphView.OnSave();
@@ -1265,6 +1330,137 @@ namespace UnityEditor.VFX.Test
             Assert.IsNull(staticMeshOutputContext.GetSetting("shader").value, "The shader was expected to be null but it didn't. Probably the previous value has been restored when saving");
         }
 
+        [UnityTest, Description("Cover case UUM-553")]
+        public IEnumerator Unexpected_Import_Issue_With_Diffusion_Profile()
+        {
+            var packagePath = "Assets/AllTests/Editor/Tests/Import_Diffusion_Profile_Repro_553.unitypackage";
+            AssetDatabase.ImportPackage(packagePath, false);
+            AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+
+            //Shouldn't log Repro_553_EmptySG_SSR_DiffProfile.shadergraph has been scheduled for reimport during the Refresh loop and Loading of it has been attempted.
+            for (int i = 0; i < 4; ++i)
+                yield return null;
+        }
+
+        [Test, Description("Cover regression UUM-83598")]
+        public void Sanitize_Custom_Attribute_With_Random()
+        {
+            var kSourceAsset = "Assets/AllTests/Editor/Tests/Repro_UUM_83598.vfx_";
+            var graph = VFXTestCommon.CopyTemporaryGraph(kSourceAsset);
+            Assert.IsNotNull(graph);
+
+            var initialize = graph.GetGraph().children.OfType<VFXBasicInitialize>().Single();
+            Assert.IsNotNull(initialize);
+
+            Assert.AreEqual(2u, initialize.children.Count());
+            Assert.AreEqual(2u, initialize.children.OfType<SetAttribute>().Count());
+            var sizeExpected = (string)initialize.children.First().GetSetting("attribute").value;
+            var customExpected = (string)initialize.children.Last().GetSetting("attribute").value;
+            Assert.AreEqual(VFXAttribute.Size.name, sizeExpected);
+            Assert.AreEqual("CustomAttribute", customExpected);
+
+            var customAttribute = graph.customAttributes.SingleOrDefault(o => o.attributeName == customExpected);
+            Assert.IsNotNull(customAttribute);
+
+            foreach (var block in initialize.children)
+            {
+                var random = (RandomMode)block.GetSetting("Random").value;
+                Assert.AreEqual(RandomMode.Uniform, random);
+                Assert.AreEqual(2u, block.inputSlots.Count);
+                Assert.AreEqual("A", block.inputSlots[0].name);
+                Assert.AreEqual("B", block.inputSlots[1].name);
+                Assert.AreEqual(typeof(float), block.inputSlots[0].property.type);
+                Assert.AreEqual(typeof(float), block.inputSlots[1].property.type);
+                Assert.AreEqual(0.0f, block.inputSlots[0].value);
+                Assert.AreEqual(1.0f, block.inputSlots[1].value);
+            }
+        }
+
+        [OneTimeTearDown]
+        public void CleanUp()
+        {
+            File.WriteAllText(s_Modify_SG_Property_VFX, m_Modify_SG_Property_VFX);
+            File.WriteAllText(s_Modify_SG_Property_SG_A, m_Modify_SG_Property_SG_A);
+            File.WriteAllText(s_Modify_SG_Property_SG_B, m_Modify_SG_Property_SG_B);
+
+            VFXTestCommon.DeleteAllTemporaryGraph();
+        }
+    }
+
+    [TestFixture]
+    public class VFXSerializationTestsWithCustomLogger
+    {
+        private CustomLogHandler m_CustomLogHandler;
+
+        [OneTimeSetUp]
+        public void SetUp()
+        {
+            VFXViewWindow.GetAllWindows().ToList().ForEach(x => x.Close());
+            m_CustomLogHandler = new CustomLogHandler();
+        }
+
+        [UnityTest, Description("Cover case UUM-69716")]
+        public IEnumerator Unexpected_Failure_With_Missing_Type()
+        {
+            m_CustomLogHandler.Reset();
+            m_CustomLogHandler.ExpectedLog(LogType.Error, "Exception while sanitizing model");
+            m_CustomLogHandler.ExpectedLog(LogType.Error, "Unable to find type: ShaderGlobalsVFXStruct");
+
+            //For reference the former type serialized in this package was something like
+            //[VFXType(VFXTypeAttribute.Usage.GraphicsBuffer)]
+            //struct ShaderGlobalsVFXStruct
+            //{
+            //    public Color GlobalVFXStruct_c;
+            //    public float GlobalVFXStruct_f;
+            //}
+            var packagePath = "Assets/AllTests/Editor/Tests/Repro_UUM_69716.unitypackage";
+            AssetDatabase.ImportPackage(packagePath, false);
+            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+
+            for (int i = 0; i < 4; ++i)
+                yield return null;
+
+            var expectedPath = "Assets/TmpTests/GlobalsTester.vfx";
+            AssetDatabase.ImportAsset(expectedPath);
+            var asset = AssetDatabase.LoadAssetAtPath<VisualEffectAsset>(expectedPath);
+            Assert.IsNotNull(asset);
+
+            //Trying to open the asset, it shouldn't fail
+            VisualEffectAssetEditor.OnOpenVFX(asset.GetInstanceID(), 0);
+            var window = VFXViewWindow.GetWindow(asset);
+            Assert.AreNotEqual(0, window.graphView.controller.allChildren.Count());
+            window.graphView.OnSave();
+        }
+
+        [UnityTest, Description("Cover regression UUM-5728")]
+        public IEnumerator ShaderGraph_Lit_On_Unlit()
+        {
+            LogAssert.Expect(LogType.Error, "Invalid VFX Particle System. It is skipped.");
+
+            var reproContent = "Assets/AllTests/Editor/Tests/VFXSerialization_Repro_5728.zip";
+            var tempDest = VFXTestCommon.tempBasePath + "/Repro_5728";
+
+            System.IO.Compression.ZipFile.ExtractToDirectory(reproContent, tempDest);
+
+            m_CustomLogHandler.Reset();
+            m_CustomLogHandler.ExpectedLog(LogType.Error, "You must use an unlit vfx master node with an unlit output");
+            m_CustomLogHandler.ExpectedLog(LogType.Error, "Invalid VFX Particle System. It is skipped.");
+            m_CustomLogHandler.ExpectedException(typeof(InvalidOperationException), "Unhandled log message: '[Error] Unity cannot compile the VisualEffectAsset at path \"Assets/TmpTests/Repro_5728/Repro_5728.vfx\"");
+
+            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            SceneManagement.EditorSceneManager.OpenScene(tempDest + "/Repro_5728.unity");
+
+            for (int i = 0; i < 4; ++i)
+                yield return null;
+
+            SceneManagement.EditorSceneManager.OpenScene("Assets/empty.unity");
+
+            for (int i = 0; i < 4; ++i)
+                yield return null;
+        }
+
         [UnityTest, Description("Cover regression UUM-13863")]
         public IEnumerator Crash_On_StoreObject_While_Modifying_SG()
         {
@@ -1272,8 +1468,15 @@ namespace UnityEditor.VFX.Test
             var tempDest = VFXTestCommon.tempBasePath + "/Repro_13863";
 
             System.IO.Compression.ZipFile.ExtractToDirectory(reproContent, tempDest);
+
+            m_CustomLogHandler.Reset();
+            m_CustomLogHandler.ExpectedLog(LogType.Error, "Gradient, Diffusion Profile, Virtual Texture, blackboard properties in Shader Graph are not currently supported in Visual Effect Shaders.");
+            m_CustomLogHandler.ExpectedLog(LogType.Error, "Diffusion Profile blackboard properties in Shader Graph are not currently supported in Visual Effect Shaders.");
+
             AssetDatabase.Refresh();
             yield return null;
+
+            m_CustomLogHandler.Clear();
 
             var asset = AssetDatabase.LoadAssetAtPath<VisualEffectAsset>(tempDest + "/Repro_13863.vfx");
             Assert.IsNotNull(asset);
@@ -1309,107 +1512,17 @@ namespace UnityEditor.VFX.Test
                 yield return null;
         }
 
-        [OneTimeTearDown]
-        public void CleanUp()
+        [TearDown]
+        public void Clean()
         {
-            File.WriteAllText(s_Modify_SG_Property_VFX, m_Modify_SG_Property_VFX);
-            File.WriteAllText(s_Modify_SG_Property_SG_A, m_Modify_SG_Property_SG_A);
-            File.WriteAllText(s_Modify_SG_Property_SG_B, m_Modify_SG_Property_SG_B);
-
             VFXTestCommon.DeleteAllTemporaryGraph();
-        }
-    }
-
-
-    [TestFixture]
-    public class VFXSerializationTestsWithCustomLogger
-    {
-        private ILogHandler m_BackupLogHandler;
-
-        [OneTimeSetUp]
-        public void SetUp()
-        {
-            VFXViewWindow.GetAllWindows().ToList().ForEach(x => x.Close());
-            m_BackupLogHandler = Debug.unityLogger.logHandler;
-        }
-
-        //Equivalent of LogAssert but always works during import
-        //LogAssert.Expect(LogType.Error, new Regex("You must use an unlit vfx master node with an unlit output"));
-        //LogAssert.Expect(LogType.Error, new Regex("System.InvalidOperationException"));
-        //It also provides the ability of breaking on log while running test
-        class ShaderGraph_Lit_On_Unlit_Logger : ILogHandler
-        {
-            public ILogHandler m_ForwardHandler;
-
-            public bool m_HasLoggedMustUnlit;
-            public bool m_HasLoggedCantCompile;
-
-            public void LogFormat(LogType logType, UnityEngine.Object context, string format, params object[] args)
-            {
-                if (logType == LogType.Error)
-                {
-                    var result = string.Format(format, args);
-                    if (result.StartsWith("You must use an unlit vfx master node with an unlit output"))
-                    {
-                        m_HasLoggedMustUnlit = true;
-                        return;
-                    }
-
-                    if (result.StartsWith("Unity cannot compile the VisualEffectAsset at path \"Assets/TmpTests/Repro_5728/Repro_5728.vfx\""))
-                    {
-                        m_HasLoggedCantCompile = true;
-                        return;
-                    }
-                }
-
-                m_ForwardHandler.LogFormat(logType, context, format, args);
-            }
-
-            public void LogException(Exception exception, UnityEngine.Object context)
-            {
-                if (exception is InvalidOperationException invalidOperationException
-                    && invalidOperationException.Message.StartsWith("Unhandled log message: '[Error] Unity cannot compile the VisualEffectAsset at path \"Assets/TmpTests/Repro_5728/Repro_5728.vfx\""))
-                {
-                    return;
-                }
-
-                m_ForwardHandler.LogException(exception, context);
-            }
-        }
-
-        [UnityTest, Description("Cover regression UUM-5728")]
-        public IEnumerator ShaderGraph_Lit_On_Unlit()
-        {
-            var reproContent = "Assets/AllTests/Editor/Tests/VFXSerialization_Repro_5728.zip";
-            var tempDest = VFXTestCommon.tempBasePath + "/Repro_5728";
-
-            System.IO.Compression.ZipFile.ExtractToDirectory(reproContent, tempDest);
-
-            var customLogger = new ShaderGraph_Lit_On_Unlit_Logger() { m_ForwardHandler = m_BackupLogHandler };;
-
-            Debug.unityLogger.logHandler = customLogger;
-            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
-            yield return null;
-
-            SceneManagement.EditorSceneManager.OpenScene(tempDest + "/Repro_5728.unity");
-
-            for (int i = 0; i < 4; ++i)
-                yield return null;
-
-            SceneManagement.EditorSceneManager.OpenScene("Assets/empty.unity");
-
-            for (int i = 0; i < 4; ++i)
-                yield return null;
-
-            Assert.IsTrue(customLogger.m_HasLoggedMustUnlit);
-            Assert.IsTrue(customLogger.m_HasLoggedCantCompile);
         }
 
         [OneTimeTearDown]
         public void CleanUp()
         {
             VFXTestCommon.DeleteAllTemporaryGraph();
-            Debug.unityLogger.logHandler = m_BackupLogHandler;
+            m_CustomLogHandler.Dispose();
         }
     }
 }

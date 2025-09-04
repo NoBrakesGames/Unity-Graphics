@@ -34,7 +34,8 @@ namespace UnityEditor.VFX.UI
                 {
                     subgraphOperator.RecreateCopy();
                     model.ResyncSlots(false);
-                    model.UpdateOutputExpressions();
+                    model.MarkOutputExpressionsAsOutOfDate();
+                    model.UpdateOutputExpressionsIfNeeded();
                 }
                 catch (Exception e)
                 {
@@ -56,13 +57,13 @@ namespace UnityEditor.VFX.UI
             get { return false; }
         }
 
-        public void ConvertToProperty(bool exposed = false)
+        public VFXParameter ConvertToProperty(bool exposed = false)
         {
-            var desc = VFXLibrary.GetParameters().FirstOrDefault(t => t.model.type == (model as VFXInlineOperator).type);
+            var desc = VFXLibrary.GetParameters().FirstOrDefault(t => t.modelType == ((VFXInlineOperator)model).type);
             if (desc == null)
-                return;
+                return null;
 
-            var param = viewController.AddVFXParameter(Vector2.zero, desc, false); // parameters should have zero for position, position is help by the nodes
+            var param = viewController.AddVFXParameter(Vector2.zero, desc.variant, false); // parameters should have zero for position, position is help by the nodes
             param.SetSettingValue("m_Exposed", exposed);
 
             VFXSlot.CopyLinks(param.GetOutputSlot(0), model.GetOutputSlot(0), false);
@@ -76,10 +77,13 @@ namespace UnityEditor.VFX.UI
             var paramController = viewController.GetParameterController(param);
             paramController.value = inputPorts[0].value;
             var paramNodeController = paramController.nodes.FirstOrDefault();
-            if (paramNodeController == null)
-                return;
-            viewController.PutInSameGroupNodeAs(paramNodeController, this);
-            viewController.RemoveElement(this);
+            if (paramNodeController != null)
+            {
+                viewController.PutInSameGroupNodeAs(paramNodeController, this);
+                viewController.RemoveElement(this);
+            }
+
+            return param;
         }
     }
 
@@ -254,14 +258,14 @@ namespace UnityEditor.VFX.UI
         {
         }
 
-        VFXUpcommingDataAnchorController m_UpcommingDataAnchor;
+        VFXUpcomingDataAnchorController m_UpcomingDataAnchor;
         protected override void NewInputSet(List<VFXDataAnchorController> newInputs)
         {
-            if (m_UpcommingDataAnchor == null)
+            if (m_UpcomingDataAnchor == null)
             {
-                m_UpcommingDataAnchor = new VFXUpcommingDataAnchorController(this, false);
+                m_UpcomingDataAnchor = new VFXUpcomingDataAnchorController(this, false);
             }
-            newInputs.Add(m_UpcommingDataAnchor);
+            newInputs.Add(m_UpcomingDataAnchor);
         }
 
         public override void OnEdgeFromInputGoingToBeRemoved(VFXDataAnchorController myInput)

@@ -66,11 +66,11 @@ namespace UnityEditor.VFX
 
         public override void OnInspectorGUI()
         {
-            serializedObject.Update();
+            PrepareContextEditorGUI();
 
             var referenceContext = serializedObject.targetObject as VFXContext;
             var resource = referenceContext.GetResource();
-            GUI.enabled = resource != null ? resource.IsAssetEditable() : true;
+            GUI.enabled = resource == null || resource.IsAssetEditable();
 
             DisplayName();
             DisplaySpace();
@@ -111,11 +111,13 @@ namespace UnityEditor.VFX
 
             ApplyAndInvalidate();
 
+            DisplayWarnings();
             DisplaySummary();
         }
     }
 
-    [VFXInfo]
+    [VFXHelpURL("Context-Update")]
+    [VFXInfo(name = "Update Particle", category = "#0Common")]
     class VFXBasicUpdate : VFXContext
     {
         public enum VFXIntegrationMode
@@ -165,7 +167,7 @@ namespace UnityEditor.VFX
                 if (particleData && (particleData.NeedsComputeBounds(this) || particleData.NeedsSharedAabbBuffer()))
                 {
                     yield return new VFXAttributeInfo(VFXAttribute.Alive, VFXAttributeMode.Read);
-                    foreach (var attribute in VFXAttribute.AllAttributeAffectingAABB)
+                    foreach (var attribute in VFXAttributesManager.AffectingAABBAttributes)
                         yield return new VFXAttributeInfo(attribute, VFXAttributeMode.Read);
                 }
 

@@ -162,25 +162,19 @@ namespace UnityEditor.VFX.UI
         {
             get { return m_ParentController.model.order; }
         }
+
         public override bool expanded
         {
-            get
-            {
-                return true;
-            }
-            set
-            {
-            }
+            get => infos.expanded;
+            set => infos.expanded = value;
         }
+
         public override bool superCollapsed
         {
-            get
-            {
-                return !infos.expanded;
-            }
+            get => infos.supecollapsed;
             set
             {
-                infos.expanded = !value;
+                infos.supecollapsed = value;
                 model.Invalidate(VFXModel.InvalidationCause.kUIChanged);
             }
         }
@@ -269,15 +263,22 @@ namespace UnityEditor.VFX.UI
         void IPropertyRMProvider.StartLiveModification() { }
         void IPropertyRMProvider.EndLiveModification() { }
 
-        public override void DrawGizmos(VisualEffect component)
+        public override void CollectGizmos()
         {
             if (parentController.isOutput)
                 return;
+            m_GizmoableAnchors.Clear();
             if (VFXGizmoUtility.HasGizmo(m_ParentController.portType))
             {
-                m_ParentController.DrawGizmos(component);
-
                 m_GizmoableAnchors.Add(m_ParentController);
+            }
+        }
+
+        public override void DrawGizmos(VisualEffect component)
+        {
+            if (currentGizmoable is VFXParameterController gizmoable)
+            {
+                gizmoable.DrawGizmos(component);
             }
         }
 
@@ -323,10 +324,10 @@ namespace UnityEditor.VFX.UI
             get { return m_ParentController; }
         }
 
-        public void ConvertToInline()
+        public VFXInlineOperator ConvertToInline()
         {
             if (parentController.isOutput)
-                return;
+                return null;
             VFXInlineOperator op = ScriptableObject.CreateInstance<VFXInlineOperator>();
             op.SetSettingValue("m_Type", (SerializableType)parentController.model.type);
 
@@ -383,6 +384,7 @@ namespace UnityEditor.VFX.UI
             viewController.LightApplyChanges();
             viewController.PutInSameGroupNodeAs(viewController.GetNodeController(op, 0), this);
             viewController.RemoveElement(this);
+            return op;
         }
     }
 }

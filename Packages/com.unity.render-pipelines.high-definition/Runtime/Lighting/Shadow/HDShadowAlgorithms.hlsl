@@ -5,32 +5,52 @@
 // Since we use slope-scale bias, the constant bias is for now set as a small fixed value
 #define FIXED_UNIFORM_BIAS (1.0f / 65536.0f)
 
+// For backward compatibility
+#ifdef SHADOW_LOW
+#ifndef PUNCTUAL_SHADOW_LOW
+#define PUNCTUAL_SHADOW_LOW
+#endif
+#ifndef DIRECTIONAL_SHADOW_LOW
+#define DIRECTIONAL_SHADOW_LOW
+#endif
+#endif
+
+
+
 // For non-fragment shaders we might skip the variant with the quality as shadows might not be used, if that's the case define something just to make the compiler happy in case the quality is not defined.
 #ifndef SHADER_STAGE_FRAGMENT
-    #if !defined(SHADOW_ULTRA_LOW) && !defined(SHADOW_LOW) && !defined(SHADOW_MEDIUM) && !defined(SHADOW_HIGH) // ultra low come from volumetricLighting.compute
-        #define SHADOW_MEDIUM
+    #if !defined(PUNCTUAL_SHADOW_ULTRA_LOW) && !defined(PUNCTUAL_SHADOW_LOW) && !defined(PUNCTUAL_SHADOW_MEDIUM) && !defined(PUNCTUAL_SHADOW_HIGH) // ultra low come from volumetricLighting.compute
+        #define PUNCTUAL_SHADOW_MEDIUM
+    #endif
+    #if !defined(DIRECTIONAL_SHADOW_ULTRA_LOW) && !defined(DIRECTIONAL_SHADOW_LOW) && !defined(DIRECTIONAL_SHADOW_MEDIUM) && !defined(DIRECTIONAL_SHADOW_HIGH) // ultra low come from volumetricLighting.compute
+        #define DIRECTIONAL_SHADOW_MEDIUM
     #endif
     #if !defined(AREA_SHADOW_LOW) && !defined(AREA_SHADOW_MEDIUM) && !defined(AREA_SHADOW_HIGH) // low come from volumetricLighting.compute
         #define AREA_SHADOW_MEDIUM
     #endif
 #endif
 
-// WARNINGS:
-// Keep in sync with both HDShadowManager::GetDirectionalShadowAlgorithm() and GetPunctualFilterWidthInTexels() in C# as well!
+// WARNINGS: Keep in sync with both HDShadowManager::GetDirectionalShadowAlgorithm() and GetPunctualFilterWidthInTexels() in C#
+// Note: currently quality settings for PCSS needs to be exposed in UI and is control in HDLightUI.cs file IsShadowSettings
 
-#ifdef SHADOW_ULTRA_LOW
+#ifdef PUNCTUAL_SHADOW_ULTRA_LOW
 #define PUNCTUAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCF_Tent_3x3(sd.isInCachedAtlas ? _CachedShadowAtlasSize.zwxy : _ShadowAtlasSize.zwxy, posTC, tex, samp, bias)
-#define DIRECTIONAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_Gather_PCF(_CascadeShadowAtlasSize.zwxy, posTC, tex, samp, bias)
-#elif defined(SHADOW_LOW)
+#elif defined(PUNCTUAL_SHADOW_LOW)
 #define PUNCTUAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCF_Tent_3x3(sd.isInCachedAtlas ? _CachedShadowAtlasSize.zwxy : _ShadowAtlasSize.zwxy, posTC, tex, samp, bias)
-#define DIRECTIONAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCF_Tent_5x5(_CascadeShadowAtlasSize.zwxy, posTC, tex, samp, bias)
-#elif defined(SHADOW_MEDIUM)
+#elif defined(PUNCTUAL_SHADOW_MEDIUM)
 #define PUNCTUAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCF_Tent_5x5(sd.isInCachedAtlas ? _CachedShadowAtlasSize.zwxy : _ShadowAtlasSize.zwxy, posTC, tex, samp, bias)
-#define DIRECTIONAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCF_Tent_7x7(_CascadeShadowAtlasSize.zwxy, posTC, tex, samp, bias)
-// Note: currently quality settings for PCSS need to be expose in UI and is control in HDLightUI.cs file IsShadowSettings
-#elif defined(SHADOW_HIGH)
+#elif defined(PUNCTUAL_SHADOW_HIGH)
 #define PUNCTUAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCSS(posTC, posSS, sd.shadowMapSize.xy * (sd.isInCachedAtlas ? _CachedShadowAtlasSize.zw : _ShadowAtlasSize.zw), sd.atlasOffset, sd.shadowFilterParams0.x, sd.shadowFilterParams0.w, asint(sd.shadowFilterParams0.y), asint(sd.shadowFilterParams0.z), tex, samp, s_point_clamp_sampler, bias, sd.zBufferParam, true, (sd.isInCachedAtlas ? _CachedShadowAtlasSize.xz : _ShadowAtlasSize.xz))
-#define DIRECTIONAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCSS(posTC, posSS, sd.shadowMapSize.xy * _CascadeShadowAtlasSize.zw, sd.atlasOffset, sd.shadowFilterParams0.x, sd.shadowFilterParams0.w, asint(sd.shadowFilterParams0.y), asint(sd.shadowFilterParams0.z), tex, samp, s_point_clamp_sampler, bias, sd.zBufferParam, false, _CascadeShadowAtlasSize.xz)
+#endif
+
+#ifdef DIRECTIONAL_SHADOW_ULTRA_LOW
+#define DIRECTIONAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_Gather_PCF(_CascadeShadowAtlasSize.zwxy, posTC, tex, samp, bias)
+#elif defined(DIRECTIONAL_SHADOW_LOW)
+#define DIRECTIONAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCF_Tent_5x5(_CascadeShadowAtlasSize.zwxy, posTC, tex, samp, bias)
+#elif defined(DIRECTIONAL_SHADOW_MEDIUM)
+#define DIRECTIONAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCF_Tent_7x7(_CascadeShadowAtlasSize.zwxy, posTC, tex, samp, bias)
+#elif defined(DIRECTIONAL_SHADOW_HIGH)
+#define DIRECTIONAL_FILTER_ALGORITHM(sd, posSS, posTC, tex, samp, bias) SampleShadow_PCSS_Directional(sd, posTC, posSS, sd.shadowMapSize.xy * _CascadeShadowAtlasSize.zw, sd.atlasOffset, sd.shadowMapSize.z, asint(sd.shadowFilterParams0.y), asint(sd.shadowFilterParams0.z), tex, samp, s_point_clamp_sampler, bias)
 #endif
 
 #ifdef AREA_SHADOW_LOW
@@ -155,7 +175,7 @@ bool EvalShadow_PositionTC(HDShadowData sd, float2 texelSize, float3 positionWS,
 
     float2 minCoord, maxCoord;
     EvalShadow_MinMaxCoords(sd, texelSize, minCoord, maxCoord, blurPassesScale);
-    return !any(posTC.xy > maxCoord || posTC.xy < minCoord);
+    return !(any(posTC.xy > maxCoord) || any(posTC.xy < minCoord));
 }
 
 //
@@ -243,23 +263,35 @@ int EvalShadow_GetSplitIndex(HDShadowContext shadowContext, int index, float3 po
 
 void LoadDirectionalShadowDatas(inout HDShadowData sd, HDShadowContext shadowContext, int index)
 {
+    sd.rot0 = shadowContext.shadowDatas[index].rot0;
+    sd.rot1 = shadowContext.shadowDatas[index].rot1;
+    sd.rot2 = shadowContext.shadowDatas[index].rot2;
+
+    sd.shadowToWorld = shadowContext.shadowDatas[index].shadowToWorld;
+    
     sd.proj = shadowContext.shadowDatas[index].proj;
     sd.pos = shadowContext.shadowDatas[index].pos;
     sd.worldTexelSize = shadowContext.shadowDatas[index].worldTexelSize;
     sd.atlasOffset = shadowContext.shadowDatas[index].atlasOffset;
-#if defined(SHADOW_HIGH)
+#if defined(DIRECTIONAL_SHADOW_HIGH)
     sd.shadowFilterParams0.x = shadowContext.shadowDatas[index].shadowFilterParams0.x;
     sd.zBufferParam = shadowContext.shadowDatas[index].zBufferParam;
+    sd.dirLightPCSSParams0.xy = shadowContext.shadowDatas[index].dirLightPCSSParams0.xy;
+    sd.dirLightPCSSParams1.z = shadowContext.shadowDatas[index].dirLightPCSSParams1.z;
 #endif
     sd.cacheTranslationDelta = shadowContext.shadowDatas[index].cacheTranslationDelta;
 }
 
-float EvalShadow_CascadedDepth_Blend_SplitIndex(HDShadowContext shadowContext, Texture2D tex, SamplerComparisonState samp, float2 positionSS, float3 positionWS, float3 normalWS, int index, float3 L, out int shadowSplitIndex)
+float EvalShadow_CascadedDepth_Blend_SplitIndex(inout HDShadowContext shadowContext, Texture2D tex, SamplerComparisonState samp, float2 positionSS, float3 positionWS, float3 normalWS, int index, float3 L, out int shadowSplitIndex)
 {
     float   alpha;
     int     cascadeCount;
     float   shadow = 1.0;
     shadowSplitIndex = EvalShadow_GetSplitIndex(shadowContext, index, positionWS, alpha, cascadeCount);
+#ifdef SHADOWS_SHADOWMASK
+    shadowContext.shadowSplitIndex = shadowSplitIndex;
+    shadowContext.fade = alpha;
+#endif
 
     float3 basePositionWS = positionWS;
 
@@ -309,18 +341,22 @@ float EvalShadow_CascadedDepth_Blend_SplitIndex(HDShadowContext shadowContext, T
     return shadow;
 }
 
-float EvalShadow_CascadedDepth_Blend(HDShadowContext shadowContext, Texture2D tex, SamplerComparisonState samp, float2 positionSS, float3 positionWS, float3 normalWS, int index, float3 L)
+float EvalShadow_CascadedDepth_Blend(inout HDShadowContext shadowContext, Texture2D tex, SamplerComparisonState samp, float2 positionSS, float3 positionWS, float3 normalWS, int index, float3 L)
 {
     int unusedSplitIndex;
     return EvalShadow_CascadedDepth_Blend_SplitIndex(shadowContext, tex, samp, positionSS, positionWS, normalWS, index, L, unusedSplitIndex);
 }
 
-float EvalShadow_CascadedDepth_Dither_SplitIndex(HDShadowContext shadowContext, Texture2D tex, SamplerComparisonState samp, float2 positionSS, float3 positionWS, float3 normalWS, int index, float3 L, out int shadowSplitIndex)
+float EvalShadow_CascadedDepth_Dither_SplitIndex(inout HDShadowContext shadowContext, Texture2D tex, SamplerComparisonState samp, float2 positionSS, float3 positionWS, float3 normalWS, int index, float3 L, out int shadowSplitIndex)
 {
     float   alpha;
     int     cascadeCount;
     float   shadow = 1.0;
     shadowSplitIndex = EvalShadow_GetSplitIndex(shadowContext, index, positionWS, alpha, cascadeCount);
+#ifdef SHADOWS_SHADOWMASK
+    shadowContext.shadowSplitIndex = shadowSplitIndex;
+    shadowContext.fade = alpha;
+#endif
 
     // Forcing the alpha to zero allows us to avoid the dithering as it requires the screen space position and an additional
     // shadow read wich can be avoided in this case.
@@ -362,7 +398,7 @@ float EvalShadow_CascadedDepth_Dither_SplitIndex(HDShadowContext shadowContext, 
     return shadow;
 }
 
-float EvalShadow_CascadedDepth_Dither(HDShadowContext shadowContext, Texture2D tex, SamplerComparisonState samp, float2 positionSS, float3 positionWS, float3 normalWS, int index, float3 L)
+float EvalShadow_CascadedDepth_Dither(inout HDShadowContext shadowContext, Texture2D tex, SamplerComparisonState samp, float2 positionSS, float3 positionWS, float3 normalWS, int index, float3 L)
 {
     int unusedSplitIndex;
     return EvalShadow_CascadedDepth_Dither_SplitIndex(shadowContext, tex, samp, positionSS, positionWS, normalWS, index, L, unusedSplitIndex);

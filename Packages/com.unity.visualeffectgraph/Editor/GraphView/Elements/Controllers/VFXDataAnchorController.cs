@@ -451,10 +451,13 @@ namespace UnityEditor.VFX.UI
             }
         }
 
-        public void SetPropertyValue(object value)
+        private void SetPropertyValue(object value)
         {
-            Undo.RecordObject(model.GetMasterSlot(), "VFXSlotValue"); // The slot value is stored on the master slot, not necessarily my own slot
-            model.value = value;
+            if (model.value != value)
+            {
+                Undo.RecordObject(model.GetMasterSlot(), "VFX port value (" + model.GetMasterSlot().value?.ToString() ?? "null" + ")"); // The slot value is stored on the master slot, not necessarily my own slot
+                model.value = value;
+            }
         }
 
         public static bool SlotShouldSkipFirstLevel(VFXSlot slot)
@@ -464,7 +467,10 @@ namespace UnityEditor.VFX.UI
 
         public virtual void ExpandPath()
         {
-            if (model == null) return;
+            if (model == null || !model.collapsed)
+                return;
+
+            Undo.RecordObject(model, "Expand port");
             model.collapsed = false;
             if (SlotShouldSkipFirstLevel(model))
             {
@@ -474,7 +480,10 @@ namespace UnityEditor.VFX.UI
 
         public virtual void RetractPath()
         {
-            if (model == null) return;
+            if (model == null || model.collapsed)
+                return;
+
+            Undo.RecordObject(model, "Collapse port");
             model.collapsed = true;
             if (SlotShouldSkipFirstLevel(model))
             {
@@ -551,9 +560,9 @@ namespace UnityEditor.VFX.UI
         }
     }
 
-    class VFXUpcommingDataAnchorController : VFXDataAnchorController
+    class VFXUpcomingDataAnchorController : VFXDataAnchorController
     {
-        public VFXUpcommingDataAnchorController(VFXNodeController sourceNode, bool hidden) : base(null, sourceNode, hidden)
+        public VFXUpcomingDataAnchorController(VFXNodeController sourceNode, bool hidden) : base(null, sourceNode, hidden)
         {
         }
 
@@ -629,7 +638,7 @@ namespace UnityEditor.VFX.UI
             if (op == null)
                 return false;
 
-            if (controller is VFXUpcommingDataAnchorController)
+            if (controller is VFXUpcomingDataAnchorController)
                 return false;
 
             if (!CanLinkToNode(controller.sourceNode, cache))
