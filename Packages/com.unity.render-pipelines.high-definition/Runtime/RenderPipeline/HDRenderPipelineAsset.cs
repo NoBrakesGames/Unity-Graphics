@@ -129,6 +129,15 @@ namespace UnityEngine.Rendering.HighDefinition
         /// </summary>
         public RenderPipelineSettings currentPlatformRenderPipelineSettings { get => m_RenderPipelineSettings ; set { m_RenderPipelineSettings = value; OnValidate(); } }
 
+        // ----------------------NBG----------------------
+        public ref RenderPipelineSettings GetRenderPipelineSettingsReference()
+        {
+            /* This allows us to reference the settings instead of copying the huge amount of data
+               in it when we just want to update some settings */
+            return ref m_RenderPipelineSettings;
+        }
+        // ----------------------NBG----------------------
+        
         internal void TurnOffRayTracing()
         {
             m_RenderPipelineSettings.supportRayTracing = false;
