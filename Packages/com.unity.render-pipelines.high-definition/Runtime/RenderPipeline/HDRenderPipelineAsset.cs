@@ -130,6 +130,11 @@ namespace UnityEngine.Rendering.HighDefinition
         public RenderPipelineSettings currentPlatformRenderPipelineSettings { get => m_RenderPipelineSettings ; set { m_RenderPipelineSettings = value; OnValidate(); } }
 
         // ----------------------NBG----------------------
+        /// <summary>
+        /// Get's a reference to <see cref="RenderPipelineSettings"/> but will not call `OnValidate()`
+        /// To initialise changes, the updated settings need to be assigned to `currentPlatformRenderPipelineSettings`
+        /// </summary>
+        /// <returns></returns>
         public ref RenderPipelineSettings GetRenderPipelineSettingsReference()
         {
             /* This allows us to reference the settings instead of copying the huge amount of data
